@@ -23,21 +23,21 @@ class Ui_Settings(object):
         if not Settings.objectName():
             Settings.setObjectName(u"Settings")
         Settings.resize(229, 120)
-        self.widget = QWidget(Settings)
-        self.widget.setObjectName(u"widget")
-        self.widget.setGeometry(QRect(30, 20, 161, 61))
-        self.gridLayout = QGridLayout(self.widget)
+        self.layoutWidget = QWidget(Settings)
+        self.layoutWidget.setObjectName(u"layoutWidget")
+        self.layoutWidget.setGeometry(QRect(30, 20, 161, 61))
+        self.gridLayout = QGridLayout(self.layoutWidget)
         self.gridLayout.setObjectName(u"gridLayout")
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
-        self.checkBox = QCheckBox(self.widget)
-        self.checkBox.setObjectName(u"checkBox")
+        self.isStartOnRoot = QCheckBox(self.layoutWidget)
+        self.isStartOnRoot.setObjectName(u"isStartOnRoot")
 
-        self.gridLayout.addWidget(self.checkBox, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.isStartOnRoot, 0, 0, 1, 1)
 
-        self.checkBox_2 = QCheckBox(self.widget)
-        self.checkBox_2.setObjectName(u"checkBox_2")
+        self.isSystemTray = QCheckBox(self.layoutWidget)
+        self.isSystemTray.setObjectName(u"isSystemTray")
 
-        self.gridLayout.addWidget(self.checkBox_2, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.isSystemTray, 1, 0, 1, 1)
 
 
         self.retranslateUi(Settings)
@@ -47,7 +47,7 @@ class Ui_Settings(object):
 
     def retranslateUi(self, Settings):
         Settings.setWindowTitle(QCoreApplication.translate("Settings", u"Form", None))
-        self.checkBox.setText(QCoreApplication.translate("Settings", u"\u5f00\u673a\u81ea\u542f\u52a8", None))
-        self.checkBox_2.setText(QCoreApplication.translate("Settings", u"\u5173\u95ed\u65f6\u6700\u5c0f\u5316\u5230\u6258\u76d8", None))
+        self.isStartOnRoot.setText(QCoreApplication.translate("Settings", u"\u5f00\u673a\u81ea\u542f\u52a8", None))
+        self.isSystemTray.setText(QCoreApplication.translate("Settings", u"\u5173\u95ed\u65f6\u6700\u5c0f\u5316\u5230\u6258\u76d8", None))
     # retranslateUi
 

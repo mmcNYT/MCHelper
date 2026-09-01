@@ -13,7 +13,7 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <widget class="QWidget" name="">
+  <widget class="QWidget" name="layoutWidget">
    <property name="geometry">
     <rect>
      <x>30</x>
@@ -24,14 +24,14 @@
    </property>
    <layout class="QGridLayout" name="gridLayout">
     <item row="0" column="0">
-     <widget class="QCheckBox" name="checkBox">
+     <widget class="QCheckBox" name="isStartOnRoot">
       <property name="text">
        <string>开机自启动</string>
       </property>
      </widget>
     </item>
     <item row="1" column="0">
-     <widget class="QCheckBox" name="checkBox_2">
+     <widget class="QCheckBox" name="isSystemTray">
       <property name="text">
        <string>关闭时最小化到托盘</string>
       </property>

@@ -1,8 +1,9 @@
-from PySide6.QtWidgets import QMainWindow, QTabWidget,QMenu
-from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QSystemTrayIcon, QMenu, QStyle, QApplication
+from PySide6.QtGui import QIcon, QAction
 from Tools import TOOL_CLASSES
 from Tools.tool_Settings import SettingsWindow
 from CodesUI.MCHelperMainWindow import Ui_MCHelper
+from Utils.signals_Settings import settings_bus
 
 
 class MainWindow(QMainWindow,Ui_MCHelper):
@@ -10,11 +11,22 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         super().__init__()
         self.setupUi(self)
 
+        #初始化状态量
+        self.is_system_tray = False     #是否最小化到托盘
+        self.is_start_on_boot = False   #是否开机自启动
+        self.is_quitting = False        #是否正在退出
+
         # 遍历注册列表，加载所有工具
         self.load_tools()
 
         # 创建并绑定菜单栏的信号
         self.create_menu()
+
+        # 绑定设置更改的信号
+        settings_bus.is_system_tray.connect(self.system_tray_controller)
+        settings_bus.is_start_on_boot.connect(self.start_on_boot_controller)
+
+        self.creat_tray_icon()
 
     def load_tools(self):
         for tool_cls in TOOL_CLASSES:
@@ -29,13 +41,23 @@ class MainWindow(QMainWindow,Ui_MCHelper):
 
     def closeEvent(self, event):
         """
-        在窗口关闭前调用，保存所有工具的配置。
+        用户点击窗口关闭按钮时：
+        - 如果托盘图标可见，则隐藏窗口（最小化到托盘）并忽略关闭事件。
+        - 如果正在退出程序，则正常关闭。
         """
-        # 调用保存所有工具配置的函数
-        self.save_all_tools_config()
-
-        # 接受关闭事件（继续关闭窗口）
-        event.accept()
+        if self.is_quitting or self.is_system_tray == False:
+            # 正在退出，正常关闭窗口
+            self.save_all_tools_config()
+            event.accept()
+            return
+        if self.tray_icon and self.tray_icon.isVisible():
+            # 隐藏窗口到系统托盘
+            self.hide()
+            event.ignore()  # 忽略关闭事件，程序继续运行
+        else:
+            # 托盘不可用，直接保存配置并关闭
+            self.save_all_tools_config()
+            event.accept()
 
     def save_all_tools_config(self):
         for i in range(self.tabWidget.count()):
@@ -45,6 +67,53 @@ class MainWindow(QMainWindow,Ui_MCHelper):
                     widget.save_config()
                 except Exception as e:
                     print(f"保存工具 {widget.tool_name()} 配置失败: {e}")
+
+    def creat_tray_icon(self):
+        # 创建托盘图标
+        self.tray_icon = QSystemTrayIcon(self)
+
+        # 设置图标（如果没有自定义图标，使用标准图标）
+        # 推荐使用资源文件：QIcon(":/icons/app.ico")
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+
+        # 设置悬浮提示
+        self.tray_icon.setToolTip("MCHelper")
+
+        # 创建托盘右键菜单
+        tray_menu = QMenu(self)
+        show_action = QAction("显示窗口", self)
+        show_action.triggered.connect(self.show_window)
+        quit_action = QAction("关闭程序", self)
+        quit_action.triggered.connect(self.quit_app)
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(quit_action)
+        self.tray_icon.setContextMenu(tray_menu)
+
+        # 连接左键单击事件（Trigger 表示点击）
+        self.tray_icon.activated.connect(self.tray_activated)
+
+        # 显示托盘图标
+        self.tray_icon.show()
+
+    def tray_activated(self, reason):
+        """托盘图标被激活（点击）时的处理"""
+        # 左键单击（Trigger）时显示窗口
+        if reason == QSystemTrayIcon.Trigger:
+            self.show_window()
+
+    def show_window(self):
+        """显示主窗口并置前"""
+        self.show()
+        self.raise_()  # 提升到顶层
+        self.activateWindow()  # 激活窗口（获取焦点）
+
+    def quit_app(self):
+        """彻底退出程序"""
+        self.is_quitting = True
+        # 保存所有工具的配置（之前已实现）
+        self.save_all_tools_config()
+        # 退出应用
+        QApplication.quit()
 
     def create_menu(self):
         menu = QMenu("菜单", self)
@@ -56,10 +125,15 @@ class MainWindow(QMainWindow,Ui_MCHelper):
             menu.addAction(action)
         self.menuBar().addMenu(menu)
 
-
     def menu_controller(self):
         action = self.sender()  # 获取触发信号的动作对象
         index = action.data()  # 取出存储的索引
         if index == 0:          #打开设置
             settings_win = SettingsWindow(self)
             settings_win.exec()
+
+    def system_tray_controller(self,statu):
+        print(f"系统托盘{statu}")
+
+    def start_on_boot_controller(self,statu):
+        print(f"自启动{statu}")
