@@ -25,6 +25,8 @@ class Ui_MCHelper(object):
         if not MCHelper.objectName():
             MCHelper.setObjectName(u"MCHelper")
         MCHelper.resize(800, 600)
+        self.action = QAction(MCHelper)
+        self.action.setObjectName(u"action")
         self.centralwidget = QWidget(MCHelper)
         self.centralwidget.setObjectName(u"centralwidget")
         self.horizontalLayout = QHBoxLayout(self.centralwidget)
@@ -52,6 +54,7 @@ class Ui_MCHelper(object):
         MCHelper.setStatusBar(self.statusbar)
 
         self.menubar.addAction(self.menu.menuAction())
+        self.menu.addAction(self.action)
 
         self.retranslateUi(MCHelper)
 
@@ -63,6 +66,7 @@ class Ui_MCHelper(object):
 
     def retranslateUi(self, MCHelper):
         MCHelper.setWindowTitle(QCoreApplication.translate("MCHelper", u"MainWindow", None))
-        self.menu.setTitle(QCoreApplication.translate("MCHelper", u"\u8bbe\u7f6e", None))
+        self.action.setText(QCoreApplication.translate("MCHelper", u"\u8bbe\u7f6e", None))
+        self.menu.setTitle("")
     # retranslateUi
 

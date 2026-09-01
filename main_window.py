@@ -1,5 +1,7 @@
-from PySide6.QtWidgets import QMainWindow, QTabWidget
+from PySide6.QtWidgets import QMainWindow, QTabWidget,QMenu
+from PySide6.QtGui import QAction
 from Tools import TOOL_CLASSES
+from Tools.tool_Settings import SettingsWindow
 from CodesUI.MCHelperMainWindow import Ui_MCHelper
 
 
@@ -10,6 +12,9 @@ class MainWindow(QMainWindow,Ui_MCHelper):
 
         # 遍历注册列表，加载所有工具
         self.load_tools()
+
+        # 创建并绑定菜单栏的信号
+        self.create_menu()
 
     def load_tools(self):
         for tool_cls in TOOL_CLASSES:
@@ -40,3 +45,21 @@ class MainWindow(QMainWindow,Ui_MCHelper):
                     widget.save_config()
                 except Exception as e:
                     print(f"保存工具 {widget.tool_name()} 配置失败: {e}")
+
+    def create_menu(self):
+        menu = QMenu("菜单", self)
+        actions = ["设置", "关于"]
+        for i, name in enumerate(actions):
+            action = QAction(name, self)
+            action.setData(i)  # 存储索引 0, 1, 2
+            action.triggered.connect(self.menu_controller)
+            menu.addAction(action)
+        self.menuBar().addMenu(menu)
+
+
+    def menu_controller(self):
+        action = self.sender()  # 获取触发信号的动作对象
+        index = action.data()  # 取出存储的索引
+        if index == 0:          #打开设置
+            settings_win = SettingsWindow(self)
+            settings_win.exec()
