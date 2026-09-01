@@ -7,6 +7,8 @@
           <value>
             <TabSessionState>
               <option name="provider" value="claude" />
+              <option name="sessionId" value="ee123a30-d256-4125-ac04-aac06e37429d" />
+              <option name="cwd" value="C:\maomaochongD\Coding\PythonProject\MCHelper" />
               <option name="model" value="claude-haiku-4-5" />
               <option name="permissionMode" value="acceptEdits" />
             </TabSessionState>

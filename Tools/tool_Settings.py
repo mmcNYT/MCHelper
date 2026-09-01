@@ -6,3 +6,4 @@ class SettingsWindow(QDialog, Ui_Settings):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)  # 加载 Designer 拖拽的控件
+        self.setWindowTitle("设置")
