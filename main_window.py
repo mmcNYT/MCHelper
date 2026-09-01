@@ -133,7 +133,9 @@ class MainWindow(QMainWindow,Ui_MCHelper):
             settings_win.exec()
 
     def system_tray_controller(self,statu):
+        self.is_system_tray = statu
         print(f"系统托盘{statu}")
 
     def start_on_boot_controller(self,statu):
+        self.is_start_on_boot = statu
         print(f"自启动{statu}")
