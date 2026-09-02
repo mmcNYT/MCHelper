@@ -4,6 +4,9 @@ from Tools import TOOL_CLASSES
 from Tools.tool_Settings import SettingsWindow
 from CodesUI.MCHelperMainWindow import Ui_MCHelper
 from Utils.signals_Settings import settings_bus
+import winreg
+import sys
+import os
 
 
 class MainWindow(QMainWindow,Ui_MCHelper):
@@ -138,4 +141,36 @@ class MainWindow(QMainWindow,Ui_MCHelper):
 
     def start_on_boot_controller(self,statu):
         self.is_start_on_boot = statu
+        self.set_start_on_boot(statu)
         print(f"自启动{statu}")
+
+    def set_start_on_boot(self,enable : bool):
+        app_name = "MCHelper"
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+        try:
+            # 打开注册表键
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+            if enable:
+                # 获取当前脚本或exe的完整路径
+                script_path = os.path.abspath(sys.argv[0])
+                # 如果是 .py 文件，需要用 python.exe 调用
+                if script_path.endswith('.py'):
+                    executable = f'"{sys.executable}" "{script_path}"'
+                else:  # 如果是打包后的 .exe
+                    executable = f'"{script_path}"'
+                # 写入注册表
+                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, executable)
+                print(f"✓ 已添加开机自启动项: {app_name}")
+            else:
+                # 删除注册表项
+                try:
+                    winreg.DeleteValue(key, app_name)
+                    print(f"✓ 已删除开机自启动项: {app_name}")
+                except FileNotFoundError:
+                    print(f"! 开机自启动项 '{app_name}' 不存在")
+            winreg.CloseKey(key)
+            return True
+        except Exception as e:
+            print(f"✗ 操作注册表失败: {e}")
+            return False
