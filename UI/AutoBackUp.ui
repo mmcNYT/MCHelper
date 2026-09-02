@@ -187,6 +187,13 @@
       </property>
      </widget>
     </item>
+    <item row="4" column="3">
+     <widget class="QCheckBox" name="isAutoBackUp">
+      <property name="text">
+       <string>自动备份</string>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
  </widget>

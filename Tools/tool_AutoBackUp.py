@@ -49,6 +49,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         self.finished_bytes = 0     # 已完成备份的数据量（字节）
         self.total_tasks = 0        # 备份任务总数
         self.failed_tasks = 0       # 失败的备份任务数量
+        self.is_auto_back_up = True # 是否进行自动备份
 
         # 7. 进程监测相关变量初始化
         self.monitor = None         # ProcessMonitor 进程监测器实例
@@ -56,7 +57,10 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
         # 8. 读取已保存的用户配置（从 ~/.config/ 目录下的 JSON 配置文件）
         self.read_config()
-        # 进程监测默认注释掉，用户可通过 UI 手动启用
+
+        # 9. 自动进行监测
+        if self.target_process:
+            self.moniter_control()
 
     def connect_slots(self):
         """连接所有 UI 控件的信号到对应的槽函数"""
@@ -70,6 +74,10 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         self.startBackUp.clicked.connect(lambda :self.do_back_up("手动"))
         # 进程监测控制按钮点击 -> 切换监测状态（启动/停止）
         self.monitorController.clicked.connect(self.moniter_control)
+        # 是否勾选自动备份
+        self.isAutoBackUp.checkStateChanged.connect(self.on_back_up_check_box_changed)
+        # 监测进程输入框变化 -> 更新变量
+        self.processName.textChanged.connect(self.on_process_name_text_changed)
 
         # 跨模块信号连接：子线程发出的备份进度信号 -> 主界面更新
         backup_bus.task_started.connect(self.on_back_up_started)
@@ -201,11 +209,13 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             self.des_dir_path = data.get("des_dir_path", "")
             self.back_up_list = data.get("back_up_list", {})
             self.target_process = data.get("target_process", "")
+            self.is_auto_back_up = data.get("is_auto_back_up", bool)
 
             #更新UI
             self.targetDirPath.setText(self.target_dir_path)
             self.targetDesPath.setText(self.des_dir_path)
             self.processName.setText(self.target_process)
+            self.isAutoBackUp.setChecked(self.is_auto_back_up)
 
             self.refresh_dir_list()
 
@@ -230,6 +240,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             "des_dir_path": getattr(self, "des_dir_path", ""),
             "back_up_list": getattr(self, "back_up_list", {}),
             "target_process": getattr(self, "target_process", ""),
+            "is_auto_back_up": getattr(self, "is_auto_back_up", bool)
         }
         config_path = self.get_config_path()
         try:
@@ -253,6 +264,9 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         参数：
             status: 备份触发方式
         """
+        # 根据是否进行自动备份来操作
+        if self.is_auto_back_up == False:
+            return
         # 调用 get_back_up_list() 更新成员变量 back_up_list（从文本框读取用户选中的文件路径）
         self.get_back_up_list()
         # 调用 save_config() 先将配置保存，确保配置文件为最新状态
@@ -436,3 +450,11 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         self.monitorController.setText("开始监测")
         # 调用备份方法
         self.do_back_up(status="自动")
+
+    def on_back_up_check_box_changed(self):
+        statu = self.isAutoBackUp.checkState().name
+        statu_bool = True if statu == "Checked" else False
+        self.is_auto_back_up = statu_bool
+
+    def on_process_name_text_changed(self):
+        self.target_process = self.processName.text()

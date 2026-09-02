@@ -15,10 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QGridLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QProgressBar,
-    QPushButton, QSizePolicy, QSpacerItem, QTextBrowser,
-    QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QGridLayout,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QProgressBar, QPushButton, QSizePolicy, QSpacerItem,
+    QTextBrowser, QWidget)
 
 class Ui_AutoBackUp(object):
     def setupUi(self, AutoBackUp):
@@ -131,6 +131,11 @@ class Ui_AutoBackUp(object):
 
         self.gridLayout.addWidget(self.monitorController, 3, 3, 1, 1)
 
+        self.isAutoBackUp = QCheckBox(self.layoutWidget)
+        self.isAutoBackUp.setObjectName(u"isAutoBackUp")
+
+        self.gridLayout.addWidget(self.isAutoBackUp, 4, 3, 1, 1)
+
         self.gridLayout.setColumnStretch(0, 1)
         self.gridLayout.setColumnStretch(2, 4)
         self.gridLayout.setColumnStretch(3, 1)
@@ -153,5 +158,6 @@ class Ui_AutoBackUp(object):
         self.processName.setText("")
         self.processName.setPlaceholderText(QCoreApplication.translate("AutoBackUp", u"java.exe", None))
         self.monitorController.setText(QCoreApplication.translate("AutoBackUp", u"\u5f00\u59cb\u76d1\u6d4b", None))
+        self.isAutoBackUp.setText(QCoreApplication.translate("AutoBackUp", u"\u81ea\u52a8\u5907\u4efd", None))
     # retranslateUi
 
