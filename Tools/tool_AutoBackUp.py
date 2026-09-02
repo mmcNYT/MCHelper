@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QFileDialog
 from .tool_base import BaseToolWidget
 from Utils.signals_AutoBackUp import backup_bus
 from Utils.process_monitor import ProcessMonitor
+from Utils.notification import NotificationWidget
 from Threads.task_AutoBackUp import BackupTask
 # 导入刚才编译生成的 UI 类
 from CodesUI.AutoBackUp import Ui_AutoBackUp
@@ -264,9 +265,6 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         参数：
             status: 备份触发方式
         """
-        # 根据是否进行自动备份来操作
-        if self.is_auto_back_up == False:
-            return
         # 调用 get_back_up_list() 更新成员变量 back_up_list（从文本框读取用户选中的文件路径）
         self.get_back_up_list()
         # 调用 save_config() 先将配置保存，确保配置文件为最新状态
@@ -399,8 +397,10 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             self.startBackUp.setEnabled(True)
             if self.failed_tasks == 0:
                 self.informationBrowser.append("所有备份任务成功完成！")
+                NotificationWidget.Show("备份完成", "所有文件已成功备份。", 3000)
             else:
                 self.informationBrowser.append(f"备份完成，但有 {self.failed_tasks} 个任务失败。")
+                NotificationWidget.Show("备份部分完成", f"有 {self.failed_tasks} 个任务失败。", 3000)
             self.backUpProgress.setValue(100)
 
     @Slot()
@@ -443,13 +443,15 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
     def on_process_started(self, name, pid):
         """进程启动时的处理"""
         self.informationBrowser.append(f"检测到进程 {name} 已启动，PID: {pid}")
+        NotificationWidget.Show("进程监测",f"{name}已启动",3000)
 
     def on_process_stopped(self, name):
         """进程退出时的处理"""
         self.informationBrowser.append(f"检测到进程 {name} 已退出")
         self.monitorController.setText("开始监测")
         # 调用备份方法
-        self.do_back_up(status="自动")
+        if self.is_auto_back_up == True:
+            self.do_back_up(status="自动")
 
     def on_back_up_check_box_changed(self):
         statu = self.isAutoBackUp.checkState().name
