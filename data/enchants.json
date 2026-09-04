@@ -1,0 +1,96 @@
+{
+  "enchants": [
+    {
+      "id": "sharpness",
+      "name": "锋利",
+      "max_level": 5,
+      "level_cost": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "applicable": [
+        "剑",
+        "斧"
+      ],
+      "category": "近战武器",
+      "description": "增加近战伤害"
+    },
+    {
+      "id": "power",
+      "name": "力量",
+      "max_level": 5,
+      "level_cost": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "applicable": [
+        "弓"
+      ],
+      "category": "远程武器",
+      "description": "增加弓箭伤害"
+    },
+    {
+      "id": "protection",
+      "name": "保护",
+      "max_level": 4,
+      "level_cost": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子"
+      ],
+      "category": "防具",
+      "description": "减少受到的伤害"
+    },
+    {
+      "id": "unbreaking",
+      "name": "耐久",
+      "max_level": 3,
+      "level_cost": [
+        1,
+        2,
+        4
+      ],
+      "applicable": [
+        "剑",
+        "斧",
+        "镐",
+        "锄",
+        "铲",
+        "弓",
+        "盔甲"
+      ],
+      "category": "通用附魔",
+      "description": "增加物品耐久度"
+    },
+    {
+      "id": "binding_curse",
+      "name": "绑定诅咒",
+      "max_level": 1,
+      "level_cost": [
+        1
+      ],
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "鞘翅"
+      ],
+      "category": "诅咒",
+      "description": "物品无法被丢弃"
+    }
+  ]
+}

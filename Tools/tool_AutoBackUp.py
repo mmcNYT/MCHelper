@@ -10,7 +10,7 @@ from Utils.signals_AutoBackUp import backup_bus
 from Utils.process_monitor import ProcessMonitor
 from Utils.notification import NotificationWidget
 from Threads.task_AutoBackUp import BackupTask
-# 导入刚才编译生成的 UI 类
+
 from CodesUI.AutoBackUp import Ui_AutoBackUp
 
 

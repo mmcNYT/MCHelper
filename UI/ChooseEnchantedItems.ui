@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>enchantedItems</class>
+ <widget class="QWidget" name="enchantedItems">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>585</width>
+    <height>417</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>ChooseEnchantedItems</string>
+  </property>
+  <widget class="QWidget" name="layoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>70</x>
+     <y>30</y>
+     <width>461</width>
+     <height>351</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="QComboBox" name="itemsList">
+      <item>
+       <property name="text">
+        <string>附魔书</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>剑</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>斧</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>镐</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>矛</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>弓</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>弩</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>三叉戟</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>重锤</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>头盔</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>胸甲</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>护腿</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>靴子</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="DropListWidget" name="chosenEnchantmentList">
+      <property name="acceptDrops">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0" colspan="2">
+     <widget class="QTabWidget" name="allEnchantmentTab">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="tab">
+       <attribute name="title">
+        <string>近战武器</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="meleeEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_3">
+       <attribute name="title">
+        <string>远程武器</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="rangedEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_2">
+       <attribute name="title">
+        <string>防具</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="armorEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_4">
+       <attribute name="title">
+        <string>通用附魔</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="commonEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_5">
+       <attribute name="title">
+        <string>诅咒</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="curseEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>EnchantListWidget</class>
+   <extends>QListWidget</extends>
+   <header>Utils.enchant_list_widget</header>
+  </customwidget>
+  <customwidget>
+   <class>DropListWidget</class>
+   <extends>QListWidget</extends>
+   <header>Utils.drop_list_widget</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
