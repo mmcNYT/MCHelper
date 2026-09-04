@@ -46,6 +46,7 @@ class Ui_enchantedItems(object):
         self.itemsList.addItem("")
         self.itemsList.addItem("")
         self.itemsList.addItem("")
+        self.itemsList.addItem("")
         self.itemsList.setObjectName(u"itemsList")
 
         self.gridLayout.addWidget(self.itemsList, 0, 0, 1, 1)
@@ -115,6 +116,7 @@ class Ui_enchantedItems(object):
         self.itemsList.setItemText(10, QCoreApplication.translate("enchantedItems", u"\u80f8\u7532", None))
         self.itemsList.setItemText(11, QCoreApplication.translate("enchantedItems", u"\u62a4\u817f", None))
         self.itemsList.setItemText(12, QCoreApplication.translate("enchantedItems", u"\u9774\u5b50", None))
+        self.itemsList.setItemText(13, QCoreApplication.translate("enchantedItems", u"\u9493\u9c7c\u7aff", None))
 
         self.allEnchantmentTab.setTabText(self.allEnchantmentTab.indexOf(self.tab), QCoreApplication.translate("enchantedItems", u"\u8fd1\u6218\u6b66\u5668", None))
         self.allEnchantmentTab.setTabText(self.allEnchantmentTab.indexOf(self.tab_3), QCoreApplication.translate("enchantedItems", u"\u8fdc\u7a0b\u6b66\u5668", None))
