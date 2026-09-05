@@ -37,6 +37,10 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         # 绑定信号与槽
         self.itemsList.currentIndexChanged.connect(self.on_item_type_changed)
         self.clearEnchantList.clicked.connect(self.on_clear_clicked)
+        self.confirmItem.clicked.connect(self.on_confirm_clicked)
+
+        # 确认后的数据包（由 on_confirm_clicked 填充，供调用方在 exec() 返回后读取）
+        self.selected_data = None
 
     def load_enchant_data(self):
         """加载附魔数据，创建各分类的列表控件并添加到 tab"""
@@ -218,3 +222,33 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         for _ in range(self.chosenEnchantmentList.count()):
             self.chosenEnchantmentList.takeItem(0)  # 每次移除第 0 行直至列表为空
         self.refresh_disabled_state()
+
+    def on_confirm_clicked(self):
+        """「确认」按钮点击：打包数据后关闭窗口（accept），数据存入 self.selected_data
+
+        数据包结构：
+            {
+                "item_name": str,                  # 当前选择的物品名称（下拉框文本，如"剑"）
+                "enchants": [                      # 已选附魔列表（按列表显示顺序）
+                    {"id": str, "name": str, "level": int},
+                    ...
+                ]
+            }
+        """
+        enchants = []
+        for i in range(self.chosenEnchantmentList.count()):
+            item = self.chosenEnchantmentList.item(i)
+            enchant_id = item.data(Qt.UserRole)
+            ench = self.data_manager.get_enchant_by_id(enchant_id)
+            if not ench:
+                continue  # 异常项（无 ID 或数据缺失）跳过，不进数据包
+            enchants.append({
+                "id": enchant_id,
+                "name": ench["name"],  # 附魔中文名（如"锋利"）
+                "level": item.data(Qt.UserRole + 1) or 1,
+            })
+        self.selected_data = {
+            "item_name": self.itemsList.currentText(),
+            "enchants": enchants,
+        }
+        self.accept()  # 关闭对话框，exec() 返回 QDialog.Accepted

@@ -11,6 +11,8 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
 
         self.addItems.clicked.connect(self.do_choose_items)
 
+        self.selected_stuff = {}
+
     # ---------- 实现基类接口 ----------
     @classmethod
     def tool_name(cls) -> str:
@@ -19,3 +21,7 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
     def do_choose_items(self):
         win = ChooseItemsWindow()
         win.exec()
+        # exec() 返回后读取打包数据（未点确认时 selected_data 为 None）
+        self.selected_stuff = win.selected_data
+        print(self.selected_stuff)
+        # TODO: 后续计算逻辑使用 self.selected_stuff
