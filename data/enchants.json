@@ -1,21 +1,59 @@
 {
   "enchants": [
     {
-      "id": "aqua_affinity",
-      "name": "水下速掘",
-      "max_level": 1,
+      "id": "sharpness",
+      "name": "锋利",
+      "max_level": 5,
       "level_cost_from_items": [
-        4
+        1,
+        2,
+        3,
+        4,
+        5
       ],
       "level_cost_from_book": [
-        2
+        1,
+        2,
+        3,
+        4,
+        5
       ],
       "applicable": [
-        "头盔",
-        "海龟壳"
+        "剑",
+        "斧",
+        "矛",
+        "附魔书"
       ],
-      "category": "防具",
-      "description": "防止水下挖掘速度惩罚"
+      "category": "近战武器",
+      "description": "增加近战攻击伤害"
+    },
+    {
+      "id": "smite",
+      "name": "亡灵杀手",
+      "max_level": 5,
+      "level_cost_from_items": [
+        2,
+        4,
+        6,
+        8,
+        10
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "applicable": [
+        "剑",
+        "斧",
+        "重锤",
+        "矛",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "对亡灵生物造成额外伤害"
     },
     {
       "id": "bane_of_arthropods",
@@ -39,10 +77,493 @@
         "剑",
         "斧",
         "重锤",
-        "矛"
+        "矛",
+        "附魔书"
       ],
       "category": "近战武器",
       "description": "对节肢生物造成额外伤害并附加缓慢效果"
+    },
+    {
+      "id": "fire_aspect",
+      "name": "火焰附加",
+      "max_level": 2,
+      "level_cost_from_items": [
+        4,
+        8
+      ],
+      "level_cost_from_book": [
+        2,
+        4
+      ],
+      "applicable": [
+        "剑",
+        "重锤",
+        "矛",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "使被近战攻击的目标着火"
+    },
+    {
+      "id": "looting",
+      "name": "抢夺",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "剑",
+        "矛",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "增加生物掉落物的数量或概率"
+    },
+    {
+      "id": "knockback",
+      "name": "击退",
+      "max_level": 2,
+      "level_cost_from_items": [
+        2,
+        4
+      ],
+      "level_cost_from_book": [
+        1,
+        2
+      ],
+      "applicable": [
+        "剑",
+        "矛",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "增加近战攻击造成的击退距离"
+    },
+    {
+      "id": "sweeping_edge",
+      "name": "横扫之刃",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "剑",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "增加横扫攻击伤害"
+    },
+    {
+      "id": "breach",
+      "name": "破甲",
+      "max_level": 4,
+      "level_cost_from_items": [
+        4,
+        8,
+        12,
+        16
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "applicable": [
+        "重锤",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "降低攻击目标的护甲值对攻击伤害的减少效果"
+    },
+    {
+      "id": "density",
+      "name": "致密",
+      "max_level": 5,
+      "level_cost_from_items": [
+        2,
+        4,
+        6,
+        8,
+        10
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "applicable": [
+        "重锤",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "增加重锤下落攻击所造成的伤害"
+    },
+    {
+      "id": "wind_burst",
+      "name": "风爆",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "重锤",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "使重锤下落时击中目标后产生风爆，将攻击者向上弹起"
+    },
+    {
+      "id": "lunge",
+      "name": "突进",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "矛",
+        "附魔书"
+      ],
+      "category": "近战武器",
+      "description": "进行戳刺攻击时在攻击方向上移动一段距离"
+    },
+    {
+      "id": "power",
+      "name": "力量",
+      "max_level": 5,
+      "level_cost_from_items": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "applicable": [
+        "弓",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "增加箭伤害"
+    },
+    {
+      "id": "punch",
+      "name": "冲击",
+      "max_level": 2,
+      "level_cost_from_items": [
+        4,
+        8
+      ],
+      "level_cost_from_book": [
+        2,
+        4
+      ],
+      "applicable": [
+        "弓",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "增加箭的击退距离"
+    },
+    {
+      "id": "flame",
+      "name": "火矢",
+      "max_level": 1,
+      "level_cost_from_items": [
+        4
+      ],
+      "level_cost_from_book": [
+        2
+      ],
+      "applicable": [
+        "弓",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "使射出的箭着火"
+    },
+    {
+      "id": "infinity",
+      "name": "无限",
+      "max_level": 1,
+      "level_cost_from_items": [
+        8
+      ],
+      "level_cost_from_book": [
+        4
+      ],
+      "applicable": [
+        "弓",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "射箭时不会消耗箭，不包括药箭和光灵箭"
+    },
+    {
+      "id": "piercing",
+      "name": "穿透",
+      "max_level": 4,
+      "level_cost_from_items": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "applicable": [
+        "弩",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "使箭穿过多个实体"
+    },
+    {
+      "id": "multishot",
+      "name": "多重射击",
+      "max_level": 1,
+      "level_cost_from_items": [
+        4
+      ],
+      "level_cost_from_book": [
+        2
+      ],
+      "applicable": [
+        "弩",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "装填时消耗一个物品以装填三个该物品"
+    },
+    {
+      "id": "quick_charge",
+      "name": "快速装填",
+      "max_level": 3,
+      "level_cost_from_items": [
+        2,
+        4,
+        6
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3
+      ],
+      "applicable": [
+        "弩",
+        "附魔书"
+      ],
+      "category": "远程武器",
+      "description": "减少弩的填装时间"
+    },
+    {
+      "id": "efficiency",
+      "name": "效率",
+      "max_level": 5,
+      "level_cost_from_items": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "applicable": [
+        "镐",
+        "铲",
+        "斧",
+        "锄",
+        "剪刀",
+        "附魔书"
+      ],
+      "category": "工具",
+      "description": "加快挖掘速度"
+    },
+    {
+      "id": "fortune",
+      "name": "时运",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "镐",
+        "铲",
+        "斧",
+        "锄",
+        "附魔书"
+      ],
+      "category": "工具",
+      "description": "增加方块掉落物的数量或概率"
+    },
+    {
+      "id": "silk_touch",
+      "name": "精准采集",
+      "max_level": 1,
+      "level_cost_from_items": [
+        8
+      ],
+      "level_cost_from_book": [
+        4
+      ],
+      "applicable": [
+        "镐",
+        "铲",
+        "斧",
+        "锄",
+        "附魔书"
+      ],
+      "category": "工具",
+      "description": "使部分被开采的方块改为掉落其方块物品，而非其他物品"
+    },
+    {
+      "id": "lure",
+      "name": "饵钓",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "钓鱼竿",
+        "附魔书"
+      ],
+      "category": "工具",
+      "description": "减少钓鱼所需的时间"
+    },
+    {
+      "id": "luck_of_the_sea",
+      "name": "海之眷顾",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "钓鱼竿",
+        "附魔书"
+      ],
+      "category": "工具",
+      "description": "增加钓鱼时获得宝藏的概率"
+    },
+    {
+      "id": "protection",
+      "name": "保护",
+      "max_level": 4,
+      "level_cost_from_items": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "减少受到的大多数种类的伤害"
+    },
+    {
+      "id": "fire_protection",
+      "name": "火焰保护",
+      "max_level": 4,
+      "level_cost_from_items": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "减少受到的火焰伤害和着火时间"
     },
     {
       "id": "blast_protection",
@@ -65,32 +586,208 @@
         "胸甲",
         "护腿",
         "靴子",
-        "海龟壳"
+        "海龟壳",
+        "附魔书"
       ],
       "category": "防具",
       "description": "减少受到的爆炸伤害，并减少受到的爆炸击退"
     },
     {
-      "id": "breach",
-      "name": "破甲",
+      "id": "projectile_protection",
+      "name": "弹射物保护",
       "max_level": 4,
       "level_cost_from_items": [
-        4,
-        8,
-        12,
-        16
-      ],
-      "level_cost_from_book": [
         2,
         4,
         6,
         8
       ],
-      "applicable": [
-        "重锤"
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4
       ],
-      "category": "近战武器",
-      "description": "降低攻击目标的护甲值对攻击伤害的减少效果"
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "减少受到的弹射物伤害"
+    },
+    {
+      "id": "thorns",
+      "name": "荆棘",
+      "max_level": 3,
+      "level_cost_from_items": [
+        8,
+        16,
+        24
+      ],
+      "level_cost_from_book": [
+        4,
+        8,
+        12
+      ],
+      "applicable": [
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "给予攻击者伤害"
+    },
+    {
+      "id": "feather_falling",
+      "name": "摔落缓冲",
+      "max_level": 4,
+      "level_cost_from_items": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "applicable": [
+        "靴子",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "减少受到的摔落伤害"
+    },
+    {
+      "id": "soul_speed",
+      "name": "灵魂疾行",
+      "max_level": 3,
+      "level_cost_from_items": [
+        8,
+        16,
+        24
+      ],
+      "level_cost_from_book": [
+        4,
+        8,
+        12
+      ],
+      "applicable": [
+        "靴子",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "增加玩家在灵魂沙和灵魂土上的移动速度"
+    },
+    {
+      "id": "frost_walker",
+      "name": "冰霜行者",
+      "max_level": 2,
+      "level_cost_from_items": [
+        4,
+        8
+      ],
+      "level_cost_from_book": [
+        2,
+        4
+      ],
+      "applicable": [
+        "靴子",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "使在水面行走时产生霜冰，且不会受到岩浆块和营火的伤害"
+    },
+    {
+      "id": "depth_strider",
+      "name": "深海探索者",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "靴子",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "减少在水中受到的减速效果"
+    },
+    {
+      "id": "swift_sneak",
+      "name": "迅捷潜行",
+      "max_level": 3,
+      "level_cost_from_items": [
+        8,
+        16,
+        24
+      ],
+      "level_cost_from_book": [
+        4,
+        8,
+        12
+      ],
+      "applicable": [
+        "护腿",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "提高玩家潜行、爬行时的移动速度"
+    },
+    {
+      "id": "respiration",
+      "name": "水下呼吸",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "头盔",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "延长水下呼吸时间"
+    },
+    {
+      "id": "aqua_affinity",
+      "name": "水下速掘",
+      "max_level": 1,
+      "level_cost_from_items": [
+        4
+      ],
+      "level_cost_from_book": [
+        2
+      ],
+      "applicable": [
+        "头盔",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "防具",
+      "description": "防止水下挖掘速度惩罚"
     },
     {
       "id": "channeling",
@@ -103,10 +800,160 @@
         4
       ],
       "applicable": [
-        "三叉戟"
+        "三叉戟",
+        "附魔书"
       ],
       "category": "三叉戟",
       "description": "使三叉戟击中实体时召唤闪电，仅在雷暴且被命中实体暴露于雨下时生效"
+    },
+    {
+      "id": "impaling",
+      "name": "穿刺",
+      "max_level": 5,
+      "level_cost_from_items": [
+        4,
+        8,
+        12,
+        16,
+        20
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6,
+        8,
+        10
+      ],
+      "applicable": [
+        "三叉戟",
+        "附魔书"
+      ],
+      "category": "三叉戟",
+      "description": "对水生生物造成额外伤害"
+    },
+    {
+      "id": "loyalty",
+      "name": "忠诚",
+      "max_level": 3,
+      "level_cost_from_items": [
+        1,
+        2,
+        3
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3
+      ],
+      "applicable": [
+        "三叉戟",
+        "附魔书"
+      ],
+      "category": "三叉戟",
+      "description": "使掷出后的三叉戟返回，魔咒等级越高返回所需时间越短"
+    },
+    {
+      "id": "riptide",
+      "name": "激流",
+      "max_level": 3,
+      "level_cost_from_items": [
+        4,
+        8,
+        12
+      ],
+      "level_cost_from_book": [
+        2,
+        4,
+        6
+      ],
+      "applicable": [
+        "三叉戟",
+        "附魔书"
+      ],
+      "category": "三叉戟",
+      "description": "将玩家向掷出三叉戟的方向发射，仅在水中或雨中生效"
+    },
+    {
+      "id": "mending",
+      "name": "经验修补",
+      "max_level": 1,
+      "level_cost_from_items": [
+        4
+      ],
+      "level_cost_from_book": [
+        2
+      ],
+      "applicable": [
+        "剑",
+        "斧",
+        "镐",
+        "铲",
+        "锄",
+        "弓",
+        "弩",
+        "三叉戟",
+        "钓鱼竿",
+        "重锤",
+        "矛",
+        "剪刀",
+        "打火石",
+        "胡萝卜钓竿",
+        "诡异菌钓竿",
+        "盾牌",
+        "鞘翅",
+        "刷子",
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "通用附魔",
+      "description": "损耗获得的经验以修补工具或盔甲的耐久度"
+    },
+    {
+      "id": "unbreaking",
+      "name": "耐久",
+      "max_level": 3,
+      "level_cost_from_items": [
+        2,
+        4,
+        6
+      ],
+      "level_cost_from_book": [
+        1,
+        2,
+        3
+      ],
+      "applicable": [
+        "剑",
+        "斧",
+        "镐",
+        "铲",
+        "锄",
+        "弓",
+        "弩",
+        "三叉戟",
+        "钓鱼竿",
+        "重锤",
+        "矛",
+        "剪刀",
+        "打火石",
+        "胡萝卜钓竿",
+        "诡异菌钓竿",
+        "盾牌",
+        "鞘翅",
+        "刷子",
+        "头盔",
+        "胸甲",
+        "护腿",
+        "靴子",
+        "海龟壳",
+        "附魔书"
+      ],
+      "category": "通用附魔",
+      "description": "减少触发耐久消耗的概率"
     },
     {
       "id": "binding_curse",
@@ -126,7 +973,8 @@
         "鞘翅",
         "雕刻南瓜",
         "生物头颅",
-        "海龟壳"
+        "海龟壳",
+        "附魔书"
       ],
       "category": "诅咒",
       "description": "受影响物品在装备时不能被卸下，玩家处于创造模式则不受影响"
@@ -167,816 +1015,11 @@
         "靴子",
         "海龟壳",
         "雕刻南瓜",
-        "生物头颅"
+        "生物头颅",
+        "附魔书"
       ],
       "category": "诅咒",
       "description": "在生物死亡时，受影响物品会消失而不掉落"
-    },
-    {
-      "id": "density",
-      "name": "致密",
-      "max_level": 5,
-      "level_cost_from_items": [
-        2,
-        4,
-        6,
-        8,
-        10
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "applicable": [
-        "重锤"
-      ],
-      "category": "近战武器",
-      "description": "增加重锤下落攻击所造成的伤害"
-    },
-    {
-      "id": "depth_strider",
-      "name": "深海探索者",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "靴子"
-      ],
-      "category": "防具",
-      "description": "减少在水中受到的减速效果"
-    },
-    {
-      "id": "efficiency",
-      "name": "效率",
-      "max_level": 5,
-      "level_cost_from_items": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "applicable": [
-        "镐",
-        "铲",
-        "斧",
-        "锄",
-        "剪刀"
-      ],
-      "category": "工具",
-      "description": "加快挖掘速度"
-    },
-    {
-      "id": "feather_falling",
-      "name": "摔落缓冲",
-      "max_level": 4,
-      "level_cost_from_items": [
-        2,
-        4,
-        6,
-        8
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "applicable": [
-        "靴子"
-      ],
-      "category": "防具",
-      "description": "减少受到的摔落伤害"
-    },
-    {
-      "id": "fire_aspect",
-      "name": "火焰附加",
-      "max_level": 2,
-      "level_cost_from_items": [
-        4,
-        8
-      ],
-      "level_cost_from_book": [
-        2,
-        4
-      ],
-      "applicable": [
-        "剑",
-        "重锤",
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "使被近战攻击的目标着火"
-    },
-    {
-      "id": "fire_protection",
-      "name": "火焰保护",
-      "max_level": 4,
-      "level_cost_from_items": [
-        2,
-        4,
-        6,
-        8
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "applicable": [
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "防具",
-      "description": "减少受到的火焰伤害和着火时间"
-    },
-    {
-      "id": "flame",
-      "name": "火矢",
-      "max_level": 1,
-      "level_cost_from_items": [
-        4
-      ],
-      "level_cost_from_book": [
-        2
-      ],
-      "applicable": [
-        "弓"
-      ],
-      "category": "远程武器",
-      "description": "使射出的箭着火"
-    },
-    {
-      "id": "fortune",
-      "name": "时运",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "镐",
-        "铲",
-        "斧",
-        "锄"
-      ],
-      "category": "工具",
-      "description": "增加方块掉落物的数量或概率"
-    },
-    {
-      "id": "frost_walker",
-      "name": "冰霜行者",
-      "max_level": 2,
-      "level_cost_from_items": [
-        4,
-        8
-      ],
-      "level_cost_from_book": [
-        2,
-        4
-      ],
-      "applicable": [
-        "靴子"
-      ],
-      "category": "防具",
-      "description": "使在水面行走时产生霜冰，且不会受到岩浆块和营火的伤害"
-    },
-    {
-      "id": "impaling",
-      "name": "穿刺",
-      "max_level": 5,
-      "level_cost_from_items": [
-        4,
-        8,
-        12,
-        16,
-        20
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6,
-        8,
-        10
-      ],
-      "applicable": [
-        "三叉戟"
-      ],
-      "category": "三叉戟",
-      "description": "对水生生物造成额外伤害"
-    },
-    {
-      "id": "infinity",
-      "name": "无限",
-      "max_level": 1,
-      "level_cost_from_items": [
-        8
-      ],
-      "level_cost_from_book": [
-        4
-      ],
-      "applicable": [
-        "弓"
-      ],
-      "category": "远程武器",
-      "description": "射箭时不会消耗箭，不包括药箭和光灵箭"
-    },
-    {
-      "id": "knockback",
-      "name": "击退",
-      "max_level": 2,
-      "level_cost_from_items": [
-        2,
-        4
-      ],
-      "level_cost_from_book": [
-        1,
-        2
-      ],
-      "applicable": [
-        "剑",
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "增加近战攻击造成的击退距离"
-    },
-    {
-      "id": "looting",
-      "name": "抢夺",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "剑",
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "增加生物掉落物的数量或概率"
-    },
-    {
-      "id": "loyalty",
-      "name": "忠诚",
-      "max_level": 3,
-      "level_cost_from_items": [
-        1,
-        2,
-        3
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3
-      ],
-      "applicable": [
-        "三叉戟"
-      ],
-      "category": "三叉戟",
-      "description": "使掷出后的三叉戟返回，魔咒等级越高返回所需时间越短"
-    },
-    {
-      "id": "luck_of_the_sea",
-      "name": "海之眷顾",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "钓鱼竿"
-      ],
-      "category": "工具",
-      "description": "增加钓鱼时获得宝藏的概率"
-    },
-    {
-      "id": "lunge",
-      "name": "突进",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "进行戳刺攻击时在攻击方向上移动一段距离"
-    },
-    {
-      "id": "lure",
-      "name": "饵钓",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "钓鱼竿"
-      ],
-      "category": "工具",
-      "description": "减少钓鱼所需的时间"
-    },
-    {
-      "id": "mending",
-      "name": "经验修补",
-      "max_level": 1,
-      "level_cost_from_items": [
-        4
-      ],
-      "level_cost_from_book": [
-        2
-      ],
-      "applicable": [
-        "剑",
-        "斧",
-        "镐",
-        "铲",
-        "锄",
-        "弓",
-        "弩",
-        "三叉戟",
-        "钓鱼竿",
-        "重锤",
-        "矛",
-        "剪刀",
-        "打火石",
-        "胡萝卜钓竿",
-        "诡异菌钓竿",
-        "盾牌",
-        "鞘翅",
-        "刷子",
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "通用附魔",
-      "description": "损耗获得的经验以修补工具或盔甲的耐久度"
-    },
-    {
-      "id": "multishot",
-      "name": "多重射击",
-      "max_level": 1,
-      "level_cost_from_items": [
-        4
-      ],
-      "level_cost_from_book": [
-        2
-      ],
-      "applicable": [
-        "弩"
-      ],
-      "category": "远程武器",
-      "description": "装填时消耗一个物品以装填三个该物品"
-    },
-    {
-      "id": "piercing",
-      "name": "穿透",
-      "max_level": 4,
-      "level_cost_from_items": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "applicable": [
-        "弩"
-      ],
-      "category": "远程武器",
-      "description": "使箭穿过多个实体"
-    },
-    {
-      "id": "power",
-      "name": "力量",
-      "max_level": 5,
-      "level_cost_from_items": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "applicable": [
-        "弓"
-      ],
-      "category": "远程武器",
-      "description": "增加箭伤害"
-    },
-    {
-      "id": "projectile_protection",
-      "name": "弹射物保护",
-      "max_level": 4,
-      "level_cost_from_items": [
-        2,
-        4,
-        6,
-        8
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "applicable": [
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "防具",
-      "description": "减少受到的弹射物伤害"
-    },
-    {
-      "id": "protection",
-      "name": "保护",
-      "max_level": 4,
-      "level_cost_from_items": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4
-      ],
-      "applicable": [
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "防具",
-      "description": "减少受到的大多数种类的伤害"
-    },
-    {
-      "id": "punch",
-      "name": "冲击",
-      "max_level": 2,
-      "level_cost_from_items": [
-        4,
-        8
-      ],
-      "level_cost_from_book": [
-        2,
-        4
-      ],
-      "applicable": [
-        "弓"
-      ],
-      "category": "远程武器",
-      "description": "增加箭的击退距离"
-    },
-    {
-      "id": "quick_charge",
-      "name": "快速装填",
-      "max_level": 3,
-      "level_cost_from_items": [
-        2,
-        4,
-        6
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3
-      ],
-      "applicable": [
-        "弩"
-      ],
-      "category": "远程武器",
-      "description": "减少弩的填装时间"
-    },
-    {
-      "id": "respiration",
-      "name": "水下呼吸",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "头盔",
-        "海龟壳"
-      ],
-      "category": "防具",
-      "description": "延长水下呼吸时间"
-    },
-    {
-      "id": "riptide",
-      "name": "激流",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "三叉戟"
-      ],
-      "category": "三叉戟",
-      "description": "将玩家向掷出三叉戟的方向发射，仅在水中或雨中生效"
-    },
-    {
-      "id": "sharpness",
-      "name": "锋利",
-      "max_level": 5,
-      "level_cost_from_items": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "applicable": [
-        "剑",
-        "斧",
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "增加近战攻击伤害"
-    },
-    {
-      "id": "silk_touch",
-      "name": "精准采集",
-      "max_level": 1,
-      "level_cost_from_items": [
-        8
-      ],
-      "level_cost_from_book": [
-        4
-      ],
-      "applicable": [
-        "镐",
-        "铲",
-        "斧",
-        "锄"
-      ],
-      "category": "工具",
-      "description": "使部分被开采的方块改为掉落其方块物品，而非其他物品"
-    },
-    {
-      "id": "smite",
-      "name": "亡灵杀手",
-      "max_level": 5,
-      "level_cost_from_items": [
-        2,
-        4,
-        6,
-        8,
-        10
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "applicable": [
-        "剑",
-        "斧",
-        "重锤",
-        "矛"
-      ],
-      "category": "近战武器",
-      "description": "对亡灵生物造成额外伤害"
-    },
-    {
-      "id": "soul_speed",
-      "name": "灵魂疾行",
-      "max_level": 3,
-      "level_cost_from_items": [
-        8,
-        16,
-        24
-      ],
-      "level_cost_from_book": [
-        4,
-        8,
-        12
-      ],
-      "applicable": [
-        "靴子"
-      ],
-      "category": "防具",
-      "description": "增加玩家在灵魂沙和灵魂土上的移动速度"
-    },
-    {
-      "id": "sweeping_edge",
-      "name": "横扫之刃",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "剑"
-      ],
-      "category": "近战武器",
-      "description": "增加横扫攻击伤害"
-    },
-    {
-      "id": "swift_sneak",
-      "name": "迅捷潜行",
-      "max_level": 3,
-      "level_cost_from_items": [
-        8,
-        16,
-        24
-      ],
-      "level_cost_from_book": [
-        4,
-        8,
-        12
-      ],
-      "applicable": [
-        "护腿"
-      ],
-      "category": "防具",
-      "description": "提高玩家潜行、爬行时的移动速度"
-    },
-    {
-      "id": "thorns",
-      "name": "荆棘",
-      "max_level": 3,
-      "level_cost_from_items": [
-        8,
-        16,
-        24
-      ],
-      "level_cost_from_book": [
-        4,
-        8,
-        12
-      ],
-      "applicable": [
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "防具",
-      "description": "给予攻击者伤害"
-    },
-    {
-      "id": "unbreaking",
-      "name": "耐久",
-      "max_level": 3,
-      "level_cost_from_items": [
-        2,
-        4,
-        6
-      ],
-      "level_cost_from_book": [
-        1,
-        2,
-        3
-      ],
-      "applicable": [
-        "剑",
-        "斧",
-        "镐",
-        "铲",
-        "锄",
-        "弓",
-        "弩",
-        "三叉戟",
-        "钓鱼竿",
-        "重锤",
-        "矛",
-        "剪刀",
-        "打火石",
-        "胡萝卜钓竿",
-        "诡异菌钓竿",
-        "盾牌",
-        "鞘翅",
-        "刷子",
-        "头盔",
-        "胸甲",
-        "护腿",
-        "靴子",
-        "海龟壳"
-      ],
-      "category": "通用附魔",
-      "description": "减少触发耐久消耗的概率"
-    },
-    {
-      "id": "wind_burst",
-      "name": "风爆",
-      "max_level": 3,
-      "level_cost_from_items": [
-        4,
-        8,
-        12
-      ],
-      "level_cost_from_book": [
-        2,
-        4,
-        6
-      ],
-      "applicable": [
-        "重锤"
-      ],
-      "category": "近战武器",
-      "description": "使重锤下落时击中目标后产生风爆，将攻击者向上弹起"
     }
   ]
 }
