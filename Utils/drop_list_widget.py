@@ -1,37 +1,82 @@
 # utils/drop_list_widget.py
-# 已选附魔列表控件：显示用户拖入的附魔，支持拖入添加、拖出删除
-from PySide6.QtWidgets import QListWidget, QApplication
-from PySide6.QtCore import Qt, QMimeData, QPoint, Signal
-from PySide6.QtGui import QDrag, QPixmap, QPainter, QColor, QPen, QFont
+# 已选附魔列表控件：显示用户拖入的附魔，支持拖入添加，Del键/×图标两种方式删除
+from PySide6.QtWidgets import QListWidget, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtCore import Qt, Signal, QRect
+from PySide6.QtGui import QPainter, QColor, QPen
+
+class CloseButtonDelegate(QStyledItemDelegate):
+    """在列表项右侧绘制 × 删除图标的委托
+
+    - 默认绘制灰色 ×，悬停行高亮为红色圆底 + 白色 ×（悬停状态由控件层通过 set_hover_row 同步）
+    - 点击命中判定在 DropListWidget.mousePressEvent 中处理（见 _hit_close_icon）
+    """
+
+    MARGIN = 12      # 图标与项右边缘的距离
+    ICON_SIZE = 10   # 图标边长（14px 缩小 25% 取整）
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hover_row = -1  # 当前悬停的行号（-1 表示无）
+
+    def set_hover_row(self, row: int) -> bool:
+        """更新悬停行号，返回是否有变化（供控件层调用）"""
+        if self._hover_row == row:
+            return False
+        self._hover_row = row
+        return True
+
+    def _icon_rect(self, option: QStyleOptionViewItem) -> QRect:
+        """计算 × 图标的绘制区域（项右侧居中）"""
+        s = self.ICON_SIZE
+        return QRect(option.rect.right() - self.MARGIN - s,
+                     option.rect.top() + (option.rect.height() - s) // 2,
+                     s, s)
+
+    def paint(self, painter, option, index):
+        """先绘制标准项内容，再在右侧叠加 × 图标"""
+        # 悬停状态变化时由控件层 setHoverRow 通知，这里只负责绘制
+        super().paint(painter, option, index)
+        rect = self._icon_rect(option)
+        hovered = (index.row() == self._hover_row)
+        if hovered:
+            # 悬停高亮：红色实心圆底 + 白色 ×
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(232, 17, 35, 255))
+            painter.drawEllipse(rect.adjusted(-3, -3, 3, 3))
+            painter.setPen(QPen(QColor(255, 255, 255, 230), 2))
+        else:
+            # 默认：灰色 ×
+            painter.setPen(QPen(QColor(160, 160, 160, 220), 2))
+        painter.drawLine(rect.left(), rect.top(), rect.right(), rect.bottom())
+        painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.top())
+
 
 class DropListWidget(QListWidget):
     """
-    可拖入/拖出的列表控件：
+    可拖入的列表控件（自身项不可拖拽）：
     - 拖入：从下方附魔列表拖拽进来，发射 dropped 信号。
-    - 拖出：将自身项拖拽到空白区域，删除该项。
+    - 删除（两种方式）：Del 或 Backspace 键 / 点击项右侧 × 图标，均发射 removed 信号。
 
     使用场景：
     - 在 ChooseItemsWindow（物品选择窗口）中作为"已选附魔列表"（chosenEnchantmentList）
     - 下方各分类附魔列表（EnchantListWidget）中的附魔可拖入本列表参与计算
-    - 拖拽本列表中的项到窗口空白区域即可移除该附魔
     """
     dropped = Signal(str, int)  # 拖入成功信号，参数：(附魔ID, 等级)
-    removed = Signal(str)       # 拖出删除/移除信号，参数：附魔ID
+    removed = Signal(str)       # 移除信号（Del/Backspace 键或 × 图标删除），参数：附魔ID
 
     def __init__(self, parent=None):
         """初始化已选附魔列表控件，开启拖放功能"""
         super().__init__(parent)
-        # 1. 开启拖放功能：允许接收外部拖入，也允许自身项被拖出
+        # 1. 开启拖放接收：只接收外部拖入，自身项不可拖拽（拖拽删除已移除）
         self.setAcceptDrops(True)          # 接受拖入操作
-        self.setDragEnabled(True)          # 允许启动拖拽（拖出删除）
-        self.setDefaultDropAction(Qt.CopyAction)  # 默认拖放动作为"复制"
         self.setDropIndicatorShown(True)   # 显示拖放位置指示线
         self.setContextMenuPolicy(Qt.NoContextMenu)  # 禁用右键菜单，防止干扰拖放
 
-        # 2. 初始化拖拽状态记录变量
-        self._drag_start_pos = QPoint()  # 鼠标按下时的起始位置（用于判断拖拽距离）
-        self._drag_item = None           # 正在被拖拽的列表项（用于拖出后删除）
-        self._is_dragging = False        # 当前是否处于拖拽过程中的标志
+        # 2. 挂载 × 删除图标委托
+        self._close_delegate = CloseButtonDelegate(self)
+        self.setItemDelegate(self._close_delegate)
+        self.setMouseTracking(True)  # 悬停高亮需要追踪鼠标移动
 
     # ---------- 拖入处理 ----------
     def dragEnterEvent(self, event):
@@ -52,26 +97,12 @@ class DropListWidget(QListWidget):
             event.ignore()
 
     def dropEvent(self, event):
-        """松开鼠标完成拖放时触发：区分"自身项的移动删除"和"外部附魔的拖入"两种情况"""
+        """松开鼠标完成拖放时触发：处理来自下方附魔列表的拖入"""
         if not event.mimeData().hasText():
             event.ignore()
             return
 
-        # 情况一：如果拖拽来自自身（即拖出后落在自己身上），删除该项
-        if event.source() is self:
-            if self._drag_item:
-                row = self.row(self._drag_item)
-                if row >= 0:
-                    removed_id = self._drag_item.data(Qt.UserRole)  # 记录被移除的附魔 ID
-                    self.takeItem(row)  # 从列表中移除该项
-                    if removed_id:
-                        self.removed.emit(removed_id)  # 通知外部：该附魔已被移除
-                self._drag_item = None
-            event.setDropAction(Qt.MoveAction)
-            event.accept()
-            return
-
-        # 情况二：外部拖入（来自下方附魔列表），解析文本数据并发射信号
+        # 外部拖入（来自下方附魔列表），解析文本数据并发射信号
         data = event.mimeData().text()
         try:
             enchant_id, level_str = data.split(":")  # 解析 "附魔ID:等级" 格式
@@ -85,114 +116,63 @@ class DropListWidget(QListWidget):
             # 文本格式不合法（缺少 ":" 或等级不是数字），拒绝本次拖放
             event.ignore()
 
-    # ---------- 拖出处理（启动拖拽） ----------
-    def mousePressEvent(self, event):
-        """鼠标按下时触发：记录按下的起始位置和当前项，为后续拖拽判断做准备"""
-        if event.button() == Qt.LeftButton:
-            self._drag_start_pos = event.pos()  # 记录起始位置（用于计算拖拽距离）
-            self._drag_item = self.currentItem()  # 记录当前选中项（可能是被拖出的项）
-            self._is_dragging = False
-        super().mousePressEvent(event)  # 保留父类的默认行为（如选中项切换）
-
-    def mouseMoveEvent(self, event):
-        """鼠标按住移动时触发：超过系统拖拽阈值后启动 QDrag 拖拽，实现拖出删除"""
-        # 未按住左键直接返回
-        if not (event.buttons() & Qt.LeftButton):
-            return
-        # 移动距离小于系统定义的拖拽阈值（startDragDistance），视为普通点击不触发拖拽
-        if (event.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
-            return
-
-        item = self._drag_item
+    # ---------- 删除操作（两种方式共用） ----------
+    def _remove_item(self, item):
+        """从列表中移除指定项并发射 removed 信号（Del 键 / × 图标删除 共用）"""
         if not item:
             return
-
-        # 从列表项的 UserRole 中取出附魔数据（由 on_enchant_dropped 槽函数存入）
-        enchant_id = item.data(Qt.UserRole)        # 附魔 ID
-        level = item.data(Qt.UserRole + 1)         # 当前等级
-        if not enchant_id:
+        row = self.row(item)
+        if row < 0:
             return
+        removed_id = item.data(Qt.UserRole)
+        self.takeItem(row)
+        if removed_id:
+            self.removed.emit(removed_id)
 
-        # 生成拖拽图标（附魔名称标签）
-        pixmap = self._create_drag_pixmap(item.text())
-        drag = QDrag(self)
-        mime_data = QMimeData()
-        mime_data.setText(f"{enchant_id}:{level}")  # 拖拽数据格式："附魔ID:等级"
-        drag.setMimeData(mime_data)
-        drag.setPixmap(pixmap)                 # 设置拖拽时跟随鼠标的图标
-        drag.setHotSpot(pixmap.rect().center())  # 热点设为图标中心（鼠标指向的位置）
+    def keyPressEvent(self, event):
+        """Del/Backspace 键删除当前选中项"""
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            item = self.currentItem()
+            if item:
+                self._remove_item(item)
+            return  # 消费按键，不传给父类（避免触发其他默认行为）
+        super().keyPressEvent(event)
 
-        # ---- 设置自定义光标：拖到无效区域时显示删除图标（叉号） ----
-        # 绘制一个 32x32 的红色叉号作为"拖到无效区域"时的光标，提示用户松手即可删除
-        cursor_pixmap = QPixmap(32, 32)
-        cursor_pixmap.fill(Qt.transparent)
-        painter = QPainter(cursor_pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QColor(255, 0, 0, 200))
-        painter.setFont(QFont("Arial", 24, QFont.Bold))
-        painter.drawText(cursor_pixmap.rect(), Qt.AlignCenter, "✕")
-        painter.end()
-        drag.setDragCursor(cursor_pixmap, Qt.IgnoreAction)
-        # -------------------------------------------------------------
+    # ---------- 鼠标事件（× 图标点击删除 + 悬停高亮） ----------
+    def mousePressEvent(self, event):
+        """鼠标按下时触发：若命中 × 图标区域则直接删除该项，其余交给父类（选中项切换）"""
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.pos())
+            if item and self._hit_close_icon(item, event.pos()):
+                self._remove_item(item)
+                return  # 点击了 × 图标，不再触发选中
+        super().mousePressEvent(event)
 
-        self._is_dragging = True
-        # 执行拖拽（阻塞直到松开鼠标），允许 Copy 和 Move 动作，默认 Copy
-        result = drag.exec_(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
-
-        # 如果拖拽被忽略（没有目标接受，即拖到了空白区域），删除该项 —— 拖出即删除
-        if result == Qt.IgnoreAction:
-            if self._drag_item:
-                row = self.row(self._drag_item)
-                if row >= 0:
-                    removed_id = self._drag_item.data(Qt.UserRole)  # 记录被移除的附魔 ID
-                    self.takeItem(row)
-                    if removed_id:
-                        self.removed.emit(removed_id)  # 通知外部：该附魔已被移除
-                self._drag_item = None
-
-        self._is_dragging = False
-
-    def mouseReleaseEvent(self, event):
-        """鼠标松开时触发：若刚结束一次拖拽则清理状态，否则恢复父类默认行为"""
-        if self._is_dragging:
-            # 拖拽刚结束，清理拖拽状态，不再让父类处理本次释放事件
-            self._is_dragging = False
-            self._drag_item = None
+    def mouseMoveEvent(self, event):
+        """鼠标移动时触发：仅更新 × 图标悬停高亮（自身项不可拖拽，不启动 QDrag）"""
+        if not (event.buttons() & Qt.LeftButton):
+            self._update_hover_row(event.pos())
             return
-        super().mouseReleaseEvent(event)
+        super().mouseMoveEvent(event)
 
-    def _create_drag_pixmap(self, text):
-        """生成拖拽时跟随的附魔标签图标
+    def leaveEvent(self, event):
+        """鼠标离开控件时清除悬停高亮"""
+        if self._close_delegate.set_hover_row(-1):
+            self.viewport().update()  # 行号变化才重绘
+        super().leaveEvent(event)
 
-        功能说明：
-        - 根据附魔名称文本绘制一个深色圆角标签图（用于拖拽时的视觉反馈）
-        - 图标宽度随文本长度自适应，高度固定 30px
-        - 返回绘制的 QPixmap 对象
+    # ---------- × 图标辅助方法 ----------
+    def _hit_close_icon(self, item, pos) -> bool:
+        """判断鼠标位置是否落在某项右侧的 × 图标区域内"""
+        opt = QStyleOptionViewItem()
+        opt.rect = self.visualItemRect(item)
+        icon_rect = self._close_delegate._icon_rect(opt)
+        # 宽容度：允许图标周围 6px 的误触范围
+        return icon_rect.adjusted(-6, -6, 6, 6).contains(pos)
 
-        参数：
-            text: 显示在标签上的文本（通常为 "附魔名 (等级 N)"）
-
-        返回：
-            pixmap: 深色圆角背景 + 白色居中文字的 QPixmap
-        """
-        font = QFont("Arial", 10)
-        width = max(120, len(text) * 10 + 30)  # 宽度至少 120px，按字符数自适应扩展
-        height = 30
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.transparent)  # 背景透明（只有圆角矩形部分可见）
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)  # 抗锯齿，圆角更平滑
-
-        # 绘制深色半透明圆角背景 + 浅色描边
-        painter.setBrush(QColor(40, 40, 40, 220))
-        painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
-        painter.drawRoundedRect(0, 0, width-1, height-1, 8, 8)  # 圆角半径 8px
-
-        # 绘制白色居中文本
-        painter.setPen(Qt.white)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
-
-        painter.end()
-        return pixmap
+    def _update_hover_row(self, pos):
+        """更新悬停高亮行，变化时触发重绘"""
+        item = self.itemAt(pos)
+        row = self.row(item) if item else -1
+        if self._close_delegate.set_hover_row(row):
+            self.viewport().update()  # 行号变化才重绘，避免频繁刷新

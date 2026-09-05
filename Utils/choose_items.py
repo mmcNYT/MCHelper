@@ -18,12 +18,10 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         #  加载 UI（包含所有 Designer 控件）
         self.setupUi(self)
 
-        # 配置chosenEnchantmentList
+        # 配置chosenEnchantmentList（只接收外部拖入，自身项不可拖拽）
         self.chosenEnchantmentList.setAcceptDrops(True)
         self.chosenEnchantmentList.setDropIndicatorShown(True)
-        self.chosenEnchantmentList.setDragEnabled(True)
         self.chosenEnchantmentList.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.chosenEnchantmentList.setDefaultDropAction(Qt.CopyAction)
         self.chosenEnchantmentList.dropped.connect(self.on_enchant_dropped)
         self.chosenEnchantmentList.removed.connect(self.on_enchant_removed)
 
@@ -38,6 +36,7 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
 
         # 绑定信号与槽
         self.itemsList.currentIndexChanged.connect(self.on_item_type_changed)
+        self.clearEnchantList.clicked.connect(self.on_clear_clicked)
 
     def load_enchant_data(self):
         """加载附魔数据，创建各分类的列表控件并添加到 tab"""
@@ -206,4 +205,16 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
 
     def on_enchant_removed(self, enchant_id: str):
         """已选附魔被拖出删除时触发：刷新冲突禁用状态（恢复可选）"""
+        self.refresh_disabled_state()
+
+    def on_clear_clicked(self):
+        """「清空」按钮点击：移除已选列表中的全部附魔，并刷新冲突禁用状态
+
+        - 清空后调用 refresh_disabled_state，使下方被禁用的冲突附魔恢复可选
+        - 列表本为空时直接返回，不做任何操作
+        """
+        if self.chosenEnchantmentList.count() == 0:
+            return
+        for _ in range(self.chosenEnchantmentList.count()):
+            self.chosenEnchantmentList.takeItem(0)  # 每次移除第 0 行直至列表为空
         self.refresh_disabled_state()

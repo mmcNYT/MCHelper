@@ -16,7 +16,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QComboBox, QGridLayout, QListWidgetItem,
-    QSizePolicy, QTabWidget, QWidget)
+    QPushButton, QSizePolicy, QTabWidget, QWidget)
 
 from Utils.drop_list_widget import DropListWidget
 from Utils.enchant_list_widget import EnchantListWidget
@@ -28,7 +28,7 @@ class Ui_enchantedItems(object):
         enchantedItems.resize(585, 417)
         self.layoutWidget = QWidget(enchantedItems)
         self.layoutWidget.setObjectName(u"layoutWidget")
-        self.layoutWidget.setGeometry(QRect(70, 30, 461, 351))
+        self.layoutWidget.setGeometry(QRect(70, 20, 461, 381))
         self.gridLayout = QGridLayout(self.layoutWidget)
         self.gridLayout.setObjectName(u"gridLayout")
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
@@ -104,7 +104,17 @@ class Ui_enchantedItems(object):
         self.curseEnchantmentList.setGeometry(QRect(0, 0, 451, 121))
         self.allEnchantmentTab.addTab(self.curseTab, "")
 
-        self.gridLayout.addWidget(self.allEnchantmentTab, 1, 0, 1, 2)
+        self.gridLayout.addWidget(self.allEnchantmentTab, 7, 0, 1, 2)
+
+        self.clearEnchantList = QPushButton(self.layoutWidget)
+        self.clearEnchantList.setObjectName(u"clearEnchantList")
+
+        self.gridLayout.addWidget(self.clearEnchantList, 2, 1, 1, 1)
+
+        self.confirmItem = QPushButton(self.layoutWidget)
+        self.confirmItem.setObjectName(u"confirmItem")
+
+        self.gridLayout.addWidget(self.confirmItem, 2, 0, 1, 1)
 
 
         self.retranslateUi(enchantedItems)
@@ -141,5 +151,7 @@ class Ui_enchantedItems(object):
         self.allEnchantmentTab.setTabText(self.allEnchantmentTab.indexOf(self.tridentTab), QCoreApplication.translate("enchantedItems", u"\u4e09\u53c9\u621f", None))
         self.allEnchantmentTab.setTabText(self.allEnchantmentTab.indexOf(self.commonTab), QCoreApplication.translate("enchantedItems", u"\u901a\u7528\u9644\u9b54", None))
         self.allEnchantmentTab.setTabText(self.allEnchantmentTab.indexOf(self.curseTab), QCoreApplication.translate("enchantedItems", u"\u8bc5\u5492", None))
+        self.clearEnchantList.setText(QCoreApplication.translate("enchantedItems", u"\u6e05\u7a7a", None))
+        self.confirmItem.setText(QCoreApplication.translate("enchantedItems", u"\u786e\u8ba4", None))
     # retranslateUi
 

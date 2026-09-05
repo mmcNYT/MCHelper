@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QListWidget, QApplication
-from PySide6.QtCore import Qt, QMimeData, QPoint, Signal
+from PySide6.QtCore import Qt, QMimeData, QPoint, Signal, QRect
 from PySide6.QtGui import QDrag, QPixmap, QPainter, QColor, QPen, QFont
 
 
@@ -52,7 +52,7 @@ class EnchantListWidget(QListWidget):
         mime_data.setText(f"{enchant_id}:{level}")
         drag.setMimeData(mime_data)
         drag.setPixmap(pixmap)
-        drag.setHotSpot(pixmap.rect().center())
+        drag.setHotSpot(self.logical_center(pixmap))  # 热点 = 图标逻辑中心（任意缩放下都对准鼠标）
         drag.exec_(Qt.CopyAction)
 
     def mouseReleaseEvent(self, event):
@@ -89,23 +89,47 @@ class EnchantListWidget(QListWidget):
         super().mouseReleaseEvent(event)
 
     def _create_drag_pixmap(self, text):
-        """生成拖拽时跟随的标签图标"""
+        """生成拖拽时跟随的标签图标
+
+        - 淡灰色圆角背景 + 黑色居中文字（与 DropListWidget 拖出图标样式一致）
+        - 按 devicePixelRatio 提升实际绘制分辨率，高分屏/系统缩放下清晰不模糊
+        """
         font = QFont("Arial", 10)
         width = max(120, len(text) * 10 + 30)
         height = 30
-        pixmap = QPixmap(width, height)
+        # 提升分辨率：实际像素 = 逻辑尺寸 × 屏幕缩放比
+        dpr = self.devicePixelRatioF() or 1.0
+        pixmap = QPixmap(int(width * dpr), int(height * dpr))
+        pixmap.setDevicePixelRatio(dpr)  # 显示尺寸不变，实际像素更高
         pixmap.fill(Qt.transparent)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
 
-        painter.setBrush(QColor(40, 40, 40, 220))
-        painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
-        painter.drawRoundedRect(0, 0, width - 1, height - 1, 8, 8)
+        # 淡灰色圆角背景 + 浅色描边
+        # 注意：设置 dpr 后 painter 使用逻辑坐标（自动缩放到物理像素），
+        # 所有绘制必须用逻辑矩形，不可用 pixmap.rect()（那是设备像素矩形）
+        logical_rect = QRect(0, 0, width, height)
+        painter.setBrush(QColor(230, 230, 230, 235))
+        painter.setPen(QPen(QColor(0, 0, 0, 60), 1))
+        painter.drawRoundedRect(logical_rect, 8, 8)
 
-        painter.setPen(Qt.white)
+        # 黑色居中文本（用逻辑矩形，任意 dpr 下都严格居中）
+        painter.setPen(QColor(20, 20, 20))
         painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+        painter.drawText(logical_rect, Qt.AlignCenter, text)
 
         painter.end()
         return pixmap
+
+    @staticmethod
+    def logical_center(pixmap) -> QPoint:
+        """返回 pixmap 的逻辑中心点（供 QDrag.setHotSpot 使用）
+
+        setHotSpot 接收逻辑坐标，而 pixmap.rect() 是设备像素矩形，
+        dpr>1 时直接用 rect().center() 会导致图标偏离鼠标，必须除回 dpr。
+        """
+        dpr = pixmap.devicePixelRatio() or 1.0
+        return QPoint(int(pixmap.width() / dpr) // 2,
+                      int(pixmap.height() / dpr) // 2)
