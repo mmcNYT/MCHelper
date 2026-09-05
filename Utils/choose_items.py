@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QAbstractItemView, QMessageBox
+    QPushButton, QLabel, QAbstractItemView, QMessageBox, QTabWidget
 )
 from PySide6.QtCore import Qt, QEvent
 from CodesUI.ChooseEnchantedItems import Ui_enchantedItems
 from Utils.enchant_data_manager import DataManager
+from Utils.enchant_list_widget import EnchantListWidget
 
 class ChooseItemsWindow(QDialog, Ui_enchantedItems):
     """
@@ -17,49 +18,91 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         # 1. 加载 UI（包含所有 Designer 控件）
         self.setupUi(self)
 
-        # 2. 配置上方物品栏（chosenEnchantmentList）
+        # 2. 配置chosenEnchantmentList
         self.chosenEnchantmentList.setAcceptDrops(True)
         self.chosenEnchantmentList.setDropIndicatorShown(True)
-        self.chosenEnchantmentList.setDragEnabled(False)
+        self.chosenEnchantmentList.setDragEnabled(True)
         self.chosenEnchantmentList.setSelectionMode(QAbstractItemView.SingleSelection)
         self.chosenEnchantmentList.setDefaultDropAction(Qt.CopyAction)
         self.chosenEnchantmentList.dropped.connect(self.on_enchant_dropped)
 
-        # 重写其拖放事件（绑定到当前类的自定义处理方法）
-        # self.chosenEnchantmentList.dragEnterEvent = self.drag_enter_event
-        # self.chosenEnchantmentList.dropEvent = self.drop_event
-
         # 3. 加载附魔数据到下方的分类列表
         self.load_enchant_data()
 
+        # 4.绑定信号与槽
+        self.itemsList.currentIndexChanged.connect(self.on_item_type_changed)
+
+        # 5.定义变量
+        self.current_stuff = "附魔书"
+        self.enchant_levels = {}
+
+
     def load_enchant_data(self):
-        """
-        将附魔数据填充到下方的各个分类列表中。
-        假设在 Designer 中这些列表的 objectName 分别为：
-            list_melee, list_ranged, list_armor, list_common, list_curse
-        并且它们已经被提升为 EnchantListWidget（自定义子类）。
-        """
-        # 建立分类与对应列表控件的映射
-        category_to_list = {
-            "近战武器": self.meleeEnchantmentList,
-            "远程武器": self.rangedEnchantmentList,
-            "防具": self.armorEnchantmentList,
-            "通用附魔": self.commonEnchantmentList,
-            "诅咒": self.curseEnchantmentList
-        }
-
+        """加载附魔数据，创建各分类的列表控件并添加到 tab"""
         all_enchants = self.data_manager.get_all_enchants()
+        # 按分类分组
+        categories = {}
+        for ench in all_enchants:
+            cat = ench.get("category", "其他")
+            categories.setdefault(cat, []).append(ench)
 
-        for category, list_widget in category_to_list.items():
-            list_widget.clear()
-            for ench in all_enchants:
-                if ench.get("category") == category:
-                    # 创建列表项，并存储附魔数据到 UserRole 中
-                    item = QListWidgetItem(f"{ench['name']} (等级 1)")
-                    item.setData(Qt.UserRole, ench['id'])  # 附魔ID
-                    item.setData(Qt.UserRole + 1, 1)  # 当前等级
-                    item.setData(Qt.UserRole + 2, ench['max_level'])  # 最大等级
-                    list_widget.addItem(item)
+        # 清空原有 tab 和记录
+        self.allEnchantmentTab.clear()
+        self.category_order = []
+        self.category_widgets = {}
+
+        # 按原数据顺序创建 tab（保持 categories 的插入顺序）
+        for cat_name, ench_list in categories.items():
+            list_widget = EnchantListWidget()
+            for ench in ench_list:
+                item = QListWidgetItem(f"{ench['name']} (等级 1)")
+                item.setData(Qt.UserRole, ench['id'])
+                item.setData(Qt.UserRole + 1, 1)           # 当前等级
+                item.setData(Qt.UserRole + 2, ench['max_level'])  # 最大等级
+                list_widget.addItem(item)
+            self.allEnchantmentTab.addTab(list_widget, cat_name)
+            self.category_order.append(cat_name)
+            self.category_widgets[cat_name] = list_widget
+
+    def update_tabs_for_item(self, item_type):
+        """
+        根据物品类型，决定显示哪些分类的 tab。
+        如果 item_type 为空，则显示所有分类。
+        """
+        if not item_type:
+            compatible_categories = set(self.category_order)
+        else:
+            # 获取该物品适用的所有附魔
+            compatible_enchants = self.data_manager.get_enchants_for_item(item_type)
+            # 提取分类
+            compatible_categories = {ench['category'] for ench in compatible_enchants}
+
+        # 保存当前选中的分类名称（用于恢复）
+        current_index = self.allEnchantmentTab.currentIndex()
+        current_cat = None
+        if current_index >= 0:
+            current_cat = self.allEnchantmentTab.tabText(current_index)
+
+        # 清除所有 tab
+        self.allEnchantmentTab.clear()
+
+        # 重新添加需要显示的 tab（按原有顺序）
+        for cat in self.category_order:
+            if cat in compatible_categories:
+                list_widget = self.category_widgets[cat]
+                self.allEnchantmentTab.addTab(list_widget, cat)
+
+        # 恢复之前选中的分类（如果仍然存在）
+        if current_cat:
+            for i in range(self.allEnchantmentTab.count()):
+                if self.allEnchantmentTab.tabText(i) == current_cat:
+                    self.allEnchantmentTab.setCurrentIndex(i)
+                    break
+
+    def on_item_type_changed(self, item_type):
+        """物品类型下拉框变化时触发"""
+        self.current_stuff = self.itemsList.currentText()
+        self.update_tabs_for_item(self.current_stuff)
 
     # ---------- 拖放事件处理（拖拽到上方物品栏） ----------
     def on_enchant_dropped(self, enchant_id: str, level: int):

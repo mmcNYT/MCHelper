@@ -42,12 +42,22 @@
       </item>
       <item>
        <property name="text">
+        <string>矛</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
         <string>镐</string>
        </property>
       </item>
       <item>
        <property name="text">
-        <string>矛</string>
+        <string>铲</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>锄</string>
        </property>
       </item>
       <item>
@@ -107,9 +117,9 @@
     <item row="1" column="0" colspan="2">
      <widget class="QTabWidget" name="allEnchantmentTab">
       <property name="currentIndex">
-       <number>0</number>
+       <number>4</number>
       </property>
-      <widget class="QWidget" name="tab">
+      <widget class="QWidget" name="meleeTab">
        <attribute name="title">
         <string>近战武器</string>
        </attribute>
@@ -124,7 +134,22 @@
         </property>
        </widget>
       </widget>
-      <widget class="QWidget" name="tab_3">
+      <widget class="QWidget" name="toolTab">
+       <attribute name="title">
+        <string>工具</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="toolEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="rangedTab">
        <attribute name="title">
         <string>远程武器</string>
        </attribute>
@@ -139,7 +164,7 @@
         </property>
        </widget>
       </widget>
-      <widget class="QWidget" name="tab_2">
+      <widget class="QWidget" name="armorTab">
        <attribute name="title">
         <string>防具</string>
        </attribute>
@@ -154,7 +179,22 @@
         </property>
        </widget>
       </widget>
-      <widget class="QWidget" name="tab_4">
+      <widget class="QWidget" name="tridentTab">
+       <attribute name="title">
+        <string>三叉戟</string>
+       </attribute>
+       <widget class="EnchantListWidget" name="tridentEnchantmentList">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>451</width>
+          <height>121</height>
+         </rect>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="commonTab">
        <attribute name="title">
         <string>通用附魔</string>
        </attribute>
@@ -169,7 +209,7 @@
         </property>
        </widget>
       </widget>
-      <widget class="QWidget" name="tab_5">
+      <widget class="QWidget" name="curseTab">
        <attribute name="title">
         <string>诅咒</string>
        </attribute>
