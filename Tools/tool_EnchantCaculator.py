@@ -1,9 +1,9 @@
 from .tool_base import BaseToolWidget
 from Utils.choose_items import ChooseItemsWindow
 from CodesUI.EnchantCaculator import Ui_EnchantCaculator
-from Utils.enchanted_item_card import EnchantedItemCard
+from Utils.card_list_widget import CardListWidget
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
-from PySide6.QtWidgets import QFileDialog, QListWidgetItem, QListView
+from PySide6.QtWidgets import QFileDialog
 
 class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
     def __init__(self, parent=None):
@@ -12,11 +12,16 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
 
         self.addItems.clicked.connect(self.do_choose_items)
 
-        # 物品卡片横向排列：每张卡片内部仍是图标在上、附魔方框在下，
-        # 多张卡片从左到右排列，排满一行后自动换行
-        self.listWidget.setFlow(QListView.LeftToRight)
-        self.listWidget.setWrapping(True)
-        self.listWidget.setSpacing(8)
+        # 卡片列表替换为增强型子类：横排布局（构造内置） + Del键删除
+        # + 再次点击取消选中 + 拖动交换位置
+        # （同父组件同网格位置替换 UI 生成的原生 QListWidget，原布局不受影响）
+        old_list = self.chosenItemList
+        self.chosenItemList = CardListWidget(old_list.parentWidget())
+        self.gridLayout.replaceWidget(old_list, self.chosenItemList)
+        old_list.deleteLater()
+
+        # 清空物品按钮：清空全部卡片并同步内部计算状态
+        self.clearItems.clicked.connect(self.chosenItemList.clear_cards)
 
         self.selected_stuff = {}
 
@@ -37,14 +42,10 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         # TODO: 后续计算逻辑使用 self.selected_stuff
 
     def add_item_card(self, data: dict):
-        """把一次确认选择的物品生成为卡片并加入 listWidget
+        """把一次确认选择的物品生成为卡片并加入卡片列表
 
         参数：
             data: ChooseItemsWindow 打包的数据
                   {"item_name": str, "enchants": [{"id","name","level"}, ...]}
         """
-        card = EnchantedItemCard(data["item_name"], data["enchants"])
-        item = QListWidgetItem()
-        item.setSizeHint(card.sizeHint())
-        self.listWidget.addItem(item)
-        self.listWidget.setItemWidget(item, card)
+        self.chosenItemList.add_card(data)

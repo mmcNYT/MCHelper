@@ -78,17 +78,17 @@ print("4. tooltip 方框文本行与尺寸 ✓")
 from Tools.tool_EnchantCaculator import EnchantCalculatorWidget
 
 widget = EnchantCalculatorWidget()
-assert widget.listWidget.count() == 0, "初始列表应为空"
+assert widget.chosenItemList.count() == 0, "初始列表应为空"
 data = {"item_name": "剑", "enchants": enchants}
 widget.add_item_card(data)
-assert widget.listWidget.count() == 1, "添加后应有一条目"
-inner = widget.listWidget.itemWidget(widget.listWidget.item(0))
+assert widget.chosenItemList.count() == 1, "添加后应有一条目"
+inner = widget.chosenItemList.itemWidget(widget.chosenItemList.item(0))
 assert isinstance(inner, EnchantedItemCard), "条目控件应为物品卡片"
 inner.grab()
 # 第二次确认（多物品堆叠）
 data2 = {"item_name": "弓", "enchants": [{"id": "power", "name": "力量", "level": 5}]}
 widget.add_item_card(data2)
-assert widget.listWidget.count() == 2, "第二次添加应累计"
+assert widget.chosenItemList.count() == 2, "第二次添加应累计"
 print("5. add_item_card 完整链路（含多次添加） ✓")
 
 # ---------- 6. 确认→卡片 端到端（复用模态流程） ----------
@@ -105,8 +105,8 @@ def confirm_modal():
 
 QTimer.singleShot(0, confirm_modal)
 widget2.do_choose_items()
-assert widget2.listWidget.count() == 1, "端到端：确认后应自动出现 1 张卡片"
-card_in_list = widget2.listWidget.itemWidget(widget2.listWidget.item(0))
+assert widget2.chosenItemList.count() == 1, "端到端：确认后应自动出现 1 张卡片"
+card_in_list = widget2.chosenItemList.itemWidget(widget2.chosenItemList.item(0))
 assert isinstance(card_in_list, EnchantedItemCard)
 box_in_card = card_in_card = card_in_list.layout().itemAt(1).widget()
 assert box_in_card._line_texts[0] == "附魔书", f"物品名应为附魔书: {box_in_card._line_texts[0]}"

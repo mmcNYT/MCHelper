@@ -6,30 +6,47 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>658</width>
+    <width>634</width>
     <height>518</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <widget class="QWidget" name="">
+  <widget class="QWidget" name="layoutWidget">
    <property name="geometry">
     <rect>
      <x>20</x>
      <y>40</y>
      <width>591</width>
-     <height>226</height>
+     <height>451</height>
     </rect>
    </property>
    <layout class="QGridLayout" name="gridLayout">
-    <item row="0" column="0">
-     <widget class="QListWidget" name="listWidget"/>
+    <item row="8" column="0" colspan="3">
+     <widget class="QListWidget" name="realSteps"/>
     </item>
-    <item row="1" column="0">
+    <item row="1" column="0" colspan="3">
+     <widget class="QListWidget" name="chosenItemList"/>
+    </item>
+    <item row="5" column="0">
      <widget class="QPushButton" name="addItems">
       <property name="text">
        <string>添加物品</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="1">
+     <widget class="QPushButton" name="clearItems">
+      <property name="text">
+       <string>清空物品</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="2">
+     <widget class="QPushButton" name="startCaculate">
+      <property name="text">
+       <string>开始计算</string>
       </property>
      </widget>
     </item>

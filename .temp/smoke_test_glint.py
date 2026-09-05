@@ -116,8 +116,8 @@ def confirm_modal():
 
 QTimer.singleShot(0, confirm_modal)
 widget.do_choose_items()
-assert widget.listWidget.count() == 1
-card_in = widget.listWidget.itemWidget(widget.listWidget.item(0))
+assert widget.chosenItemList.count() == 1
+card_in = widget.chosenItemList.itemWidget(widget.chosenItemList.item(0))
 assert isinstance(card_in, EnchantedItemCard)
 icon_in = card_in.layout().itemAt(0).widget()
 assert isinstance(icon_in, _GlintIcon) and icon_in._timer.isActive(), "端到端：卡片图标应为流光动画"

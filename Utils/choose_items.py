@@ -167,6 +167,9 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
     def on_item_type_changed(self, item_type):
         """物品类型下拉框变化时触发"""
         self.current_stuff = self.itemsList.currentText()
+        # 物品改变后旧附魔可能不再兼容新物品，清空已选附魔列表
+        # （复用清空逻辑：同时刷新冲突禁用状态；列表本为空时无副作用）
+        self.on_clear_clicked()
         self.update_tabs_and_lists(self.current_stuff)
 
     # ---------- 拖放事件处理（拖拽到上方物品栏） ----------

@@ -22,22 +22,37 @@ class Ui_EnchantCaculator(object):
     def setupUi(self, EnchantCaculator):
         if not EnchantCaculator.objectName():
             EnchantCaculator.setObjectName(u"EnchantCaculator")
-        EnchantCaculator.resize(658, 518)
-        self.widget = QWidget(EnchantCaculator)
-        self.widget.setObjectName(u"widget")
-        self.widget.setGeometry(QRect(20, 40, 591, 226))
-        self.gridLayout = QGridLayout(self.widget)
+        EnchantCaculator.resize(634, 518)
+        self.layoutWidget = QWidget(EnchantCaculator)
+        self.layoutWidget.setObjectName(u"layoutWidget")
+        self.layoutWidget.setGeometry(QRect(20, 40, 591, 451))
+        self.gridLayout = QGridLayout(self.layoutWidget)
         self.gridLayout.setObjectName(u"gridLayout")
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
-        self.listWidget = QListWidget(self.widget)
-        self.listWidget.setObjectName(u"listWidget")
+        self.realSteps = QListWidget(self.layoutWidget)
+        self.realSteps.setObjectName(u"realSteps")
 
-        self.gridLayout.addWidget(self.listWidget, 0, 0, 1, 1)
+        self.gridLayout.addWidget(self.realSteps, 8, 0, 1, 3)
 
-        self.addItems = QPushButton(self.widget)
+        self.chosenItemList = QListWidget(self.layoutWidget)
+        self.chosenItemList.setObjectName(u"chosenItemList")
+
+        self.gridLayout.addWidget(self.chosenItemList, 1, 0, 1, 3)
+
+        self.addItems = QPushButton(self.layoutWidget)
         self.addItems.setObjectName(u"addItems")
 
-        self.gridLayout.addWidget(self.addItems, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.addItems, 5, 0, 1, 1)
+
+        self.clearItems = QPushButton(self.layoutWidget)
+        self.clearItems.setObjectName(u"clearItems")
+
+        self.gridLayout.addWidget(self.clearItems, 5, 1, 1, 1)
+
+        self.startCaculate = QPushButton(self.layoutWidget)
+        self.startCaculate.setObjectName(u"startCaculate")
+
+        self.gridLayout.addWidget(self.startCaculate, 5, 2, 1, 1)
 
 
         self.retranslateUi(EnchantCaculator)
@@ -48,5 +63,7 @@ class Ui_EnchantCaculator(object):
     def retranslateUi(self, EnchantCaculator):
         EnchantCaculator.setWindowTitle(QCoreApplication.translate("EnchantCaculator", u"Form", None))
         self.addItems.setText(QCoreApplication.translate("EnchantCaculator", u"\u6dfb\u52a0\u7269\u54c1", None))
+        self.clearItems.setText(QCoreApplication.translate("EnchantCaculator", u"\u6e05\u7a7a\u7269\u54c1", None))
+        self.startCaculate.setText(QCoreApplication.translate("EnchantCaculator", u"\u5f00\u59cb\u8ba1\u7b97", None))
     # retranslateUi
 
