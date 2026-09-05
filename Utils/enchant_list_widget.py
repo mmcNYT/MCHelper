@@ -3,6 +3,11 @@ from PySide6.QtCore import Qt, QMimeData, QPoint, Signal
 from PySide6.QtGui import QDrag, QPixmap, QPainter, QColor, QPen, QFont
 
 
+def _is_item_disabled(item) -> bool:
+    """判断列表项是否处于禁用状态（无 ItemIsEnabled 标志）"""
+    return not (item.flags() & Qt.ItemIsEnabled)
+
+
 class EnchantListWidget(QListWidget):
     """可点击增减等级、可拖拽的附魔列表"""
     levelChanged = Signal(str, int)  # (enchant_id, new_level)
@@ -13,8 +18,12 @@ class EnchantListWidget(QListWidget):
         self.setAcceptDrops(False)
         self.setContextMenuPolicy(Qt.NoContextMenu)
         self._drag_start_pos = QPoint()
+        self._pressed_item = None  # 鼠标按下位置的项（可能与 currentItem 不同：禁用项不会被选中）
 
     def mousePressEvent(self, event):
+        # 记录按下位置的项：禁用项不会被选中，currentItem 会停留在旧项上，
+        # 因此必须用 itemAt 判断实际按在哪个项上，避免误拖/误改旧项
+        self._pressed_item = self.itemAt(event.pos())
         if event.button() == Qt.LeftButton:
             self._drag_start_pos = event.pos()
         super().mousePressEvent(event)
@@ -25,8 +34,11 @@ class EnchantListWidget(QListWidget):
         if (event.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
             return
 
-        item = self.currentItem()
+        item = self._pressed_item
         if not item:
+            return
+        # 禁用项（与已选附魔冲突）不可拖拽
+        if _is_item_disabled(item):
             return
         enchant_id = item.data(Qt.UserRole)
         level = item.data(Qt.UserRole + 1)
@@ -47,8 +59,9 @@ class EnchantListWidget(QListWidget):
         # 左键点击：增加等级
         if event.button() == Qt.LeftButton:
             if (event.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
-                item = self.currentItem()
-                if item:
+                item = self._pressed_item
+                # 禁用项（与已选附魔冲突）不可点击加级
+                if item and not _is_item_disabled(item):
                     level = item.data(Qt.UserRole + 1) or 1
                     max_level = item.data(Qt.UserRole + 2) or 1
                     if level < max_level:
@@ -61,8 +74,9 @@ class EnchantListWidget(QListWidget):
                             self.levelChanged.emit(enchant_id, level)  # 发射信号
         # 右键点击：减少等级
         elif event.button() == Qt.RightButton:
-            item = self.currentItem()
-            if item:
+            item = self._pressed_item
+            # 禁用项（与已选附魔冲突）不可点击减级
+            if item and not _is_item_disabled(item):
                 level = item.data(Qt.UserRole + 1) or 1
                 if level > 1:
                     level -= 1

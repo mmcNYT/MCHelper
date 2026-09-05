@@ -25,6 +25,7 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         self.chosenEnchantmentList.setSelectionMode(QAbstractItemView.SingleSelection)
         self.chosenEnchantmentList.setDefaultDropAction(Qt.CopyAction)
         self.chosenEnchantmentList.dropped.connect(self.on_enchant_dropped)
+        self.chosenEnchantmentList.removed.connect(self.on_enchant_removed)
 
         # 定义变量
         self.current_stuff = "附魔书"
@@ -96,7 +97,6 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
                 item.setData(Qt.UserRole + 1, level)
                 item.setData(Qt.UserRole + 2, ench['max_level'])
                 list_widget.addItem(item)
-
             self.allEnchantmentTab.addTab(list_widget, cat_name)
             self.category_widgets[cat_name] = list_widget
 
@@ -109,9 +109,57 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         elif self.allEnchantmentTab.count() > 0:
             self.allEnchantmentTab.setCurrentIndex(0)
 
+        # 根据已选附魔刷新禁用状态
+        self.refresh_disabled_state()
+
     def on_enchant_level_changed(self, enchant_id: str, new_level: int):
         """等级变化时更新字典"""
         self.enchant_levels[enchant_id] = new_level
+
+    # ---------- 冲突禁用逻辑 ----------
+    def _get_selected_enchant_ids(self) -> set:
+        """收集已选列表中所有附魔 ID"""
+        ids = set()
+        for i in range(self.chosenEnchantmentList.count()):
+            eid = self.chosenEnchantmentList.item(i).data(Qt.UserRole)
+            if eid:
+                ids.add(eid)
+        return ids
+
+    def refresh_disabled_state(self):
+        """根据已选附魔的冲突关系，禁用/恢复下方各分类列表中的对应选项
+
+        - 已选附魔的冲突附魔 → 移除 ItemIsEnabled 标志（Qt 自动置灰）+ tooltip 提示冲突来源
+        - 无冲突附魔 → 恢复全部标志并清除 tooltip
+        """
+        selected_ids = self._get_selected_enchant_ids()
+
+        # 计算应禁用的附魔集合：所有已选附魔的冲突附魔的并集
+        disabled_ids = set()
+        conflict_source = {}  # 冲突附魔 ID -> 导致冲突的已选附魔名（用于提示）
+        for sel_id in selected_ids:
+            for cid in self.data_manager.get_conflicts(sel_id):
+                if cid not in selected_ids:  # 理论上不会发生（选择时未拦截），双保险
+                    disabled_ids.add(cid)
+                    sel_ench = self.data_manager.get_enchant_by_id(sel_id)
+                    if sel_ench:
+                        conflict_source[cid] = sel_ench["name"]
+
+        # 遍历所有分类列表，更新每个选项的启用/禁用状态
+        for list_widget in self.category_widgets.values():
+            for i in range(list_widget.count()):
+                item = list_widget.item(i)
+                eid = item.data(Qt.UserRole)
+                if eid in disabled_ids:
+                    # 禁用：移除 enabled/选中/拖拽相关标志，Qt 自动置灰显示
+                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled & ~Qt.ItemIsSelectable)
+                    source = conflict_source.get(eid, "已选附魔")
+                    item.setToolTip(f"与已选的「{source}」冲突，移除后可选")
+                else:
+                    # 恢复：补回标准标志并清除提示
+                    item.setFlags(item.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable
+                                  | Qt.ItemIsDragEnabled | Qt.ItemIsUserCheckable)
+                    item.setToolTip("")
 
     def on_item_type_changed(self, item_type):
         """物品类型下拉框变化时触发"""
@@ -152,3 +200,10 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
             item.setData(Qt.UserRole, enchant_id)
             item.setData(Qt.UserRole + 1, level)
             self.chosenEnchantmentList.addItem(item)
+
+        # 已选集合变化，刷新冲突禁用状态
+        self.refresh_disabled_state()
+
+    def on_enchant_removed(self, enchant_id: str):
+        """已选附魔被拖出删除时触发：刷新冲突禁用状态（恢复可选）"""
+        self.refresh_disabled_state()

@@ -16,6 +16,7 @@ class DropListWidget(QListWidget):
     - 拖拽本列表中的项到窗口空白区域即可移除该附魔
     """
     dropped = Signal(str, int)  # 拖入成功信号，参数：(附魔ID, 等级)
+    removed = Signal(str)       # 拖出删除/移除信号，参数：附魔ID
 
     def __init__(self, parent=None):
         """初始化已选附魔列表控件，开启拖放功能"""
@@ -61,7 +62,10 @@ class DropListWidget(QListWidget):
             if self._drag_item:
                 row = self.row(self._drag_item)
                 if row >= 0:
+                    removed_id = self._drag_item.data(Qt.UserRole)  # 记录被移除的附魔 ID
                     self.takeItem(row)  # 从列表中移除该项
+                    if removed_id:
+                        self.removed.emit(removed_id)  # 通知外部：该附魔已被移除
                 self._drag_item = None
             event.setDropAction(Qt.MoveAction)
             event.accept()
@@ -140,7 +144,10 @@ class DropListWidget(QListWidget):
             if self._drag_item:
                 row = self.row(self._drag_item)
                 if row >= 0:
+                    removed_id = self._drag_item.data(Qt.UserRole)  # 记录被移除的附魔 ID
                     self.takeItem(row)
+                    if removed_id:
+                        self.removed.emit(removed_id)  # 通知外部：该附魔已被移除
                 self._drag_item = None
 
         self._is_dragging = False

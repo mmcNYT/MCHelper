@@ -20,6 +20,7 @@ class DataManager:
                 "level_cost_from_book": [2],         # 各等级经验消耗（从附魔书合并时）
                 "applicable": ["头盔", "海龟壳"],     # 适用的物品类型列表
                 "category": "防具",                   # 所属类别（近战武器/工具/远程武器/防具/通用附魔/诅咒）
+                "conflicts": ["protection"],          # 互斥附魔 ID 列表（不能同时存在于同一物品）
                 "description": "防止水下挖掘速度惩罚"  # 附魔效果说明
             },
             ...
@@ -185,3 +186,17 @@ class DataManager:
         """
         ench = self.get_enchant_by_id(enchant_id)
         return ench.get("max_level") if ench else None
+
+    def get_conflicts(self, enchant_id: str) -> List[str]:
+        """获取与某附魔互斥（不共存）的附魔 ID 列表
+
+        参数：
+            enchant_id: 附魔 ID
+
+        返回：
+            互斥附魔 ID 列表；附魔不存在或无冲突数据时返回空列表
+        """
+        ench = self.get_enchant_by_id(enchant_id)
+        if not ench:
+            return []
+        return list(ench.get("conflicts", []))
