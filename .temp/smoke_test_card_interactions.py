@@ -175,5 +175,34 @@ app.processEvents()
 assert reordered[0] == before, "落回原位不应发射 cardReordered"
 print("4. 拖动交换位置：顺序正确 + 控件随行 + 移到末尾 + 原位不发射 ✓")
 
+# ---------- 5. 拖动快照透明 + 视口淡灰背景 ----------
+from PySide6.QtGui import QImage, QColor
+
+# 5a. 透明快照：四角 alpha=0（无灰底），内容不透明像素充足（卡片可见）
+snap = CardListWidget._transparent_snapshot(lst.itemWidget(lst.item(0)))
+snap_img = snap.toImage().convertToFormat(QImage.Format_ARGB32)
+corner_alphas = [snap_img.pixelColor(x, y).alpha()
+                 for x, y in ((0, 0), (snap_img.width() - 1, 0),
+                              (0, snap_img.height() - 1), (snap_img.width() - 1, snap_img.height() - 1))]
+assert all(a == 0 for a in corner_alphas), f"快照四角应完全透明，实际 {corner_alphas}"
+opaque = sum(1 for y in range(snap_img.height()) for x in range(snap_img.width())
+             if snap_img.pixelColor(x, y).alpha() > 0)
+total = snap_img.width() * snap_img.height()
+assert opaque > total * 0.3, f"快照内容像素应充足（实际不透明 {opaque}/{total}）"
+# 与旧 grab() 对比：grab 四角为不透明灰底
+g_img = lst.itemWidget(lst.item(0)).grab().toImage().convertToFormat(QImage.Format_ARGB32)
+g_corner = g_img.pixelColor(0, 0).alpha()
+assert g_corner == 255 and corner_alphas[0] == 0, "grab() 应带不透明底而新快照应透明"
+print(f"5a. 拖动快照透明：四角 alpha 全 0，内容 {opaque}/{total} 像素可见 ✓")
+
+# 5b. 视口淡灰背景：实测像素为 #ECECEC (236,236,236)
+lst.clear_cards()
+app.processEvents()
+vp_img = lst.viewport().grab().toImage().convertToFormat(QImage.Format_ARGB32)
+c5 = vp_img.pixelColor(2, 2)
+assert (c5.red(), c5.green(), c5.blue()) == (236, 236, 236), \
+    f"视口背景应为 #ECECEC，实际 ({c5.red()}, {c5.green()}, {c5.blue()})"
+print("5b. 视口淡灰背景 #ECECEC 实测生效 ✓")
+
 widget.close()
 print("\n全部冒烟测试通过")

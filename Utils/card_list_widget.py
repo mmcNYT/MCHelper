@@ -1,9 +1,9 @@
 # utils/card_list_widget.py
 # 物品卡片列表控件：横排展示已添加的物品卡片
 # 交互：清空按钮全清 / Del 键删除 / 再次点击取消选中 / 拖动交换位置
-from PySide6.QtWidgets import QListWidget, QListView, QListWidgetItem
+from PySide6.QtWidgets import QListWidget, QListView, QListWidgetItem, QWidget
 from PySide6.QtCore import Qt, Signal, QPoint, QMimeData, QTimer
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QDrag, QImage, QPainter, QPixmap, QColor, QPalette, QRegion
 
 from Utils.enchanted_item_card import EnchantedItemCard
 
@@ -46,6 +46,12 @@ class CardListWidget(QListWidget):
         self.setAcceptDrops(True)
         self.setSelectionMode(QListWidget.SingleSelection)
         self.setContextMenuPolicy(Qt.NoContextMenu)
+        # 视口画布淡灰背景（QListView 以 Base 角色承色，实测改 Window 无效）
+        vp = self.viewport()
+        pal = vp.palette()
+        pal.setColor(QPalette.Base, QColor("#ECECEC"))
+        vp.setPalette(pal)
+        vp.setAutoFillBackground(True)
         # 鼠标按下状态（点击取消选中 / 启动拖动共用）
         self._pressed_item = None
         self._press_pos = QPoint()
@@ -150,8 +156,20 @@ class CardListWidget(QListWidget):
         drag.setMimeData(mime)
         widget = self.itemWidget(item)
         if widget is not None:
-            drag.setPixmap(widget.grab())  # 卡片快照跟随鼠标
+            drag.setPixmap(self._transparent_snapshot(widget))  # 透明底卡片快照跟随鼠标
         drag.exec_(Qt.MoveAction)  # 阻塞至松手，期间 dropEvent 被回调
+
+    @staticmethod
+    def _transparent_snapshot(widget) -> QPixmap:
+        """渲染控件透明背景快照（grab() 会强制填充不透明底色，拖动悬浮时生硬）"""
+        img = QImage(widget.size(), QImage.Format_ARGB32_Premultiplied)
+        img.fill(Qt.transparent)
+        painter = QPainter(img)
+        # 仅 DrawChildren：跳过窗口背景填充，保留卡片周边透明
+        widget.render(painter, QPoint(0, 0), QRegion(),
+                      QWidget.RenderFlag.DrawChildren)
+        painter.end()
+        return QPixmap.fromImage(img)
 
     def dragEnterEvent(self, event):
         """只接受携带卡片交换 MIME 的拖动"""
