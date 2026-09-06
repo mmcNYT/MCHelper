@@ -38,8 +38,8 @@ _SAME_POSITION_EPS = 0.5
 _COMPASS = ("南", "西南", "西", "西北", "北", "东北", "东", "东南")
 
 
-def parse_f3c_command(text: str) -> tuple[float, float, float]:
-    """从 F3+C 复制的命令文本中解析出 (x, z, yaw)。
+def _parse_f3c_numbers(text: str) -> tuple[float, float, float, float, float]:
+    """从 F3+C 复制的命令文本中解析出末尾 5 个数字 (x, y, z, yaw, pitch)。
 
     不依赖命令前缀的完整格式（新旧版本的命令前缀不同），而是抓取文本中
     所有数字、取最后 5 个，按 F3+C 的固定顺序解释为 x y z yaw pitch，
@@ -49,7 +49,7 @@ def parse_f3c_command(text: str) -> tuple[float, float, float]:
         text: 粘贴进输入框的原始文本。
 
     Returns:
-        (x, z, yaw)：水平坐标与水平视角（度，未规范化）。
+        (x, y, z, yaw, pitch) 五元组。
 
     Raises:
         ValueError: 文本为空，或其中数字不足 5 个。
@@ -63,8 +63,43 @@ def parse_f3c_command(text: str) -> tuple[float, float, float]:
             "而 F3+C 复制的命令应包含 5 个数字（x y z yaw pitch），"
             f"示例：/execute in minecraft:overworld run tp @s 123.45 64.0 -678.9 120.5 15.0"
         )
-    x, _y, z, yaw, _pitch = numbers[-5:]
+    x, y, z, yaw, pitch = numbers[-5:]
+    return x, y, z, yaw, pitch
+
+
+def parse_f3c_command(text: str) -> tuple[float, float, float]:
+    """从 F3+C 复制的命令文本中解析出 (x, z, yaw)。
+
+    Args:
+        text: 粘贴进输入框的原始文本。
+
+    Returns:
+        (x, z, yaw)：水平坐标与水平视角（度，未规范化）。
+
+    Raises:
+        ValueError: 文本为空，或其中数字不足 5 个。
+    """
+    x, _y, z, yaw, _pitch = _parse_f3c_numbers(text)
     return x, z, yaw
+
+
+def parse_f3c_command_full(text: str) -> tuple[float, float, float, float]:
+    """从 F3+C 复制的命令文本中解析出 (x, y, z, yaw)。
+
+    与 parse_f3c_command 相同的解析规则，但额外保留 y 坐标，
+    供生成传送命令时使用。
+
+    Args:
+        text: 粘贴进输入框的原始文本。
+
+    Returns:
+        (x, y, z, yaw)：三维坐标与水平视角（度，未规范化）。
+
+    Raises:
+        ValueError: 文本为空，或其中数字不足 5 个。
+    """
+    x, y, z, yaw, _pitch = _parse_f3c_numbers(text)
+    return x, y, z, yaw
 
 
 def looks_like_f3c(text: str) -> bool:
@@ -75,7 +110,8 @@ def looks_like_f3c(text: str) -> bool:
       ``/execute in minecraft:overworld run tp @s``；
     - 前缀之后至少有 5 个数字（x y z yaw pitch）；
     - 文本长度不超过 200 字符（F3+C 命令约 90 字符）。
-    - 例：/execute in minecraft:overworld run tp @s 123.45 64.0 -678.9 120.5 16.0
+    - 例：/execute in minecraft:overworld run tp @s 78.77 -42.60 177.92 418.35 -31.05
+         /execute in minecraft:overworld run tp @s 62.00 -55.26 287.00 60.90 -29.70
 
     其他维度（the_nether/the_end）的 F3+C 复制不会被识别——
     末影之眼在这些维度不朝要塞飞，本工具用不上。

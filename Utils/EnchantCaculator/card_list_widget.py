@@ -288,8 +288,14 @@ class CardListWidget(QListWidget):
         return True
 
     def _rebuild_card_at_item(self, item, data: dict):
-        """在指定条目上按数据重建卡片控件（条目仍存在时）"""
+        """在指定条目上按数据重建卡片控件（条目仍存在时）
+
+        重建后必须同步更新 item 的 sizeHint：编辑可能增删附魔行，
+        新卡片高度与旧 sizeHint 不同；若沿用旧值，视图按旧高度裁剪
+        卡片，附魔文字与底边框会被切掉（编辑加附魔后底部溢出的根因）。
+        """
         if self.row(item) < 0:
             return  # 条目已被移除（如重建前又删除/清空），放弃重建
         card = EnchantedItemCard(data["item_name"], data["enchants"])
+        item.setSizeHint(card.sizeHint())
         self.setItemWidget(item, card)

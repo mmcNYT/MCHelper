@@ -17,6 +17,7 @@ from Utils.StrongHoldFinder.stronghold_math import (  # noqa: E402
     intersect_rays,
     normalize_yaw,
     parse_f3c_command,
+    parse_f3c_command_full,
     yaw_to_compass,
     yaw_to_direction,
 )
@@ -38,6 +39,10 @@ def yaw_towards(from_x, from_z, to_x, to_z):
 cmd = "/execute in minecraft:overworld run tp @s 123.45 64.00 -678.90 120.5 15.0"
 x, z, yaw = parse_f3c_command(cmd)
 check("解析标准 F3+C 命令", (x, z, yaw) == (123.45, -678.90, 120.5), f"{x},{z},{yaw}")
+
+fx, fy, fz, fyaw = parse_f3c_command_full(cmd)
+check("解析完整坐标（含 y）", (fx, fy, fz, fyaw) == (123.45, 64.00, -678.90, 120.5),
+      f"{fx},{fy},{fz},{fyaw}")
 
 x, z, yaw = parse_f3c_command("123.45 64 -678.9 120.5 15.5")
 check("解析手打纯数字", (x, z, yaw) == (123.45, -678.9, 120.5), f"{x},{z},{yaw}")
@@ -139,6 +144,21 @@ try:
           bool(m) and abs(float(m.group(1)) - 300) < 0.5 and abs(float(m.group(2)) + 200) < 0.5,
           out.replace("\n", " | ")[:150])
 
+    # 下界交通坐标（÷8）与传送命令（y 取两观测点较大值）
+    m_nether = re.search(r"下界交通（主世界坐标/8）：X = ([-\d.]+)，Z = ([-\d.]+)", out)
+    m_tp = re.search(r"传送命令（已复制到剪贴板）：(/tp @s [-\d. ]+)", out)
+    check("下界交通坐标正确",
+          bool(m_nether) and abs(float(m_nether.group(1)) - 37.5) < 0.2
+          and abs(float(m_nether.group(2)) + 25.0) < 0.2,
+          out.replace("\n", " | ")[:200])
+    check("传送命令已生成",
+          bool(m_tp) and abs(float(m_tp.group(1).split()[2]) - 300) < 0.5
+          and abs(float(m_tp.group(1).split()[4]) + 200) < 0.5,
+          m_tp.group(1) if m_tp else "")
+    check("传送命令已复制到剪贴板",
+          QApplication.clipboard().text() == m_tp.group(1) if m_tp else False,
+          QApplication.clipboard().text())
+
     # 错误输入 → 计算失败提示
     w.coordinate1Edit.setText("随便写的文字")
     w.doCaculate.click()
@@ -224,12 +244,19 @@ try:
     m_auto = re.search(r"交点（要塞水平位置）：X = ([-\d.]+)，Z = ([-\d.]+)", out)
     notifs = NotificationWidget._instances
     # cmd_a/cmd_b 的 yaw 是任意值，理论交点应为 (26.3, 42.2)（手算 t1≈27.06 验证）
+    # y 取两观测点较大值（65.0）
     check("远距自动计算并弹通知",
           w.coordinate2Edit.text() == cmd_b and bool(m_auto)
           and abs(float(m_auto.group(1)) - 26.3) < 0.5
           and abs(float(m_auto.group(2)) - 42.2) < 0.5
-          and len(notifs) >= 1 and "要塞位置" in notifs[-1].message_label.text(),
+          and len(notifs) >= 1 and "要塞位置" in notifs[-1].message_label.text()
+          and "下界交通" in notifs[-1].message_label.text()
+          and "已复制到剪贴板" in notifs[-1].message_label.text(),
           out.replace("\n", " | ")[:150])
+    # 自动计算后剪贴板应为传送命令（y = max(64.0, 65.0) = 65.0）
+    check("自动计算后剪贴板为传送命令",
+          QApplication.clipboard().text() == "/tp @s 26.3 65.0 42.2",
+          QApplication.clipboard().text())
 
     # 两框皆有内容 + 新内容 → 不覆盖
     QApplication.clipboard().setText(cmd_c)
@@ -349,6 +376,24 @@ try:
     w.closeEvent(QCloseEvent())
     check("closeEvent 停止监听线程",
           w._clipboard_thread.isFinished() or w._clipboard_thread.wait(1000))
+
+    # ---------- 10. aboutToQuit 退出兜底（托盘退出崩溃回归） ----------
+    # 场景：右键托盘图标「关闭程序」走 QApplication.quit()，不触发 closeEvent；
+    # 修复前监听线程仍在运行就被析构，进程以 0xC0000409 崩溃退出。
+    # 重新启动线程后发出 aboutToQuit 信号（等价于应用退出前），线程应被停止。
+    w._clipboard_thread.start()
+    time.sleep(0.4)
+    check("回归：重新启动线程后确实在运行", w._clipboard_thread.isRunning())
+    app.aboutToQuit.emit()  # 直接发信号，模拟应用退出前的通知
+    check("aboutToQuit 后线程已停止",
+          w._clipboard_thread.isFinished() or w._clipboard_thread.wait(1000))
+    # 重复调用应无副作用（closeEvent 与 aboutToQuit 可能都触发）
+    try:
+        w._stop_clipboard_thread()
+        w._stop_clipboard_thread()
+        check("重复调用停止无副作用", True)
+    except Exception as e:  # noqa: BLE001
+        check("重复调用停止无副作用", False, repr(e))
 except Exception as e:  # noqa: BLE001
     os_ok2 = f"{type(e).__name__}: {e}"
     check("UI 自动填入全流程", False, os_ok2)

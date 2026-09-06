@@ -12,19 +12,27 @@ class NotificationWidget(QWidget):
     - 多条通知从下往上堆叠（间距 10px）
     - 显示 duration 毫秒后自动淡出并销毁
     - 通过类方法 NotificationWidget.Show(title, message, duration) 快捷调用
+    - 可选 title_size/message_size/padding 自定义字体与内边距
+      （不传则用默认值，窗口随字体/内边距自适应变大）
 
     使用场景（已接入）：
     - AutoBackUpWidget：备份完成/部分完成、监测进程启动时弹出
+    - StrongHoldFinderWidget：要塞定位完成时弹出（大字号）
     """
     _instances = []  # 类级列表：记录当前所有存活的通知实例（用于多通知堆叠排布）
 
-    def __init__(self, title: str, message: str, duration: int = 3000, parent=None):
+    def __init__(self, title: str, message: str, duration: int = 3000,
+                 title_size: int = 13, message_size: int = 12,
+                 padding: tuple = (15, 12, 15, 12), parent=None):
         """初始化通知窗口
 
         参数：
             title: 通知标题（加粗白字）
             message: 通知正文（支持自动换行）
             duration: 通知显示时长（毫秒），超时后开始淡出，默认 3000ms
+            title_size: 标题字号（px），默认 13
+            message_size: 正文字号（px），默认 12
+            padding: 内容内边距（左, 上, 右, 下），默认 (15, 12, 15, 12)
         """
         super().__init__(parent)
         self.duration = duration
@@ -41,7 +49,8 @@ class NotificationWidget(QWidget):
         # 2. 主框架样式（深色圆角容器 + 标题/正文字体样式）
         self.frame = QFrame(self)
         self.frame.setObjectName("NotificationFrame")
-        self.frame.setStyleSheet("""
+        self.frame.setStyleSheet(
+            """
             QFrame#NotificationFrame {
                 background-color: rgba(40, 40, 40, 220);
                 border-radius: 8px;
@@ -50,17 +59,19 @@ class NotificationWidget(QWidget):
             QLabel#TitleLabel {
                 color: #ffffff;
                 font-weight: bold;
-                font-size: 13px;
+                font-size: __TITLE_SIZE__px;
             }
             QLabel#MessageLabel {
                 color: #e0e0e0;
-                font-size: 12px;
+                font-size: __MESSAGE_SIZE__px;
             }
-        """)
+            """.replace("__TITLE_SIZE__", str(title_size))
+              .replace("__MESSAGE_SIZE__", str(message_size))
+        )
 
         # 3. 框架内垂直布局：标题在上、正文在下
         layout = QVBoxLayout(self.frame)
-        layout.setContentsMargins(15, 12, 15, 12)  # 内边距
+        layout.setContentsMargins(*padding)        # 内边距（可自定义）
         layout.setSpacing(4)                       # 标题与正文间距
 
         self.title_label = QLabel(title)           # 标题标签
@@ -151,27 +162,29 @@ class NotificationWidget(QWidget):
                 widget.move(base_x, base_y - offset)
 
     @staticmethod
-    def Show(title: str, message: str, duration: int = 3000):
+    def Show(title: str, message: str, duration: int = 3000,
+             title_size: int = 13, message_size: int = 12,
+             padding: tuple = (15, 12, 15, 12)):
         """静态方法：弹出通知（必须在主线程调用）
 
         功能说明：
         - 创建通知控件实例、显示窗口并返回实例引用
         - 供其他模块静态调用（如 NotificationWidget.Show("备份完成", "...", 3000)）
+        - 可选 title_size/message_size/padding 自定义外观，不传则用默认值
         - 注意：Qt 控件必须在主线程创建/操作，子线程需通过信号转发到主线程调用
 
         参数：
             title: 通知标题
             message: 通知正文
             duration: 显示时长（毫秒），默认 3000ms
+            title_size: 标题字号（px），默认 13
+            message_size: 正文字号（px），默认 12
+            padding: 内容内边距（左, 上, 右, 下），默认 (15, 12, 15, 12)
 
         返回：
             widget: 创建的通知实例（便于外部跟踪或主动关闭）
         """
-        # 确保在主线程
-        # if QApplication.instance().thread() != QThread.currentThread():
-        #     # 如果不在主线程，建议通过信号触发，这里简单警告
-        #     print("警告：通知必须在主线程调用，请使用信号转发。")
-        #     return
-        widget = NotificationWidget(title, message, duration)
+        widget = NotificationWidget(title, message, duration,
+                                    title_size, message_size, padding)
         widget.show()
         return widget

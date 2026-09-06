@@ -13,11 +13,16 @@
 - 距上次自动填入不足 8 秒，或与上次自动填入位置相距不足 10 格（1 格 = 1 米）
   的新观测会被忽略——避免站在原地对末影之眼反复按 F3+C 时来回覆盖；
 - 点「清除」会重置防抖状态；需要覆盖时可手动粘贴或清除后重新观测。
+
+计算完成后：
+- 结果同时给出主世界要塞坐标与下界交通坐标（主世界坐标 / 8）；
+- 生成一条可粘贴到聊天栏的 /tp 传送命令并自动复制到剪贴板。
 """
 
 import math
 import time
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .tool_base import BaseToolWidget
@@ -29,6 +34,7 @@ from Utils.StrongHoldFinder.stronghold_math import (
     looks_like_f3c,
     normalize_yaw,
     parse_f3c_command,
+    parse_f3c_command_full,
     yaw_to_compass,
 )
 
@@ -37,6 +43,11 @@ _AUTO_FILL_COOLDOWN_S = 8.0     # 坐标一两次自动填入的最小间隔（�
 _AUTO_FILL_MIN_DISTANCE = 10.0  # 坐标一自动填入与上次位置的最小距离（格）
 _AUTO_CALC_MIN_DISTANCE = 30.0  # 两观测点相距达到该值（格）时自动计算
 _RESULT_NOTIFY_DURATION_MS = 6000  # 自动计算通知的显示时长
+
+# 通知外观：定位结果需要醒目，字体与内边距均大于默认值（窗口自适应变大）
+_NOTIFY_TITLE_SIZE = 16
+_NOTIFY_MESSAGE_SIZE = 14
+_NOTIFY_PADDING = (20, 16, 20, 16)
 
 
 class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
@@ -48,6 +59,8 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         # 防抖状态：上次自动填入坐标一的时刻与位置（None 表示尚无记录）
         self._last_auto_fill_time: float | None = None
         self._last_auto_fill_pos: tuple[float, float] | None = None
+        # 最近一次计算的传送命令（用于结果展示）
+        self._tp_command = ""
         # 打开工具时先给出使用说明
         self.informationBrowser.setPlainText(
             "使用方法：\n"
@@ -56,8 +69,8 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
             "   也可以手动粘贴或直接编辑输入框；8 秒内或与上次位置相距不足 10 格的\n"
             "   重复观测会被自动忽略）；\n"
             "3. 走到远处再对准一次；两观测点相距 30 格以上时会自动计算，\n"
-            "   并在屏幕右下角弹出要塞坐标通知；\n"
-            "4. 相距不足 30 格时可走远些重新观测，或直接点击「计算」。"
+            "   并在屏幕右下角弹出要塞坐标通知（含下界交通坐标）；\n"
+            "4. 计算完成后传送命令会自动复制到剪贴板，可直接粘贴到游戏聊天栏。"
         )
         # 按钮 → 槽
         self.doCaculate.clicked.connect(self._on_do_caculate_clicked)
@@ -68,11 +81,23 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         self._clipboard_thread.clipboard_changed.connect(self._on_clipboard_changed)
         self._clipboard_thread.start()
 
-    def closeEvent(self, event) -> None:
-        """主窗口关闭时停止剪贴板监听线程。"""
+        # 退出兜底：Qt 只给顶层窗口发 closeEvent，不会传给作为子控件的工具页，
+        # 托盘菜单「关闭程序」等路径也不会触发窗口 closeEvent；
+        # 若监听线程在仍运行时被析构，程序会以 0xC0000409 崩溃退出。
+        # 因此这里挂接应用级 aboutToQuit 信号，保证任何退出路径都会先停线程。
+        QApplication.instance().aboutToQuit.connect(self._stop_clipboard_thread)
+
+    def _stop_clipboard_thread(self) -> None:
+        """停止剪贴板监听线程（应用退出前调用；重复调用无副作用）。"""
+        if self._clipboard_thread is None:
+            return
         self._clipboard_thread.requestInterruption()
         self._clipboard_thread.quit()
         self._clipboard_thread.wait(1000)
+
+    def closeEvent(self, event) -> None:
+        """窗口关闭时停止剪贴板监听线程（aboutToQuit 的双保险）。"""
+        self._stop_clipboard_thread()
         super().closeEvent(event)
 
     # ---------- 实现基类接口 ----------
@@ -158,8 +183,13 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
             return
         NotificationWidget.Show(
             "要塞定位完成",
-            f"要塞位置：X = {result['x']:.1f}，Z = {result['z']:.1f}",
+            f"要塞位置：X = {result['x']:.1f}，Z = {result['z']:.1f}\n"
+            f"下界交通：X = {result['x'] / 8:.1f}，Z = {result['z'] / 8:.1f}\n"
+            "传送命令已复制到剪贴板",
             _RESULT_NOTIFY_DURATION_MS,
+            title_size=_NOTIFY_TITLE_SIZE,
+            message_size=_NOTIFY_MESSAGE_SIZE,
+            padding=_NOTIFY_PADDING,
         )
 
     def _on_do_caculate_clicked(self) -> None:
@@ -167,7 +197,11 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         self._compute_and_show()
 
     def _compute_and_show(self) -> dict | None:
-        """执行计算并把结果写入信息框。
+        """执行计算、把结果写入信息框，并把传送命令复制到剪贴板。
+
+        复制内容为可粘贴到聊天栏的传送命令：
+            ``/tp @s <要塞x> <y> <要塞z>``
+        y 取两观测点 y 的较大值（游戏内实际 y 以到达时为准）。
 
         Returns:
             成功时返回交点结果 dict（x/z/t1/t2/dist1/dist2），失败返回 None。
@@ -181,14 +215,18 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
             )
             return None
         try:
-            x1, z1, yaw1 = parse_f3c_command(text1)
-            x2, z2, yaw2 = parse_f3c_command(text2)
+            x1, y1, z1, yaw1 = parse_f3c_command_full(text1)
+            x2, y2, z2, yaw2 = parse_f3c_command_full(text2)
             result = intersect_rays(x1, z1, yaw1, x2, z2, yaw2)
         except ValueError as exc:
             self.informationBrowser.setPlainText(f"计算失败：{exc}")
             return None
+        # 生成传送命令并复制到剪贴板（y 取两观测点较大值）
+        self._tp_command = f"/tp @s {result['x']:.1f} {max(y1, y2):.1f} {result['z']:.1f}"
+        QApplication.clipboard().setText(self._tp_command)
         self.informationBrowser.setPlainText(
-            self._format_result(result, x1, z1, yaw1, x2, z2, yaw2)
+            self._format_result(result, x1, y1, z1, yaw1, x2, y2, z2, yaw2,
+                                self._tp_command)
         )
         return result
 
@@ -196,21 +234,24 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
     @staticmethod
     def _format_result(
         result: dict,
-        x1: float, z1: float, yaw1: float,
-        x2: float, z2: float, yaw2: float,
+        x1: float, y1: float, z1: float, yaw1: float,
+        x2: float, y2: float, z2: float, yaw2: float,
+        tp_command: str = "",
     ) -> str:
-        """把交点结果整理成展示文本，附带可信度警示与使用提示。"""
+        """把交点结果整理成展示文本，附带下界交通坐标与传送命令。"""
         lines = [
             "———— 要塞定位结果 ————",
             "",
-            f"观测一：X = {x1:.1f}，Z = {z1:.1f}，"
+            f"观测一：X = {x1:.1f}，Y = {y1:.1f}，Z = {z1:.1f}，"
             f"视线朝向 {yaw_to_compass(yaw1)}（yaw = {normalize_yaw(yaw1):.1f}°）",
-            f"观测二：X = {x2:.1f}，Z = {z2:.1f}，"
+            f"观测二：X = {x2:.1f}，Y = {y2:.1f}，Z = {z2:.1f}，"
             f"视线朝向 {yaw_to_compass(yaw2)}（yaw = {normalize_yaw(yaw2):.1f}°）",
             "",
             f"交点（要塞水平位置）：X = {result['x']:.1f}，Z = {result['z']:.1f}",
-            f"距观测一：约 {result['dist1']:.1f} 格",
-            f"距观测二：约 {result['dist2']:.1f} 格",
+            f"下界交通（主世界坐标/8）：X = {result['x'] / 8:.1f}，Z = {result['z'] / 8:.1f}",
+            "",
+            f"传送命令（已复制到剪贴板）：{tp_command}",
+            "",
         ]
         warnings = []
         if result["t1"] < 0:
@@ -218,10 +259,9 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         if result["t2"] < 0:
             warnings.append("交点位于观测二的视线反方向，当时准星可能没有对准末影之眼，建议重新观测")
         if warnings:
-            lines.append("")
             lines.extend(f"注意：{w}" for w in warnings)
+            lines.append("")
         lines += [
-            "",
             "提示：末影之眼在距要塞约 20 格内会悬停下坠，近距离观测误差大；",
             "两次观测点相距越远、瞄准越准，交点越可靠。",
         ]
