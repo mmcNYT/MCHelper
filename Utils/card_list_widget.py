@@ -73,6 +73,42 @@ class CardListWidget(QListWidget):
         """读取卡片项上记录的附魔 ID 列表"""
         return item.data(self.CARD_IDS_ROLE) or []
 
+    # ---------- 数据读取 / 附魔移除（供跨卡片冲突解决使用） ----------
+    def all_card_data(self) -> list:
+        """读取全部卡片数据包列表 [{"item_name", "enchants": [...]}, ...]"""
+        result = []
+        for i in range(self.count()):
+            data = self.item(i).data(self.CARD_DATA_ROLE)
+            if data:
+                result.append(data)
+        return result
+
+    def remove_enchants_everywhere(self, removals: dict):
+        """按物品名批量从卡片移除附魔并重绘受影响卡片
+
+        参数：
+            removals: {物品名: [要移除的附魔 ID, ...]}
+        """
+        for i in range(self.count()):
+            item = self.item(i)
+            data = item.data(self.CARD_DATA_ROLE)
+            if not data:
+                continue
+            to_remove = removals.get(data["item_name"], [])
+            if not to_remove:
+                continue
+            # 同一物品多张卡片同样处理（每张都移除对应附魔）
+            removed_set = set(to_remove)
+            kept = [e for e in data["enchants"] if e["id"] not in removed_set]
+            if len(kept) == len(data["enchants"]):
+                continue
+            new_data = {"item_name": data["item_name"], "enchants": kept}
+            item.setData(self.CARD_DATA_ROLE, new_data)
+            item.setData(self.CARD_IDS_ROLE, [e["id"] for e in kept])
+            # 走延迟重建机制（同 _move_item：规避重绑与销毁的时序冲突）
+            QTimer.singleShot(
+                0, lambda it=item, d=new_data: self._rebuild_card_at_item(it, d))
+
     # ---------- 清空 ----------
     def clear_cards(self):
         """清空全部物品卡片（外部清空按钮调用），发射 cardsCleared 信号"""

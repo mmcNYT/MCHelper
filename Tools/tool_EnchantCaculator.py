@@ -2,6 +2,8 @@ from .tool_base import BaseToolWidget
 from Utils.choose_items import ChooseItemsWindow
 from CodesUI.EnchantCaculator import Ui_EnchantCaculator
 from Utils.card_list_widget import CardListWidget
+from Utils.conflict_resolver import find_conflict_clusters, ConflictResolveDialog
+from Utils.enchant_data_manager import DataManager
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
 from PySide6.QtWidgets import QFileDialog
 
@@ -35,7 +37,6 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         win.exec()
         # exec() 返回后读取打包数据（未点确认时 selected_data 为 None）
         self.selected_stuff = win.selected_data
-        print(self.selected_stuff)
         # 确认后把物品卡片（图标+附魔方框）添加到展示列表
         if self.selected_stuff:
             self.add_item_card(self.selected_stuff)
@@ -49,3 +50,30 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
                   {"item_name": str, "enchants": [{"id","name","level"}, ...]}
         """
         self.chosenItemList.add_card(data)
+        self.resolve_cross_card_conflicts()
+
+    def resolve_cross_card_conflicts(self):
+        """检测全部卡片间的互斥附魔冲突，弹窗让用户选择最终保留哪个
+
+        流程：簇检测（无冲突直接返回）→ 模态对话框逐簇单选 →
+        确定后把未保留的附魔从对应卡片移除重绘；「暂不处理」保持现状。
+        """
+        clusters = find_conflict_clusters(
+            self.chosenItemList.all_card_data(), DataManager())
+        if not clusters:
+            return
+        dlg = ConflictResolveDialog(clusters, self)
+        if dlg.exec() != ConflictResolveDialog.DialogCode.Accepted:
+            return  # 暂不处理：卡片维持现状，下次添加物品会再次弹窗提醒
+        choices = dlg.choices()
+        removals = {}  # {物品名: [要移除的附魔 ID, ...]}
+        for ci, members in enumerate(clusters):
+            keep_id = choices.get(ci)
+            for m in members:
+                if m["id"] == keep_id:
+                    continue
+                for item_name in m["items"]:
+                    removals.setdefault(item_name, [])
+                    if m["id"] not in removals[item_name]:
+                        removals[item_name].append(m["id"])
+        self.chosenItemList.remove_enchants_everywhere(removals)
