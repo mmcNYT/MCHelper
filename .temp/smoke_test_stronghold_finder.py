@@ -156,6 +156,134 @@ except Exception as e:  # noqa: BLE001
     os_ok = f"{type(e).__name__}: {e}"
     check("UI 全流程", False, os_ok)
 
+# ---------- 6. looks_like_f3c 预判（剪贴板自动填入门槛） ----------
+from Utils.StrongHoldFinder.stronghold_math import looks_like_f3c  # noqa: E402
+
+check("预判：标准 F3+C 命令", looks_like_f3c(cmd) is True)
+check("预判：手打纯数字", looks_like_f3c("123.45 64 -678.9 120.5 15.5") is True)
+check("预判：无小数点拒绝", looks_like_f3c("1 2 3 4 5") is False)
+check("预判：数字太少拒绝", looks_like_f3c("价格 19.99 元") is False)
+check("预判：版本号文本拒绝", looks_like_f3c("version 1.2.3 build 4567") is False)
+check("预判：纯文字拒绝", looks_like_f3c("hello world") is False)
+check("预判：空文本拒绝", looks_like_f3c("") is False)
+check("预判：超长文本拒绝", looks_like_f3c("1.1 " * 60) is False)
+
+# ---------- 7. UI 自动填入（剪贴板 → 首个空输入框） ----------
+os_ok2 = ui_detail2 = ""
+try:
+    import time
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    # 先把剪贴板换成无害文本，等真实监听线程消化掉这次变化，避免干扰后续断言
+    QApplication.clipboard().setText("无数字的占位文本")
+    time.sleep(0.5)
+    for _ in range(25):
+        app.processEvents()
+        time.sleep(0.02)
+    w._on_clear_coordinates_clicked()
+
+    cmd_a = "/execute in minecraft:overworld run tp @s 10.50 64.00 20.25 -35.7 12.0"
+    cmd_b = "/execute in minecraft:overworld run tp @s 210.75 65.00 -85.50 55.3 8.0"
+    cmd_c = "/execute in minecraft:overworld run tp @s 1.00 64.00 2.00 90.0 0.0"
+
+    # 复制第一条 → 槽触发 → 填入坐标一
+    QApplication.clipboard().setText(cmd_a)
+    w._on_clipboard_changed()
+    check("自动填入坐标一", w.coordinate1Edit.text() == cmd_a and w.coordinate2Edit.text() == "")
+
+    # 同一文本再次触发 → 不重复处理
+    w._on_clipboard_changed()
+    check("同一文本不重复填入", w.coordinate2Edit.text() == "")
+
+    # 非 F3+C 内容 → 不填入
+    QApplication.clipboard().setText("普通文本 123.45")
+    w._on_clipboard_changed()
+    check("非 F3+C 内容不填入", w.coordinate2Edit.text() == "")
+
+    # 复制第二条 → 填入坐标二
+    QApplication.clipboard().setText(cmd_b)
+    w._on_clipboard_changed()
+    check("自动填入坐标二", w.coordinate2Edit.text() == cmd_b
+          and "计算" in w.informationBrowser.toPlainText())
+
+    # 两框皆有内容 + 新内容 → 不覆盖
+    QApplication.clipboard().setText(cmd_c)
+    w._on_clipboard_changed()
+    check("两框已满不覆盖", w.coordinate1Edit.text() == cmd_a and w.coordinate2Edit.text() == cmd_b)
+
+    # 自动填入的数据可直接计算
+    w.doCaculate.click()
+    check("自动填入后可直接计算", "要塞定位结果" in w.informationBrowser.toPlainText())
+
+    # 清除按钮
+    w.clearCoordinates.click()
+    check("清除按钮生效",
+          w.coordinate1Edit.text() == "" and w.coordinate2Edit.text() == ""
+          and w.informationBrowser.toPlainText() == "")
+
+    # ---------- 8. 真实监听线程端到端 ----------
+    # offscreen 平台的 Qt 剪贴板不一定写系统剪贴板，故用 ctypes 直接写系统剪贴板触发
+    import ctypes
+
+    def set_system_clipboard_text(s: str) -> bool:
+        user32 = ctypes.WinDLL("user32")
+        kernel32 = ctypes.WinDLL("kernel32")
+        # 64 位下句柄是 64 位，必须显式声明，否则默认按 32 位截断
+        user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+        user32.OpenClipboard.restype = ctypes.c_bool
+        user32.EmptyClipboard.restype = None
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        user32.CloseClipboard.restype = None
+        kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        if not user32.OpenClipboard(None):
+            return False
+        try:
+            user32.EmptyClipboard()
+            data = s.encode("utf-16-le") + b"\x00\x00"
+            h = kernel32.GlobalAlloc(0x0002, len(data))  # GMEM_MOVEABLE
+            p = kernel32.GlobalLock(h)
+            if not p:
+                return False
+            ctypes.memmove(p, data, len(data))
+            kernel32.GlobalUnlock(h)
+            user32.SetClipboardData(13, h)  # CF_UNICODETEXT
+            return True
+        finally:
+            user32.CloseClipboard()
+
+    from Threads.task_StrongHoldFinder import ClipboardListenerThread
+
+    received = []
+    listener = ClipboardListenerThread()
+    listener.clipboard_changed.connect(lambda: received.append(1))
+    listener.start()
+    time.sleep(0.4)  # 记录基准序号
+    written = set_system_clipboard_text(cmd_a)
+    for _ in range(100):
+        app.processEvents()
+        time.sleep(0.02)
+    listener.requestInterruption()
+    listener.quit()
+    check("真实线程检测到剪贴板变化", written and len(received) >= 1,
+          f"written={written}, received={received}")
+    check("线程可正常停止", listener.wait(1000) and listener.isFinished())
+
+    # ---------- 9. closeEvent 停止工具内的监听线程 ----------
+    w.closeEvent(QCloseEvent())
+    check("closeEvent 停止监听线程",
+          w._clipboard_thread.isFinished() or w._clipboard_thread.wait(1000))
+except Exception as e:  # noqa: BLE001
+    os_ok2 = f"{type(e).__name__}: {e}"
+    check("UI 自动填入全流程", False, os_ok2)
+
 # ---------- 输出结果 ----------
 lines = []
 passed = sum(1 for _, ok, _ in RESULTS if ok)

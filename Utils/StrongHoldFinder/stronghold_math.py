@@ -61,6 +61,31 @@ def parse_f3c_command(text: str) -> tuple[float, float, float]:
     return x, z, yaw
 
 
+def looks_like_f3c(text: str) -> bool:
+    """判断剪贴板文本是否像 F3+C 复制的内容（剪贴板自动填入的预判门槛）。
+
+    判据（故意保守，避免把网页/文档里复制的普通数字误填进坐标框）：
+    - 文本非空且长度不超过 200 字符（F3+C 命令约 90 字符）；
+    - 数字个数 5~8 个（标准命令 5 个；自定义维度名等可能额外带数字）；
+    - 文本中至少含一个小数点（F3+C 的坐标与视角恒带小数，纯整数列表不算）。
+
+    Args:
+        text: 剪贴板中的原始文本。
+
+    Returns:
+        True 表示很可能是 F3+C 内容，可以自动填入坐标框。
+    """
+    if not text:
+        return False
+    text = text.strip()
+    if not text or len(text) > 200:
+        return False
+    if "." not in text:
+        return False
+    count = len(_NUMBER_RE.findall(text))
+    return 5 <= count <= 8
+
+
 def yaw_to_direction(yaw: float) -> tuple[float, float]:
     """把 Minecraft 的 yaw 角转成 XZ 平面上的单位方向向量 (dx, dz)。
 
