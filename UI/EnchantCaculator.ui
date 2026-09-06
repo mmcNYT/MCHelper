@@ -23,12 +23,6 @@
     </rect>
    </property>
    <layout class="QGridLayout" name="gridLayout">
-    <item row="8" column="0" colspan="3">
-     <widget class="QListWidget" name="realSteps"/>
-    </item>
-    <item row="1" column="0" colspan="3">
-     <widget class="QListWidget" name="chosenItemList"/>
-    </item>
     <item row="5" column="0">
      <widget class="QPushButton" name="addItems">
       <property name="text">
@@ -49,6 +43,26 @@
        <string>开始计算</string>
       </property>
      </widget>
+    </item>
+    <item row="5" column="3">
+     <widget class="QComboBox" name="displayMode">
+      <item>
+       <property name="text">
+        <string>树状图</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>步骤图</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="8" column="0" colspan="4">
+     <widget class="QListWidget" name="realSteps"/>
+    </item>
+    <item row="1" column="0" colspan="4">
+     <widget class="QListWidget" name="chosenItemList"/>
     </item>
    </layout>
   </widget>

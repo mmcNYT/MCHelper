@@ -1,0 +1,2 @@
+count=1
+type=QGraphicsTextItem has_attr=True text='hello 世界'

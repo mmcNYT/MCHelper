@@ -38,12 +38,18 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         # 开始计算按钮：计算合并所有卡片的最少经验等级与最优合成步骤
         self.startCaculate.clicked.connect(self.do_start_calculate)
 
+        # 展示模式下拉框：树状图 / 步骤图，切换时用最近方案即时重渲染
+        self.displayMode.currentIndexChanged.connect(self._on_display_mode_changed)
+
         self.selected_stuff = {}
         # 跨卡片冲突保留决策 {簇序号: 保留的附魔ID}：只影响最终合成物组成，
         # 不从卡片移除任何附魔（未保留的仍计费）；开始计算时重新检测并预选
         self.conflict_choices = {}
         # 铁砧优化器（DataManager 单例，构造开销极小）
         self._optimizer = AnvilOptimizer(DataManager())
+        # 最近一次计算成功的方案（displayMode 切换时重渲染用；含当时的数据管理器）
+        self._last_plan = None
+        self._last_dm = None
 
     # ---------- 实现基类接口 ----------
     @classmethod
@@ -120,6 +126,16 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         self.conflict_choices = choices
         return True
 
+    def _on_display_mode_changed(self, index: int):
+        """展示模式切换：树状图(0) / 步骤图(1)，用最近方案重渲染
+
+        无方案（未计算/已清空）时不动结果区，保持占位或旧图。
+        """
+        if self._last_plan is None:
+            return
+        self.realSteps.show_plan(self._last_plan, self._last_dm,
+                                 mode="steps" if index == 1 else "tree")
+
     def do_clear_cards(self):
         """清空物品：清空全部卡片 + 冲突决策清零 + 步骤图恢复占位提示
 
@@ -127,6 +143,8 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         """
         self.chosenItemList.clear_cards()
         self.conflict_choices = {}
+        self._last_plan = None
+        self._last_dm = None
         self.realSteps.clear_plan()
 
     def do_start_calculate(self):
@@ -151,4 +169,8 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         except AnvilError as e:
             QMessageBox.warning(self, "无法计算", str(e))
             return
-        self.realSteps.show_plan(plan, dm)
+        self._last_plan = plan
+        self._last_dm = dm
+        self.realSteps.show_plan(
+            plan, dm,
+            mode="steps" if self.displayMode.currentIndex() == 1 else "tree")

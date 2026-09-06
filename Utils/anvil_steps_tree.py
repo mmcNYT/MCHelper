@@ -10,19 +10,37 @@
 # - 汇合线汇入产物框的竖线上挂圆形经验标记（数字 = 该步花费等级），
 #   悬停圆标显示该步计费明细；花费 ≥40（生存模式"过于昂贵"）的步骤圆标为红色
 # - 最终合成物方框加粗描边，下方标注总花费（及过于昂贵警告）
-from PySide6.QtCore import Qt, QRectF, QPoint
+#
+# 另含"步骤图"线性模式（displayMode 下拉框切换）：每步一行依次排列，
+# 行内 = [目标框] + [牺牲框] = [产物框]，行首行末标注步骤序号与花费；
+# 其余交互（悬停 tooltip / 花费圆标 / 最终框加粗 / 总花费标注）与树模式一致。
+from PySide6.QtCore import Qt, QRectF, QPoint, QTimer
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPen,
-                           QBrush, QPixmap, QPainterPath, QCursor)
+                           QBrush, QPixmap, QPainterPath, QCursor, QRegion)
 from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsItem,
                                QGraphicsPathItem, QGraphicsSimpleTextItem,
                                QWidget)
 
 from Utils.anvil_optimizer import AnvilPlan
 from Utils.enchanted_item_card import (int_to_roman, get_item_icon_path,
-                                       TOOLTIP_BG_TOP,
-                                       TOOLTIP_BORDER_OUTER_START,
-                                       TOOLTIP_BORDER_INNER_START,
-                                       TOOLTIP_TEXT, TOOLTIP_HEADER)
+                                        TOOLTIP_BG_TOP,
+                                        TOOLTIP_BORDER_OUTER_START,
+                                        TOOLTIP_BORDER_INNER_START,
+                                        TOOLTIP_TEXT, TOOLTIP_HEADER)
+
+_GLINT_TEX_PATH = None  # 光效纹理路径（首用时解析，避免模块导入期路径依赖）
+
+
+def _glint_texture() -> QPixmap:
+    """附魔光效纹理（类外缓存，全部方框共享同一份 QPixmap；不可用返回 null）"""
+    global _GLINT_TEX_PATH
+    if _GLINT_TEX_PATH is None:
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _GLINT_TEX_PATH = os.path.join(
+            base_dir, "assets", "icons", "enchanted_glint.png")
+    pix = QPixmap(_GLINT_TEX_PATH)
+    return pix  # 文件不存在时为 null pixmap，调用方按无光效处理
 
 # ---------- 版面常量 ----------
 _BOX_W, _BOX_H = 68, 60    # 物品方框尺寸（内含 48px 图标）
@@ -30,6 +48,7 @@ _ICON = 48                 # 图标显示边长（与卡片一致）
 _LEAF_GAP = 18             # 相邻叶子框间隔
 _SIBLING_GAP = 30          # 两棵子树间隔
 _ROW_H = 88                # 行高（框高 + 连线空间）
+_STEP_GAP = 44             # 步骤图模式：框与运算符（+/=）间隔
 _MARGIN = 16               # 场景边距
 _LINE_COLOR = QColor("#1A1A1A")     # 连线/方框描边
 _TEXT_COLOR = QColor(70, 70, 70)    # 总花费文字
@@ -117,6 +136,8 @@ def _place_x(node, x_left):
 class _ItemBox(QGraphicsItem):
     """物品方框：白底黑描边矩形，内部居中放物品图标（缺图标回退物品名）。
 
+    带附魔的物品叠加游戏附魔流光（紫色流光双层反向滚动，由视图级
+    QTimer 统一驱动重绘——QGraphicsItem 非 QObject 不能自挂定时器）。
     悬停时经由所属视图弹出游戏 tooltip 风格提示（物品名 + 附魔列表）。
     left_box / right_box 仅合并节点使用，指向左（目标）/右（牺牲）子框。
     """
@@ -136,6 +157,32 @@ class _ItemBox(QGraphicsItem):
                                    Qt.KeepAspectRatio, Qt.FastTransformation)
         else:
             self._pix = QPixmap()
+        # 附魔流光：有附魔且物品纹理可用时叠加（与卡片 _GlintIcon 同视觉）
+        self._offset_fast = 0
+        self._offset_slow = 0
+        self._glint_scaled = None
+        self._clip_region = None
+        if anvil_item.enchants and not self._pix.isNull():
+            tex = _glint_texture()
+            if not tex.isNull():
+                # 预缩放到 2x 平铺尺寸（paint 每帧直接绘制，避免重复 scaled）
+                self._glint_scaled = tex.scaled(
+                    _ICON * 2, _ICON * 2,
+                    Qt.KeepAspectRatioByExpanding, Qt.FastTransformation)
+                # 剪辑区域 = 物品不透明像素区域（同卡片 _GlintIcon 的掩码法）
+                mask = self._pix.createMaskFromColor(Qt.transparent,
+                                                     Qt.MaskInColor)
+                self._clip_region = QRegion(mask)
+
+    def advance_glint(self):
+        """推进流光位移一帧（由视图级定时器统一调用）并重绘本框
+
+        两层反向滚动（同卡片 _GlintIcon）：快速层正向、慢速层反向
+        """
+        if self._glint_scaled is not None:
+            self._offset_fast = (self._offset_fast + 1) % _ICON
+            self._offset_slow = (self._offset_slow - 1) % _ICON
+            self.update()
 
     def boundingRect(self):
         return QRectF(-3, -3, _BOX_W + 6, _BOX_H + 6)
@@ -145,8 +192,24 @@ class _ItemBox(QGraphicsItem):
         painter.setPen(QPen(_LINE_COLOR, 3 if self.role == "final" else 2))
         painter.drawRect(QRectF(0, 0, _BOX_W, _BOX_H))
         if not self._pix.isNull():
-            painter.drawPixmap((_BOX_W - _ICON) // 2, (_BOX_H - _ICON) // 2,
-                               self._pix)
+            ix = (_BOX_W - _ICON) // 2
+            iy = (_BOX_H - _ICON) // 2
+            painter.drawPixmap(ix, iy, self._pix)
+            if self._glint_scaled is not None:
+                # 光效仅绘制在物品不透明区域，加法混合提亮（同卡片实现）
+                # 平铺间距必须 = 纹理边长（96px）：间距小于纹理边长会使相邻
+                # 瓦片在图标区内重叠，加法混合重复叠加形成周期性亮斑。
+                # 纹理 96x96 平移量在 [-48,-1] 时单片即完整覆盖 48x48
+                # 图标区，故每层只需绘制一次（与卡片 2x2 平铺数学等价）
+                painter.save()
+                painter.setClipRegion(self._clip_region)
+                painter.setCompositionMode(QPainter.CompositionMode_Plus)
+                painter.setOpacity(0.35)
+                tex = self._glint_scaled
+                for off in (self._offset_fast, self._offset_slow):
+                    painter.drawPixmap(ix + off - _ICON,
+                                       iy + off - _ICON, tex)
+                painter.restore()
         else:
             painter.setPen(QPen(QColor(110, 110, 110)))
             f = QFont()
@@ -308,6 +371,11 @@ class AnvilStepsTree(QGraphicsView):
         self._circles = []
         self._placeholder_item = None
         self._tooltip = _GameTooltip(self.viewport())
+        # 流光动画驱动：QGraphicsItem 非 QObject 不能自挂 QTimer，
+        # 由视图级定时器统一推进全部带附魔方框（无带附魔框时自停）
+        self._glint_timer = QTimer(self)
+        self._glint_timer.timeout.connect(self._advance_glint)
+        self._glint_timer.start(50)
         self._placeholder = ("添加物品后点击「开始计算」，"
                              "这里将显示最优合成步骤")
         self.clear_plan()
@@ -335,6 +403,20 @@ class AnvilStepsTree(QGraphicsView):
                 return b
         return None
 
+    def _advance_glint(self):
+        """流光帧推进：推进全部带附魔方框；无带附魔框时自停省开销"""
+        glint_boxes = [b for b in self._boxes if b._glint_scaled is not None]
+        if not glint_boxes:
+            self._glint_timer.stop()
+            return
+        for b in glint_boxes:
+            b.advance_glint()
+
+    def _ensure_glint_timer(self):
+        """渲染新方案后按需重启流光定时器（无带附魔框时保持停止）"""
+        if any(b._glint_scaled is not None for b in self._boxes):
+            self._glint_timer.start(50)
+
     def clear_plan(self):
         """清空图形并显示占位提示"""
         self.hide_tooltip()
@@ -351,8 +433,11 @@ class AnvilStepsTree(QGraphicsView):
         self._scene.setSceneRect(t.boundingRect().adjusted(-12, -12, 12, 12))
         self._placeholder_item = t
 
-    def show_plan(self, plan: AnvilPlan, data_manager=None):
-        """渲染完整合并方案（plan: AnvilOptimizer.optimize() 返回值）"""
+    def show_plan(self, plan: AnvilPlan, data_manager=None, mode: str = "tree"):
+        """渲染完整合并方案（plan: AnvilOptimizer.optimize() 返回值）
+
+        mode: "tree" = 自上而下方框树（默认）；"steps" = 每步一行依次排列
+        """
         self.hide_tooltip()
         self._scene.clear()
         self._boxes.clear()
@@ -360,6 +445,13 @@ class AnvilStepsTree(QGraphicsView):
         self._placeholder_item = None
         self._dm = data_manager
         too_exp = set(plan.too_expensive_steps)
+
+        if mode == "steps":
+            self._show_plan_steps(plan, too_exp)
+            self._ensure_glint_timer()
+            self._scene.setSceneRect(
+                self._scene.itemsBoundingRect().adjusted(-8, -8, 8, 8))
+            return
 
         if plan.steps:
             root = _build_tree(plan.steps)
@@ -372,11 +464,87 @@ class AnvilStepsTree(QGraphicsView):
         _set_rows(root)
         _place_x(root, _MARGIN)
         self._draw_node(root, too_exp)
-        self._draw_summary(plan, root)
+        self._draw_summary(plan, root.cx,
+                           _MARGIN + root.row * _ROW_H + _BOX_H)
+        self._ensure_glint_timer()
         self._scene.setSceneRect(
             self._scene.itemsBoundingRect().adjusted(-8, -8, 8, 8))
 
-    # ---------- 内部绘制 ----------
+    # ---------- 内部绘制：步骤图模式 ----------
+    def _show_plan_steps(self, plan, too_exp):
+        """步骤图模式：每步一行依次排列 [目标] + [牺牲] = [产物]
+
+        行内从左到右 = 铁砧第一格（目标）、+ 号、第二格（牺牲）、
+        = 号、产物框；= 号上方挂花费圆标（悬停计费明细），行末标注
+        步骤序号与花费；最后一步产物框为最终合成物（加粗描边）。
+        """
+        y = _MARGIN
+        op_font = QFont()
+        op_font.setPointSize(13)
+        op_font.setBold(True)
+        op_fm = QFontMetrics(op_font)
+        label_font = QFont()
+        label_font.setPointSize(9)
+
+        if not plan.steps:
+            # 单物品：无步骤，只画最终框
+            box = _ItemBox(plan.final_item, "final", self)
+            box.setPos(_MARGIN, y)
+            self._scene.addItem(box)
+            self._boxes.append(box)
+            last_cx, last_bottom = _MARGIN + _BOX_W / 2, y + _BOX_H
+        else:
+            for idx, step in enumerate(plan.steps):
+                is_final = idx == len(plan.steps) - 1
+                tx = _MARGIN
+                sx = tx + _BOX_W + _STEP_GAP
+                rx = sx + _BOX_W + _STEP_GAP
+                plus_cx = tx + _BOX_W + _STEP_GAP / 2
+                eq_cx = sx + _BOX_W + _STEP_GAP / 2
+
+                tb = _ItemBox(step.target, "", self)
+                tb.setPos(tx, y)
+                sb = _ItemBox(step.sacrifice, "", self)
+                sb.setPos(sx, y)
+                rb = _ItemBox(step.result, "final" if is_final else "", self)
+                rb.setPos(rx, y)
+                for b in (tb, sb, rb):
+                    self._scene.addItem(b)
+                    self._boxes.append(b)
+
+                # + / = 运算符（垂直居中于框行）
+                for text, cx in (("+", plus_cx), ("=", eq_cx)):
+                    op = QGraphicsSimpleTextItem(text)
+                    op.setFont(op_font)
+                    op.setBrush(QBrush(_LINE_COLOR))
+                    op.setPos(cx - op_fm.horizontalAdvance(text) / 2,
+                              y + _BOX_H / 2 - op_fm.height() / 2)
+                    self._scene.addItem(op)
+
+                # 花费圆标（= 号上方，悬停显示该步计费明细）
+                circle = _CostCircle(step, idx + 1,
+                                     idx + 1 in too_exp, self)
+                circle.setPos(eq_cx, y - 9)
+                self._scene.addItem(circle)
+                self._circles.append(circle)
+
+                # 行末步骤信息（过于昂贵时红色）
+                too = idx + 1 in too_exp
+                label = QGraphicsSimpleTextItem(
+                    f"第 {idx + 1} 步 · 花费 {step.cost} 级"
+                    + ("（过于昂贵）" if too else ""))
+                label.setFont(label_font)
+                label.setBrush(QBrush(_WARN_COLOR if too else _TEXT_COLOR))
+                label.setPos(rx + _BOX_W + 10,
+                             y + _BOX_H / 2
+                             - label.boundingRect().height() / 2)
+                self._scene.addItem(label)
+
+                y += _ROW_H
+            last_cx, last_bottom = rx + _BOX_W / 2, y - _ROW_H + _BOX_H
+        self._draw_summary(plan, last_cx, last_bottom)
+
+    # ---------- 内部绘制：共用 ----------
     def _draw_node(self, node, too_exp):
         """递归绘制：先子后父（父框需引用子框），连线画在框下层"""
         if node.kind == "merge":
@@ -418,15 +586,18 @@ class AnvilStepsTree(QGraphicsView):
         self._scene.addItem(circle)
         self._circles.append(circle)
 
-    def _draw_summary(self, plan, root):
-        """最终框下方：总花费文字（+ 过于昂贵警告）"""
-        ty = _MARGIN + root.row * _ROW_H + _BOX_H + 6
+    def _draw_summary(self, plan, cx: float, bottom_y: float):
+        """最终框下方：总花费文字（+ 过于昂贵警告）
+
+        cx = 最终框中心 x，bottom_y = 最终框底边 y（树/步骤两模式共用）
+        """
+        ty = bottom_y + 6
         f = QFont()
         f.setPointSize(9)
         total = QGraphicsSimpleTextItem(f"总花费 {plan.total_cost} 级")
         total.setFont(f)
         total.setBrush(QBrush(_TEXT_COLOR))
-        total.setPos(root.cx - total.boundingRect().width() / 2, ty)
+        total.setPos(cx - total.boundingRect().width() / 2, ty)
         self._scene.addItem(total)
         if plan.too_expensive_steps:
             warn = QGraphicsSimpleTextItem(
@@ -434,7 +605,7 @@ class AnvilStepsTree(QGraphicsView):
                 f"超过 39 级，生存模式中铁砧会显示「过于昂贵！」")
             warn.setFont(f)
             warn.setBrush(QBrush(_WARN_COLOR))
-            warn.setPos(root.cx - warn.boundingRect().width() / 2, ty + 18)
+            warn.setPos(cx - warn.boundingRect().width() / 2, ty + 18)
             self._scene.addItem(warn)
 
     # ---------- tooltip ----------

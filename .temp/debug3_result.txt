@@ -1,0 +1,5 @@
+count=1
+type=QGraphicsSimpleTextItem
+has toPlainText=False
+has text=True
+text()='简单文本 世界'

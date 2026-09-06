@@ -1,0 +1,7 @@
+glint_tex_null=False size=128x128
+mode=tree: 框数=5 带流光框数=4 final框流光=True
+mode=tree: 帧推进前 offset=0 推进后=1
+mode=tree: grab 渲染无异常
+mode=steps: 框数=6 带流光框数=5 final框流光=True
+mode=steps: 帧推进前 offset=0 推进后=1
+mode=steps: grab 渲染无异常
