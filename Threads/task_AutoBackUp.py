@@ -2,7 +2,7 @@ import os
 import zipfile
 from datetime import datetime
 from PySide6.QtCore import QRunnable
-from Utils.signals_AutoBackUp import backup_bus
+from Utils.AutoBackUp.signals_AutoBackUp import backup_bus
 
 # =============================================================================
 # BackupTask 类：备份任务的线程执行类

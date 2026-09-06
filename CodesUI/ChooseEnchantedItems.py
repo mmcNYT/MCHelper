@@ -18,8 +18,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QApplication, QComboBox, QGridLayout, QListWidgetItem,
     QPushButton, QSizePolicy, QTabWidget, QWidget)
 
-from Utils.drop_list_widget import DropListWidget
-from Utils.enchant_list_widget import EnchantListWidget
+from Utils.EnchantCaculator.drop_list_widget import DropListWidget
+from Utils.EnchantCaculator.enchant_list_widget import EnchantListWidget
 
 class Ui_enchantedItems(object):
     def setupUi(self, enchantedItems):

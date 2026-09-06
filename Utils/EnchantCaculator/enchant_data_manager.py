@@ -53,11 +53,14 @@ class DataManager:
             data/enchants.json 的绝对路径
 
         功能说明：
-        - 当前文件位于 Utils/ 目录，向上两级（dirname 两次）回到项目根目录
+        - 当前文件位于 Utils/EnchantCaculator/ 目录，向上三级（dirname 三次）
+          回到项目根目录
         - 自动创建 data 目录（若不存在）
         """
-        # 当前文件在 utils/data_manager.py，向上两级到项目根目录
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # 当前文件在 Utils/EnchantCaculator/enchant_data_manager.py，
+        # 向上三级到项目根目录
+        base_dir = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
         data_dir = os.path.join(base_dir, "data")
         os.makedirs(data_dir, exist_ok=True)   # 如果 data 目录不存在则创建
         return os.path.join(data_dir, "enchants.json")

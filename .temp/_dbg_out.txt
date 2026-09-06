@@ -1,9 +1,0 @@
-Timeout (0:00:25)!
-Thread 0x00005090 (most recent call first):
-  File "C:\maomaochongD\Coding\PythonProject\MCHelper\Tools\tool_EnchantCaculator.py", line 189 in _resolve_conflicts_for_calculate
-  File "C:\maomaochongD\Coding\PythonProject\MCHelper\Tools\tool_EnchantCaculator.py", line 231 in do_start_calculate
-  File "C:\maomaochongD\Coding\PythonProject\MCHelper\.temp\smoke_test_display_mode.py", line 118 in <module>
-  File "<frozen runpy>", line 88 in _run_code
-  File "<frozen runpy>", line 98 in _run_module_code
-  File "<frozen runpy>", line 294 in run_path
-  File "C:\maomaochongD\Coding\PythonProject\MCHelper\.temp\_dbg_timeout.py", line 7 in <module>

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QListWidget, QListView, QListWidgetItem, QWidget
 from PySide6.QtCore import Qt, Signal, QPoint, QMimeData, QTimer
 from PySide6.QtGui import QDrag, QImage, QPainter, QPixmap, QColor, QPalette, QRegion
 
-from Utils.enchanted_item_card import EnchantedItemCard
+from Utils.EnchantCaculator.enchanted_item_card import EnchantedItemCard
 
 _MIME_CARD = "application/x-card-reorder"  # 内部拖动交换位置的 MIME 类型
 

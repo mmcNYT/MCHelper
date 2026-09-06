@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsItem,
                                QGraphicsPathItem, QGraphicsSimpleTextItem,
                                QWidget)
 
-from Utils.anvil_optimizer import AnvilPlan
-from Utils.enchanted_item_card import (int_to_roman, get_item_icon_path,
+from Utils.EnchantCaculator.anvil_optimizer import AnvilPlan
+from Utils.EnchantCaculator.enchanted_item_card import (int_to_roman, get_item_icon_path,
                                         TOOLTIP_BG_TOP,
                                         TOOLTIP_BORDER_OUTER_START,
                                         TOOLTIP_BORDER_INNER_START,
@@ -36,7 +36,8 @@ def _glint_texture() -> QPixmap:
     global _GLINT_TEX_PATH
     if _GLINT_TEX_PATH is None:
         import os
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base_dir = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
         _GLINT_TEX_PATH = os.path.join(
             base_dir, "assets", "icons", "enchanted_glint.png")
     pix = QPixmap(_GLINT_TEX_PATH)

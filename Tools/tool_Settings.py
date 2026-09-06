@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QDialog
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
 from CodesUI.Settings import Ui_Settings  # 编译生成的 UI 类
-from Utils.signals_Settings import settings_bus
+from Utils.Settings.signals_Settings import settings_bus
 import os,json
 
 class SettingsWindow(QDialog, Ui_Settings):

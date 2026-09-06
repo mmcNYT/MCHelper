@@ -243,18 +243,18 @@
    </layout>
   </widget>
  </widget>
- <customwidgets>
-  <customwidget>
-   <class>EnchantListWidget</class>
-   <extends>QListWidget</extends>
-   <header>Utils.enchant_list_widget</header>
-  </customwidget>
-  <customwidget>
-   <class>DropListWidget</class>
-   <extends>QListWidget</extends>
-   <header>Utils.drop_list_widget</header>
-  </customwidget>
- </customwidgets>
+  <customwidgets>
+   <customwidget>
+    <class>EnchantListWidget</class>
+    <extends>QListWidget</extends>
+    <header>Utils.EnchantCaculator.enchant_list_widget</header>
+   </customwidget>
+   <customwidget>
+    <class>DropListWidget</class>
+    <extends>QListWidget</extends>
+    <header>Utils.EnchantCaculator.drop_list_widget</header>
+   </customwidget>
+  </customwidgets>
  <resources/>
  <connections/>
 </ui>

@@ -8,10 +8,10 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QListWidgetItem
 from .tool_base import BaseToolWidget
-from Utils.signals_AutoBackUp import backup_bus
-from Utils.process_monitor import ProcessMonitor
-from Utils.notification import NotificationWidget
-from Utils.right_icon_delegate import RightIconDelegate
+from Utils.AutoBackUp.signals_AutoBackUp import backup_bus
+from Utils.AutoBackUp.process_monitor import ProcessMonitor
+from Utils.AutoBackUp.notification import NotificationWidget
+from Utils.AutoBackUp.right_icon_delegate import RightIconDelegate
 from Threads.task_AutoBackUp import BackupTask
 
 from CodesUI.AutoBackUp import Ui_AutoBackUp

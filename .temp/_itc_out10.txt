@@ -1,1 +1,0 @@
-{'C1': {'n_after_add': 1, 'restored': 1, 'total_cards': 3, 'boxes': 5}}

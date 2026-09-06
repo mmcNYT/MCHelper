@@ -1,12 +1,12 @@
 from .tool_base import BaseToolWidget
-from Utils.choose_items import ChooseItemsWindow
+from Utils.EnchantCaculator.choose_items import ChooseItemsWindow
 from CodesUI.EnchantCaculator import Ui_EnchantCaculator
-from Utils.card_list_widget import CardListWidget
-from Utils.conflict_resolver import (find_conflict_clusters,
+from Utils.EnchantCaculator.card_list_widget import CardListWidget
+from Utils.EnchantCaculator.conflict_resolver import (find_conflict_clusters,
                                      resolve_conflicts, ConflictResolveDialog)
-from Utils.enchant_data_manager import DataManager
-from Utils.anvil_optimizer import AnvilOptimizer, AnvilError, build_items_from_cards
-from Utils.anvil_steps_tree import AnvilStepsTree
+from Utils.EnchantCaculator.enchant_data_manager import DataManager
+from Utils.EnchantCaculator.anvil_optimizer import AnvilOptimizer, AnvilError, build_items_from_cards
+from Utils.EnchantCaculator.anvil_steps_tree import AnvilStepsTree
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 import os

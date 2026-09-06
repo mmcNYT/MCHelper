@@ -4,7 +4,7 @@ from PySide6.QtGui import QIcon, QAction
 from Tools import TOOL_CLASSES
 from Tools.tool_Settings import SettingsWindow
 from CodesUI.MCHelperMainWindow import Ui_MCHelper
-from Utils.signals_Settings import settings_bus
+from Utils.Settings.signals_Settings import settings_bus
 import winreg
 import sys
 import os

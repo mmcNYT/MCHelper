@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QEvent
 from CodesUI.ChooseEnchantedItems import Ui_enchantedItems
-from Utils.enchant_data_manager import DataManager
-from Utils.enchant_list_widget import EnchantListWidget
+from Utils.EnchantCaculator.enchant_data_manager import DataManager
+from Utils.EnchantCaculator.enchant_list_widget import EnchantListWidget
 
 class ChooseItemsWindow(QDialog, Ui_enchantedItems):
     """

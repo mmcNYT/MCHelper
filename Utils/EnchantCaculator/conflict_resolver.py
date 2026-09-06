@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton, QHBoxLayout
 )
 
-from Utils.enchanted_item_card import int_to_roman
+from Utils.EnchantCaculator.enchanted_item_card import int_to_roman
 
 
 def find_conflict_clusters(cards_data: list, data_manager) -> list:

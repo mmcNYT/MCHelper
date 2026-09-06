@@ -60,7 +60,8 @@ def get_item_icon_path(item_name: str) -> str:
         fname = mapping.get(item_name, "")
     if not fname:
         return ""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))))
     path = os.path.join(base_dir, "assets", "icons", f"{fname}.png")
     return path if os.path.exists(path) else ""
 
@@ -100,7 +101,8 @@ class _GlintIcon(QWidget):
 
         # 加载光效纹理（类级缓存，所有卡片共享）
         if _GlintIcon._glint_tex is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))
             glint_path = os.path.join(base_dir, "assets", "icons", "enchanted_glint.png")
             if os.path.exists(glint_path):
                 _GlintIcon._glint_tex = QPixmap(glint_path)

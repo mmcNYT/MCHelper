@@ -1,0 +1,22 @@
+[PASS] 解析标准 F3+C 命令
+[PASS] 解析手打纯数字
+[PASS] 解析旧版短命令
+[PASS] 多余数字时取最后 5 个
+[PASS] 数字不足报错
+[PASS] 空输入报错
+[PASS] yaw 方向向量（0=南,90=西,180=北,270=东）
+[PASS] yaw 八方位映射
+[PASS] normalize_yaw 规范到 [-180,180)
+[PASS] 交点坐标正确
+[PASS] 交点在两条视线前方(t>0)
+[PASS] 距离正确
+[PASS] 反向瞄准 t2<0
+[PASS] 平行视线报错
+[PASS] 同位置报错
+[PASS] 打开工具有使用说明
+[PASS] 空输入提示
+[PASS] 计算结果输出
+[PASS] 错误输入提示
+[PASS] 清除按钮生效
+[PASS] TOOL_CLASSES 注册
+合计 21/21 通过
