@@ -22,47 +22,47 @@ class Ui_strongHoldFinder(object):
     def setupUi(self, strongHoldFinder):
         if not strongHoldFinder.objectName():
             strongHoldFinder.setObjectName(u"strongHoldFinder")
-        strongHoldFinder.resize(660, 387)
-        self.widget = QWidget(strongHoldFinder)
-        self.widget.setObjectName(u"widget")
-        self.widget.setGeometry(QRect(30, 20, 601, 341))
-        self.gridLayout = QGridLayout(self.widget)
+        strongHoldFinder.resize(663, 373)
+        self.layoutWidget = QWidget(strongHoldFinder)
+        self.layoutWidget.setObjectName(u"layoutWidget")
+        self.layoutWidget.setGeometry(QRect(30, 20, 601, 341))
+        self.gridLayout = QGridLayout(self.layoutWidget)
         self.gridLayout.setObjectName(u"gridLayout")
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
-        self.doCaculate = QPushButton(self.widget)
+        self.doCaculate = QPushButton(self.layoutWidget)
         self.doCaculate.setObjectName(u"doCaculate")
 
         self.gridLayout.addWidget(self.doCaculate, 2, 0, 1, 1)
 
-        self.coordinate2Edit = QLineEdit(self.widget)
+        self.coordinate2Edit = QLineEdit(self.layoutWidget)
         self.coordinate2Edit.setObjectName(u"coordinate2Edit")
 
         self.gridLayout.addWidget(self.coordinate2Edit, 1, 1, 1, 1)
 
-        self.coordinate2 = QLabel(self.widget)
+        self.coordinate2 = QLabel(self.layoutWidget)
         self.coordinate2.setObjectName(u"coordinate2")
         self.coordinate2.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.coordinate2.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.gridLayout.addWidget(self.coordinate2, 0, 0, 1, 1)
 
-        self.clearCoordinates = QPushButton(self.widget)
+        self.clearCoordinates = QPushButton(self.layoutWidget)
         self.clearCoordinates.setObjectName(u"clearCoordinates")
 
         self.gridLayout.addWidget(self.clearCoordinates, 2, 1, 1, 1)
 
-        self.coordinate1Edit = QLineEdit(self.widget)
+        self.coordinate1Edit = QLineEdit(self.layoutWidget)
         self.coordinate1Edit.setObjectName(u"coordinate1Edit")
 
         self.gridLayout.addWidget(self.coordinate1Edit, 0, 1, 1, 1)
 
-        self.coordinate1 = QLabel(self.widget)
+        self.coordinate1 = QLabel(self.layoutWidget)
         self.coordinate1.setObjectName(u"coordinate1")
         self.coordinate1.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.gridLayout.addWidget(self.coordinate1, 1, 0, 1, 1)
 
-        self.informationBrowser = QTextBrowser(self.widget)
+        self.informationBrowser = QTextBrowser(self.layoutWidget)
         self.informationBrowser.setObjectName(u"informationBrowser")
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)

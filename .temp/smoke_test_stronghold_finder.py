@@ -156,14 +156,27 @@ except Exception as e:  # noqa: BLE001
     os_ok = f"{type(e).__name__}: {e}"
     check("UI 全流程", False, os_ok)
 
-# ---------- 6. looks_like_f3c 预判（剪贴板自动填入门槛） ----------
+# ---------- 6. looks_like_f3c 预判（剪贴板自动填入门槛：必须以命令前缀开头） ----------
 from Utils.StrongHoldFinder.stronghold_math import looks_like_f3c  # noqa: E402
 
 check("预判：标准 F3+C 命令", looks_like_f3c(cmd) is True)
-check("预判：手打纯数字", looks_like_f3c("123.45 64 -678.9 120.5 15.5") is True)
-check("预判：无小数点拒绝", looks_like_f3c("1 2 3 4 5") is False)
-check("预判：数字太少拒绝", looks_like_f3c("价格 19.99 元") is False)
-check("预判：版本号文本拒绝", looks_like_f3c("version 1.2.3 build 4567") is False)
+check("预判：无斜杠前缀也接受",
+      looks_like_f3c("execute in minecraft:overworld run tp @s 12.5 64.0 -3.5 120.5 15.0") is True)
+check("预判：含首尾空白接受", looks_like_f3c("  " + cmd + "  ") is True)
+check("预判：下界维度拒绝",
+      looks_like_f3c("/execute in minecraft:the_nether run tp @s 1.0 64.0 3.0 90.0 0.0") is False)
+check("预判：末地维度拒绝",
+      looks_like_f3c("/execute in minecraft:the_end run tp @s 1.0 64.0 3.0 90.0 0.0") is False)
+check("预判：缺 run 拒绝",
+      looks_like_f3c("/execute in minecraft:overworld tp @s 1.0 64.0 3.0 90.0 0.0") is False)
+check("预判：前缀对但数字不足拒绝",
+      looks_like_f3c("/execute in minecraft:overworld run tp @s 1.0 2.0 3.0") is False)
+check("预判：仅前缀无数字拒绝",
+      looks_like_f3c("/execute in minecraft:overworld run tp @s") is False)
+check("预判：前缀不在开头拒绝",
+      looks_like_f3c("复制得到 /execute in minecraft:overworld run tp @s 1.0 2.0 3.0 4.0 5.0") is False)
+check("预判：手打纯数字拒绝", looks_like_f3c("123.45 64 -678.9 120.5 15.5") is False)
+check("预判：普通数字文本拒绝", looks_like_f3c("价格 19.99 元，版本 1.2.3 build 4567") is False)
 check("预判：纯文字拒绝", looks_like_f3c("hello world") is False)
 check("预判：空文本拒绝", looks_like_f3c("") is False)
 check("预判：超长文本拒绝", looks_like_f3c("1.1 " * 60) is False)
@@ -177,6 +190,7 @@ try:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
+    from Utils.AutoBackUp.notification import NotificationWidget  # noqa: F401  # 通知断言用
     # 先把剪贴板换成无害文本，等真实监听线程消化掉这次变化，避免干扰后续断言
     QApplication.clipboard().setText("无数字的占位文本")
     time.sleep(0.5)
@@ -189,7 +203,7 @@ try:
     cmd_b = "/execute in minecraft:overworld run tp @s 210.75 65.00 -85.50 55.3 8.0"
     cmd_c = "/execute in minecraft:overworld run tp @s 1.00 64.00 2.00 90.0 0.0"
 
-    # 复制第一条 → 槽触发 → 填入坐标一
+    # 复制第一条 → 槽触发 → 填入坐标一（首次填入无防抖记录，直接通过）
     QApplication.clipboard().setText(cmd_a)
     w._on_clipboard_changed()
     check("自动填入坐标一", w.coordinate1Edit.text() == cmd_a and w.coordinate2Edit.text() == "")
@@ -203,26 +217,81 @@ try:
     w._on_clipboard_changed()
     check("非 F3+C 内容不填入", w.coordinate2Edit.text() == "")
 
-    # 复制第二条 → 填入坐标二
+    # 复制第二条（相距约 226 格）→ 填入坐标二 → 自动计算 + 通知
     QApplication.clipboard().setText(cmd_b)
     w._on_clipboard_changed()
-    check("自动填入坐标二", w.coordinate2Edit.text() == cmd_b
-          and "计算" in w.informationBrowser.toPlainText())
+    out = w.informationBrowser.toPlainText()
+    m_auto = re.search(r"交点（要塞水平位置）：X = ([-\d.]+)，Z = ([-\d.]+)", out)
+    notifs = NotificationWidget._instances
+    # cmd_a/cmd_b 的 yaw 是任意值，理论交点应为 (26.3, 42.2)（手算 t1≈27.06 验证）
+    check("远距自动计算并弹通知",
+          w.coordinate2Edit.text() == cmd_b and bool(m_auto)
+          and abs(float(m_auto.group(1)) - 26.3) < 0.5
+          and abs(float(m_auto.group(2)) - 42.2) < 0.5
+          and len(notifs) >= 1 and "要塞位置" in notifs[-1].message_label.text(),
+          out.replace("\n", " | ")[:150])
 
     # 两框皆有内容 + 新内容 → 不覆盖
     QApplication.clipboard().setText(cmd_c)
     w._on_clipboard_changed()
     check("两框已满不覆盖", w.coordinate1Edit.text() == cmd_a and w.coordinate2Edit.text() == cmd_b)
 
-    # 自动填入的数据可直接计算
+    # 自动填入的数据可手动再计算
     w.doCaculate.click()
-    check("自动填入后可直接计算", "要塞定位结果" in w.informationBrowser.toPlainText())
+    check("自动填入后可手动计算", "要塞定位结果" in w.informationBrowser.toPlainText())
 
-    # 清除按钮
+    # ---------- 7b. 自动填入防抖（8 秒冷却 / 10 格距离 / 30 格自动计算门槛） ----------
+    # 清空输入框但保留防抖状态（直接 setText，不走「清除」按钮）
+    w.coordinate1Edit.setText("")
+    w.coordinate2Edit.setText("")
+
+    # 8 秒内 + 相距约 7.3 格 → 双条件命中，忽略
+    cmd_close = "/execute in minecraft:overworld run tp @s 5.00 64.00 25.00 -35.7 12.0"
+    QApplication.clipboard().setText(cmd_close)
+    w._on_clipboard_changed()
+    check("8秒内近距离重复观测被忽略",
+          w.coordinate1Edit.text() == "" and "忽略" in w.informationBrowser.toPlainText())
+
+    # 模拟时间前进 10 秒（冷却已过），但相距约 6.5 格 → 距离防抖命中，忽略
+    w._last_auto_fill_time -= 10
+    cmd_close2 = "/execute in minecraft:overworld run tp @s 15.00 64.00 25.00 55.3 8.0"
+    QApplication.clipboard().setText(cmd_close2)
+    w._on_clipboard_changed()
+    check("冷却已过但距离不足10格被忽略",
+          w.coordinate1Edit.text() == "" and "忽略" in w.informationBrowser.toPlainText())
+
+    # 相距约 120 格 → 通过防抖，填入坐标一
+    cmd_far = "/execute in minecraft:overworld run tp @s 100.00 64.00 100.00 -35.7 12.0"
+    QApplication.clipboard().setText(cmd_far)
+    w._on_clipboard_changed()
+    check("距离足够则自动填入", w.coordinate1Edit.text() == cmd_far)
+
+    # 第二点相距约 216 格 → 自动计算 + 通知
+    QApplication.clipboard().setText(cmd_b)
+    w._on_clipboard_changed()
+    out = w.informationBrowser.toPlainText()
+    notifs = NotificationWidget._instances
+    check("第二观测点触发自动计算",
+          "要塞定位结果" in out and len(notifs) >= 1
+          and "要塞位置" in notifs[-1].message_label.text())
+
+    # 第二点仅相距约 27.8 格（<30）→ 只填入不自动计算
+    w.coordinate1Edit.setText(cmd_a)
+    w.coordinate2Edit.setText("")
+    cmd_near2 = "/execute in minecraft:overworld run tp @s 30.00 64.00 40.00 55.3 8.0"
+    QApplication.clipboard().setText(cmd_near2)
+    w._on_clipboard_changed()
+    out = w.informationBrowser.toPlainText()
+    check("距离不足30格不自动计算",
+          w.coordinate2Edit.text() == cmd_near2 and "不足 30 格" in out
+          and "要塞定位结果" not in out)
+
+    # 清除按钮：清空 + 重置防抖状态
     w.clearCoordinates.click()
-    check("清除按钮生效",
+    check("清除按钮生效并重置防抖",
           w.coordinate1Edit.text() == "" and w.coordinate2Edit.text() == ""
-          and w.informationBrowser.toPlainText() == "")
+          and w.informationBrowser.toPlainText() == ""
+          and w._last_auto_fill_time is None and w._last_auto_fill_pos is None)
 
     # ---------- 8. 真实监听线程端到端 ----------
     # offscreen 平台的 Qt 剪贴板不一定写系统剪贴板，故用 ctypes 直接写系统剪贴板触发

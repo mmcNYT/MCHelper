@@ -5,7 +5,7 @@
     末影之眼被抛出后会朝最近的要塞方向飞行。玩家在两个不同位置，
     分别把准星对准末影之眼飞走的方向按 F3+C，会复制出形如
 
-        /execute in minecraft:overworld run tp @s 123.45 64.00 -678.90 120.5 15.0
+        /execute in minecraft:overworld run tp @s 123.45 64.00 -678.90 120.5 16.0
 
     的传送命令，末尾 5 个数字依次为 x y z yaw pitch。
     两条「位置 + 视线朝向」确定的视线在水平面上的交点，即要塞的水平位置。
@@ -20,6 +20,12 @@ import re
 
 # 匹配带可选正负号的十进制数（F3+C 不会产生科学计数法，正则顺带兼容）
 _NUMBER_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)")
+
+# F3+C 命令必然出现的完整前缀：
+#     /execute in minecraft:overworld run tp @s x y z yaw pitch
+# 末影之眼只在主世界朝要塞飞，定位场景下维度恒为 overworld；
+# 允许可选的开头斜杠与首尾空白
+_F3C_PREFIX_RE = re.compile(r"^\s*/?execute in minecraft:overworld run tp @s\b")
 
 # 两条视线的单位方向向量叉积（= sin 夹角）小于该阈值视为平行，
 # 对应夹角约 0.00006°，只拦截「几乎原样复制两遍」的情况
@@ -62,28 +68,32 @@ def parse_f3c_command(text: str) -> tuple[float, float, float]:
 
 
 def looks_like_f3c(text: str) -> bool:
-    """判断剪贴板文本是否像 F3+C 复制的内容（剪贴板自动填入的预判门槛）。
+    """判断剪贴板文本是否是 F3+C 复制的内容（剪贴板自动填入的预判门槛）。
 
-    判据（故意保守，避免把网页/文档里复制的普通数字误填进坐标框）：
-    - 文本非空且长度不超过 200 字符（F3+C 命令约 90 字符）；
-    - 数字个数 5~8 个（标准命令 5 个；自定义维度名等可能额外带数字）；
-    - 文本中至少含一个小数点（F3+C 的坐标与视角恒带小数，纯整数列表不算）。
+    判据：
+    - 以必然出现的命令前缀开头（允许省略开头的 /）：
+      ``/execute in minecraft:overworld run tp @s``；
+    - 前缀之后至少有 5 个数字（x y z yaw pitch）；
+    - 文本长度不超过 200 字符（F3+C 命令约 90 字符）。
+    - 例：/execute in minecraft:overworld run tp @s 123.45 64.0 -678.9 120.5 16.0
+
+    其他维度（the_nether/the_end）的 F3+C 复制不会被识别——
+    末影之眼在这些维度不朝要塞飞，本工具用不上。
 
     Args:
         text: 剪贴板中的原始文本。
 
     Returns:
-        True 表示很可能是 F3+C 内容，可以自动填入坐标框。
+        True 表示是 F3+C 内容，可以自动填入坐标框。
     """
     if not text:
         return False
     text = text.strip()
     if not text or len(text) > 200:
         return False
-    if "." not in text:
+    if not _F3C_PREFIX_RE.match(text):
         return False
-    count = len(_NUMBER_RE.findall(text))
-    return 5 <= count <= 8
+    return len(_NUMBER_RE.findall(text)) >= 5
 
 
 def yaw_to_direction(yaw: float) -> tuple[float, float]:
