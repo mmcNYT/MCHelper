@@ -117,7 +117,7 @@
     <item row="7" column="0" colspan="2">
      <widget class="QTabWidget" name="allEnchantmentTab">
       <property name="currentIndex">
-       <number>4</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="meleeTab">
        <attribute name="title">

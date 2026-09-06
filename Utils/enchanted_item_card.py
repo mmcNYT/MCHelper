@@ -41,6 +41,7 @@ def get_item_icon_path(item_name: str) -> str:
         "矛": "diamond_spear",
         "镐": "diamond_pickaxe",
         "锹": "diamond_shovel",
+        "铲": "diamond_shovel",  # 下拉框物品名用"铲"（与数据 applicable 一致），与"锹"同图标
         "锄": "diamond_hoe",
         "弓": "bow",
         "弩": "crossbow",

@@ -10,7 +10,8 @@
 6. 约束满足 / 约束无法满足（AnvilError）
 7. 与穷举对照（4 物品），验证 Dijkstra 结果确为最优
 8. 终态类型约束：剑 + 多本书 → 最终必须是剑（不允许"降级到书上"）
-9. 性能：8 物品精确搜索应秒级完成；9 物品降级贪心可运行
+9. 合并方向合法性：书做第一格不能吞非书物品（附魔书只能吞书或做牺牲）
+10. 性能：8 物品精确搜索应秒级完成；9 物品降级贪心可运行
 """
 import os
 import sys
@@ -177,6 +178,32 @@ items = [
 plan = opt.optimize(items)
 assert plan.final_item.name == "剑", plan.final_item
 print(f"8. 剑+书 → 最终为剑（总花费 {plan.total_cost}）✓")
+
+# ========== 8b. 合并方向合法性：书不能吞非书 ==========
+# 牺牲为非书时必须与目标同类型；附魔书做第一格只能吞另一本书
+book = AnvilItem.make("附魔书", [("unbreaking", 3)])
+plain_sword = AnvilItem.make("剑", [])
+ench_sword = AnvilItem.make("剑", [("sharpness", 5)])
+assert not mech.can_merge(book, plain_sword), "书+无附魔剑 应不可合并"
+assert not mech.can_merge(book, ench_sword), "书+附魔剑 应不可合并"
+assert mech.can_merge(plain_sword, book), "剑+书（书做牺牲）应可合并"
+assert mech.can_merge(book, AnvilItem.make("附魔书", [("mending", 1)])), \
+    "书+书 应可合并"
+# 单本书 + 剑：优化器唯一合法路径是剑做目标吞书
+plan = opt.optimize([book, plain_sword])
+assert len(plan.steps) == 1 and plan.steps[0].target is plain_sword \
+    and plan.steps[0].sacrifice is book and plan.final_item.name == "剑", \
+    plan.steps
+# 全为书 + 一把剑：先书+书再剑吞书，任何一步都不允许书做目标吞剑
+plan = opt.optimize([
+    AnvilItem.make("附魔书", [("unbreaking", 3)]),
+    AnvilItem.make("附魔书", [("unbreaking", 3)]),
+    plain_sword,
+])
+assert plan.final_item.name == "剑"
+assert all(not (s.target.is_book() and not s.sacrifice.is_book())
+           for s in plan.steps)
+print("8b. 合并方向合法性（书不能吞非书，剑+书唯一路径剑做目标）✓")
 
 # ========== 9. 性能与降级 ==========
 items9 = [AnvilItem.make("附魔书", [(eid, lv)]) for eid, lv in

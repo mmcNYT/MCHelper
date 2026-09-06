@@ -10,13 +10,23 @@ from Utils.enchant_list_widget import EnchantListWidget
 class ChooseItemsWindow(QDialog, Ui_enchantedItems):
     """
     物品选择窗口：显示可用物品列表，支持多选。
+
+    allowed_item_names: 可选，物品类型白名单（set[str]）。传入时从物品
+    下拉框移除白名单之外的类型（如已添加剑卡片后只允许「附魔书、剑」），
+    None 表示不限制。必须在连接信号之前过滤，避免触发切换清空联动。
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, allowed_item_names=None):
         super().__init__(parent)
 
         self.data_manager = DataManager()
         #  加载 UI（包含所有 Designer 控件）
         self.setupUi(self)
+
+        # 物品类型白名单过滤（倒序移除，当前项 index 0 不受影响、不发信号）
+        if allowed_item_names is not None:
+            for i in range(self.itemsList.count() - 1, -1, -1):
+                if self.itemsList.itemText(i) not in allowed_item_names:
+                    self.itemsList.removeItem(i)
 
         # 配置chosenEnchantmentList（只接收外部拖入，自身项不可拖拽）
         self.chosenEnchantmentList.setAcceptDrops(True)

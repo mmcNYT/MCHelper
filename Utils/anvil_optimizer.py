@@ -15,7 +15,9 @@
 #   （即使牺牲等级低于目标、等级不上升，仍按输出最终等级计费）
 # - 等级合并：目标无此魔咒 → 获得牺牲等级；牺牲等级高 → 升至牺牲等级；
 #   相同 → +1（均不超上限）；低 → 目标等级不变
-# - 合法性：相同物品类型两两可合（书+书视为同类型）；任意非书物品可与附魔书合并；
+# - 合法性（方向敏感）：牺牲（第二格）必须与目标（第一格）同类型
+#   （书+书视为同类型），或牺牲本身是附魔书；附魔书做目标时只能吞另一本
+#   书，不能把剑等非书物品"吸收"进书里（游戏中不存在提取物品附魔的操作）；
 #   不同类型非书物品无法合并（本工具以此报"无法合成一件"）
 # - 生存模式单次操作 ≤39 级，否则铁砧显示"过于昂贵！"（本优化器在方案中标记此类步骤）
 #
@@ -130,12 +132,16 @@ class AnvilMechanics:
         return c if c is not None else 0
 
     # ---------- 合并合法性 ----------
-    def can_merge(self, a: AnvilItem, b: AnvilItem) -> bool:
-        """两件物品能否放进同一铁砧（顺序无关）：
-        同类型物品（含 书+书），或一方为附魔书而另一方为任意非书物品"""
-        if a.name == b.name:
+    def can_merge(self, target: AnvilItem, sacrifice: AnvilItem) -> bool:
+        """target 放铁砧第一格、sacrifice 放第二格能否合并：
+
+        牺牲物品必须与目标同类型（含 书+书），或牺牲本身是附魔书；
+        附魔书做第一格时只能吞另一本书——把剑等非书物品"吸收"进书里
+        （提取物品上的附魔）是游戏中不存在的操作。
+        """
+        if target.name == sacrifice.name:
             return True
-        return a.is_book() or b.is_book()
+        return sacrifice.is_book()
     # ---------- 核心：一次合并模拟 ----------
     def merge(self, target: AnvilItem, sacrifice: AnvilItem) -> tuple:
         """把 sacrifice 合并进 target（target 在铁砧第一格/左侧）
@@ -153,7 +159,8 @@ class AnvilMechanics:
         out = dict(t_map)  # 输出魔咒 = 目标魔咒 + 转移结果（实时更新，冲突检查基于它）
 
         # 输出物品类型 = 目标（左格）物品类型（Java 版输出是目标物品的副本：
-        # 剑+书→剑；书+书→书；书+剑→书——物品附魔可"降级"到书上）
+        # 剑+书→剑；书+书→书；牺牲为非书时必与目标同类型，
+        # 由 can_merge 的方向敏感规则保证）
         out_name = target.name
 
         sacrifice_is_book = sacrifice.is_book()  # 决定乘数表
@@ -327,8 +334,8 @@ class AnvilOptimizer:
     def _search_greedy(self, items, required_enchants, required_type) -> AnvilPlan:
         """每轮选合并对：优先不拦截保留附魔，其次本次花费最小，直到剩一件
 
-        终态类型约束：输出类型 = 目标类型，故禁止"书做目标吞非书"的合并
-        （否则非书物品丢失，终态无法满足 required_type）。
+        合并合法性（含"书不能吞非书"）由方向敏感的 can_merge 统一保证，
+        输出类型 = 目标类型，终态自然满足 required_type。
         """
         cur = list(items)
         steps = []
@@ -339,10 +346,6 @@ class AnvilOptimizer:
                     if i == j:
                         continue
                     if not self.mech.can_merge(cur[i], cur[j]):
-                        continue
-                    # 类型约束：目标为书而牺牲为非书 → 输出为书，非书物品丢失
-                    if (required_type and required_type != BOOK_ITEM
-                            and cur[i].is_book() and not cur[j].is_book()):
                         continue
                     result, fee, detail = self.mech.merge(cur[i], cur[j])
                     # 拦截了保留附魔的组合加重惩罚（虚拟代价，不改变实际花费）

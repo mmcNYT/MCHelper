@@ -4,11 +4,13 @@ import zipfile
 from datetime import datetime
 import shutil
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QFileDialog, QListWidgetItem
 from .tool_base import BaseToolWidget
 from Utils.signals_AutoBackUp import backup_bus
 from Utils.process_monitor import ProcessMonitor
 from Utils.notification import NotificationWidget
+from Utils.right_icon_delegate import RightIconDelegate
 from Threads.task_AutoBackUp import BackupTask
 
 from CodesUI.AutoBackUp import Ui_AutoBackUp
@@ -28,6 +30,10 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
         # 2. 执行 UI 的 setup，创建所有界面控件和布局
         self.setupUi(self)
+
+        # 2.5 存档列表接入委托：MC 存档文件夹（内含 icon.png）的封面图标固定显示在行最右侧
+        self._save_icon_delegate = RightIconDelegate(icon_size=32, parent=self.targetDirList)
+        self.targetDirList.setItemDelegate(self._save_icon_delegate)
 
         # 3. 重置进度条为 0（防止上次运行遗留状态）
         self.backUpProgress.setValue(0)
@@ -135,7 +141,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
                     full_path = os.path.join(self.target_dir_path, item)  # 拼接文件名和目录路径得到文件的绝对路径
                     self.saves_list[item] = full_path  # 存入映射字典：键为文件名，值为绝对路径，便于后续通过文件名快速查找完整路径
 
-                self.targetDirList.addItems(items)  # 将文件列表一次性添加到 UI 列表框中供用户选择（会替换现有所有项）
+                self._add_list_items(items)  # 逐项构建列表项：MC 存档文件夹（内含 icon.png）在名称后方显示封面图标
 
             except OSError as e:  # 捕获目录不存在、权限不足、路径无效等操作系统相关异常
                 pass  # 静默处理，不弹出错误提示（配置会被记住用户上次选择的正确路径，避免误操作导致备份失败）
@@ -151,6 +157,33 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
                         index,
                         QItemSelectionModel.Select | QItemSelectionModel.Rows  # Select: 按整行选中所有子项；Rows: 同时选中该行中的所有单元格
                     )
+
+    def _add_list_items(self, items):
+        """将目录条目逐项添加到列表框，并为 MC 存档文件夹设置行右缘的封面图标
+
+        判断依据：文件夹内存档根目录下直接存在 icon 文件（icon.png / icon.jpg /
+        icon.jpeg / icon.webp / icon.bmp），则认为它是 MC 地图存档，
+        加载其封面图标固定显示在该行最右侧；普通文件/无 icon 的文件夹不设图标。
+
+        注意：列表项的 text 必须保持原始文件夹名不变（它是 saves_list/back_up_list
+        的字典键，选中恢复逻辑依赖 text 匹配），图标通过自定义数据角色携带，不影响 text。
+        """
+        icon_names = ("icon.png", "icon.jpg", "icon.jpeg", "icon.webp", "icon.bmp")
+        for name in items:
+            list_item = QListWidgetItem(name)  # text 保持原始文件夹名
+            full_path = self.saves_list.get(name, "")
+            pixmap = None
+            if os.path.isdir(full_path):  # 只有文件夹才可能是地图存档（普通文件如 session.lock 跳过）
+                for icon_name in icon_names:
+                    icon_path = os.path.join(full_path, icon_name)
+                    if os.path.exists(icon_path):
+                        pixmap = QPixmap(icon_path)
+                        if not pixmap.isNull():
+                            break  # 加载成功，找到封面图标
+                        pixmap = None  # 加载失败（文件损坏/格式不支持），继续尝试下一个候选名
+            if pixmap is not None:
+                self._save_icon_delegate.set_right_icon(list_item, pixmap)
+            self.targetDirList.addItem(list_item)
 
     def get_back_up_list(self):  # 获取用户选中的需要备份的文件列表
         """获取当前列表中用户选中的所有文件项，构建文件名到绝对路径的映射字典

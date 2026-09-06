@@ -1,7 +1,12 @@
 # utils/conflict_resolver.py
 # 跨卡片附魔冲突检测与解决：
-# 多件物品最终合成到一件时，互斥附魔（conflicts 列表）不能共存于最终合成物，
-# 弹窗让用户为每组冲突选择最终合成物要保留的附魔。
+# 多件物品最终合成到一件时，互斥附魔（conflicts 列表）不能共存于最终合成物。
+# 冲突处理规则（供开始计算时统一调用）：
+# - 自动决策：出现在全部非附魔书卡片上的附魔必然保留——非书物品在所有
+#   合并中只能做铁砧第一格，其附魔必定传入最终合成物（且互斥附魔不可能
+#   同时存在于同一物品上把它拦掉）。这类冲突无需询问用户，如只有一把剑
+#   且剑上有锋利，锋利必保留，书上的亡灵杀手必然被拦截计费。
+# - 其余冲突弹窗让用户为每组选择最终合成物要保留的附魔。
 # 注意：弹窗只记录决策，不从卡片移除任何附魔——未保留的附魔仍留在卡片上
 # 并正常计入合成花费（互斥不转移时每次 +1 级），只是不会出现在最终合成物中。
 from PySide6.QtWidgets import (
@@ -69,6 +74,49 @@ def find_conflict_clusters(cards_data: list, data_manager) -> list:
                 for members in groups.values() if len(members) > 1]
     clusters.sort(key=lambda ms: ms[0]["id"])
     return clusters
+
+
+def resolve_conflicts(clusters: list, cards_data: list) -> tuple:
+    """把冲突簇分为「自动决策」与「需用户决策」两组（开始计算时调用）
+
+    自动决策规则：附魔出现在**全部**非附魔书卡片上 → 必然保留。
+    依据：最终合成物由某张非书卡片沿铁砧第一格链传递而来，非书物品永远
+    做第一格（附魔书不能吞非书物品），其自带附魔不可被移除；且互斥附魔
+    不可能同时存在于同一物品上把它拦掉。如：只有一把剑且剑上有锋利，
+    锋利必保留，书上的亡灵杀手必然被拦截——冲突虽存在但可直接忽略。
+
+    参数：
+        clusters: find_conflict_clusters 返回的簇列表
+        cards_data: 卡片数据列表（同 find_conflict_clusters 入参）
+
+    返回：
+        (auto_choices, pending_clusters)
+        auto_choices: {簇序号(相对传入 clusters): 必然保留的附魔 ID}
+        pending_clusters: 仍需用户决策的簇列表（保持原相对顺序）
+    """
+    non_book_cards = [c for c in cards_data
+                      if c.get("item_name") and c["item_name"] != "附魔书"]
+    auto = {}
+    pending = []
+    if non_book_cards:
+        # 全部非书卡片共有的附魔 = 必然保留的附魔
+        common = {e["id"] for e in non_book_cards[0].get("enchants", [])}
+        for c in non_book_cards[1:]:
+            common &= {e["id"] for e in c.get("enchants", [])}
+        for ci, members in enumerate(clusters):
+            kept = [m["id"] for m in members if m["id"] in common]
+            # 簇内恰有一个必然保留方 → 整簇自动决策：该附魔保留，
+            # 簇内其余附魔注定被拦截计费（如 锋利×保护×爆炸保护 三者
+            # 互斥成一簇，锋利在剑上 → 保护/爆炸保护无需选择，均被拦截）；
+            # 零个 → 需用户选择；多个（同一卡片自带两个互斥附魔，正常
+            # 操作无法产生）→ 交回弹窗，由优化器对任一选择给出精确报错
+            if len(kept) == 1:
+                auto[ci] = kept[0]
+            else:
+                pending.append(members)
+    else:
+        pending = list(clusters)
+    return auto, pending
 
 
 class ConflictResolveDialog(QDialog):

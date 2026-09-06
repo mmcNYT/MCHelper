@@ -119,7 +119,7 @@ class Ui_enchantedItems(object):
 
         self.retranslateUi(enchantedItems)
 
-        self.allEnchantmentTab.setCurrentIndex(4)
+        self.allEnchantmentTab.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(enchantedItems)
