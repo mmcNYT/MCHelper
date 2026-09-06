@@ -1,4 +1,5 @@
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QSystemTrayIcon, QMenu, QStyle, QApplication
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QSystemTrayIcon, QMenu, QStyle, QApplication, QMessageBox
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon, QAction
 from Tools import TOOL_CLASSES
 from Tools.tool_Settings import SettingsWindow
@@ -22,6 +23,12 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         # 遍历注册列表，加载所有工具
         self.load_tools()
 
+        # 切换 tab 时窗口自适应当前工具的期望尺寸
+        self.tabWidget.currentChanged.connect(self.adapt_window_to_tool)
+        # 启动时首个 addTab 自动选中 index 0，但此时信号尚未连接；
+        # 用 0ms 延迟在事件循环启动后补一次自适应，避免程序以默认 800x600 打开
+        QTimer.singleShot(0, lambda: self.adapt_window_to_tool(self.tabWidget.currentIndex()))
+
         # 创建并绑定菜单栏的信号
         self.create_menu()
 
@@ -42,12 +49,56 @@ class MainWindow(QMainWindow,Ui_MCHelper):
             # 3. 添加到 Tab 页
             self.tabWidget.addTab(tool_widget, tool_name)
 
+    def adapt_window_to_tool(self, index: int):
+        """切换 tab 时窗口自适应当前工具的期望尺寸。
+
+        工具通过类属性 preferred_size = (宽, 高) 声明内容区期望尺寸：
+        - 声明了：窗口 resize 到 期望尺寸 + 窗口装饰差值（边框/标题栏/菜单栏/tab 栏，动态计算）
+        - 未声明（None）：保持当前窗口大小不动
+        - 窗口最大化/最小化/全屏时不干预
+        """
+        if index < 0:
+            return
+        widget = self.tabWidget.widget(index)
+        if widget is None:
+            return
+        preferred = getattr(widget, 'preferred_size', None)
+        if not preferred:
+            return
+        # 最大化/最小化/全屏状态不干预用户当前窗口状态
+        if self.isMaximized() or self.isMinimized() or self.isFullScreen():
+            return
+
+        # 客户区尺寸相对工具 widget 的固定开销 =
+        #   菜单栏 + central widget 布局边距 + tab 栏 + tab 页边框
+        # 这些开销不随窗口大小变化，用当前尺寸差直接补偿即可
+        # 注意 resize() 设置的是客户区尺寸，不能用 frameGeometry()（含原生边框）
+        chrome_w = self.width() - widget.width()
+        chrome_h = self.height() - widget.height()
+
+        target_content_w, target_content_h = preferred
+        self.resize(target_content_w + chrome_w, target_content_h + chrome_h)
+
     def closeEvent(self, event):
         """
         用户点击窗口关闭按钮时：
         - 如果托盘图标可见，则隐藏窗口（最小化到托盘）并忽略关闭事件。
         - 如果正在退出程序，则正常关闭。
+        - 关闭前询问各工具：备份进行中时提示用户并阻止关闭（避免留下不完整的备份文件）。
         """
+        # 逐个工具检查是否允许关闭（如 AutoBackUp 备份进行中返回 False）
+        for i in range(self.tabWidget.count()):
+            widget = self.tabWidget.widget(i)
+            if hasattr(widget, 'can_close') and callable(widget.can_close):
+                if not widget.can_close():
+                    # 有工具正在进行关键操作：提示用户，本次阻止关闭
+                    QMessageBox.warning(
+                        self, "无法关闭",
+                        "工具正在执行备份任务，关闭程序会产生不完整的备份文件。\n"
+                        "请等待备份完成后再关闭。")
+                    event.ignore()
+                    return
+
         if self.is_quitting or self.is_system_tray == False:
             # 正在退出，正常关闭窗口
             self.save_all_tools_config()

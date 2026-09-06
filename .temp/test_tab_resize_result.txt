@@ -1,0 +1,12 @@
+[PASS] 1a 已注册工具均已声明 preferred_size  ['AutoBackUpWidget', 'EnchantCalculatorWidget', 'StrongHoldFinderWidget']
+[PASS] 1b AutoBackUp preferred_size  
+[PASS] 1c Enchant preferred_size  
+[PASS] 2 启动即自适应（非默认 800x600）  idx=0 actual=628x475 preferred=(628, 475)
+[PASS] 3 附魔页自适应 634x518  actual=634x518 win=656x601
+[PASS] 4 备份页自适应 628x475  actual=628x475 win=650x558
+[PASS] 5 任意起点尺寸自适应  actual=634x518 win=656x601
+[PASS] 6 最大化时切换不干预  was_max=True
+[PASS] 7 无声明工具窗口不变  (656, 601) -> (656, 601)
+[PASS] 8a 备份中关窗被阻止  accepted=False warned=1
+[PASS] 8b 非备份状态不阻止关窗  accepted=True
+合计: 11/11 通过

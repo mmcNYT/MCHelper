@@ -25,7 +25,7 @@ class Ui_AutoBackUp(object):
         if not AutoBackUp.objectName():
             AutoBackUp.setObjectName(u"AutoBackUp")
         AutoBackUp.setEnabled(True)
-        AutoBackUp.resize(633, 475)
+        AutoBackUp.resize(628, 475)
         self.layoutWidget = QWidget(AutoBackUp)
         self.layoutWidget.setObjectName(u"layoutWidget")
         self.layoutWidget.setGeometry(QRect(40, 30, 541, 431))

@@ -6,6 +6,11 @@ class BaseToolWidget(QWidget):
     # 例如：请求主窗口显示状态栏消息等
     request_status_message = Signal(str)
 
+    # 可选：工具期望的主窗口内容区尺寸 (宽, 高)，单位像素
+    # 主窗口在切换到该工具的 tab 时会把窗口调整到该尺寸（窗口装饰差值自动计算）
+    # 设为 None 表示不声明，主窗口切换到该工具时保持当前窗口大小不动
+    preferred_size: tuple | None = None
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # 工具特有的初始化

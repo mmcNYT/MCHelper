@@ -73,6 +73,19 @@ class CardListWidget(QListWidget):
         """读取卡片项上记录的附魔 ID 列表"""
         return item.data(self.CARD_IDS_ROLE) or []
 
+    def replace_card(self, item, data: dict):
+        """原位替换指定条目的卡片数据并重建控件（编辑卡片确认后调用）
+
+        数据包结构同 add_card；条目仍留在原行（编辑不改变卡片顺序）。
+        重建走延迟机制（同 _move_item：规避重绑与销毁的时序冲突）。
+        """
+        if self.row(item) < 0:
+            return  # 条目已不存在（理论上不会发生），忽略
+        item.setData(self.CARD_DATA_ROLE, data)
+        item.setData(self.CARD_IDS_ROLE, [e["id"] for e in data["enchants"]])
+        QTimer.singleShot(
+            0, lambda: self._rebuild_card_at_item(item, data))
+
     # ---------- 数据读取 / 附魔移除（供跨卡片冲突解决使用） ----------
     def all_card_data(self) -> list:
         """读取全部卡片数据包列表 [{"item_name", "enchants": [...]}, ...]"""

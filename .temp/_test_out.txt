@@ -1,0 +1,15 @@
+1. format_bytes 全部边界用例通过（B/KB/MB/GB/TB、≥10 取整） ✓
+2. 源目录无效时显示不可选提示项（不静默空白） ✓
+3. 防抖 300ms：setText 不立即刷新，到期后正常刷新 ✓
+4. 备份中重入拦截 + 5. 目标目录为空提前拦截（无崩溃） ✓
+6. can_close：备份中 False / 平时 True ✓
+   回归：空备份列表提示正常 ✓
+8a. 会话文件写入成功 ✓
+8b. 重启恢复卡片成功（剑+附魔书，附魔完整） ✓
+8c. prefill_data 预填：物品类型/附魔/等级全部恢复 ✓
+8d. replace_card 原位替换：数据更新、顺序不变、其余卡片不受影响 ✓
+8e. 清空卡片后同步保存空会话 ✓
+恢复附魔计算器会话失败: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+8f. 损坏会话文件静默跳过（不崩溃） ✓
+
+全部冒烟测试通过

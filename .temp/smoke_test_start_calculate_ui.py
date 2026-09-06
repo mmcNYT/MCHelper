@@ -70,6 +70,21 @@ class FakeMsgBox(QObject):
 tec.ConflictResolveDialog = FakeConflictDlg
 tec.QMessageBox = FakeMsgBox
 
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染测试初始状态 ----------
+_session_path = tec.EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 w = tec.EnchantCalculatorWidget()
 w.resize(658, 518)
 w.show()
@@ -261,4 +276,5 @@ w4.close()
 print("8. 保留不适用于剑的无限 → 警告“无法合成一件”（约束互斥生效）✓")
 
 w.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

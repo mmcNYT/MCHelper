@@ -1,0 +1,7 @@
+构造完成(未show) currentIndex=0 count=3
+构造完成(未show) 窗口尺寸=800x600
+show后 currentIndex=0 count=3
+show后 窗口尺寸=800x600
+show后 工具页0尺寸=776x500
+singleShot触发: [('singleShot', 0, 800, 600)]
+OK

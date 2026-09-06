@@ -85,7 +85,8 @@ try:
     widget = AutoBackUpWidget()
     widget.back_up_list = {}
     widget.target_dir_path = base
-    widget.targetDirPath.setText(base)  # 触发 textChanged -> refresh_dir_list
+    widget.targetDirPath.setText(base)  # 触发 textChanged -> refresh_dir_list（防抖 300ms）
+    widget._do_refresh_dir_list()       # 测试不等防抖：直接执行实际刷新
     app.processEvents()
 
     expected_names = set(os.listdir(base))

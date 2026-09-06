@@ -17,6 +17,24 @@ from PySide6.QtCore import Qt
 
 app = QApplication(sys.argv)
 
+import Tools.tool_EnchantCaculator as _tec_isol
+
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染测试初始状态 ----------
+# （master 新增功能：部件构造时自动恢复上次卡片，测试需要干净的初始列表）
+_session_path = _tec_isol.EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 from Utils.conflict_resolver import find_conflict_clusters, ConflictResolveDialog
 from Utils.enchant_data_manager import DataManager
 from Utils.card_list_widget import CardListWidget
@@ -280,4 +298,5 @@ print("4e. 再次计算：预选上次决策 + 改选更新（卡片始终不变
 
 w.close()
 w2.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

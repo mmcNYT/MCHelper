@@ -77,6 +77,13 @@ print("4. tooltip 方框文本行与尺寸 ✓")
 # ---------- 5. add_item_card 完整链路 ----------
 from Tools.tool_EnchantCaculator import EnchantCalculatorWidget
 
+# 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染初始列表
+_session_path = EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
 widget = EnchantCalculatorWidget()
 assert widget.chosenItemList.count() == 0, "初始列表应为空"
 data = {"item_name": "剑", "enchants": enchants}
@@ -114,4 +121,8 @@ assert any("锋利 V" in t for t in box_in_card._line_texts), "应含 锋利 V �
 assert any("时运 III" in t for t in box_in_card._line_texts), "应含 时运 III 行"
 print("6. 端到端：确认选择 → 卡片显示（名称+罗马数字附魔） ✓")
 
+# 恢复用户真实会话文件
+if _saved_session is not None:
+    with open(_session_path, "w", encoding="utf-8") as f:
+        f.write(_saved_session)
 print("\n全部冒烟测试通过")

@@ -20,6 +20,21 @@ from Tools.tool_EnchantCaculator import EnchantCalculatorWidget
 from Utils.card_list_widget import CardListWidget
 from Utils.enchanted_item_card import EnchantedItemCard
 
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染初始列表 ----------
+_session_path = EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 widget = EnchantCalculatorWidget()
 widget.resize(658, 518)
 widget.show()
@@ -205,4 +220,5 @@ assert (c5.red(), c5.green(), c5.blue()) == (236, 236, 236), \
 print("5b. 视口淡灰背景 #ECECEC 实测生效 ✓")
 
 widget.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

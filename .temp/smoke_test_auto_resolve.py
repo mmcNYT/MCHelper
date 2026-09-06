@@ -27,6 +27,21 @@ import Tools.tool_EnchantCaculator as tec
 from Utils.conflict_resolver import find_conflict_clusters, resolve_conflicts
 from Utils.enchant_data_manager import DataManager
 
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染测试初始状态 ----------
+_session_path = tec.EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 dm = DataManager()
 
 # ---------- mock 弹窗（记录调用） ----------
@@ -230,4 +245,5 @@ print("6. defaults 记忆按待决策簇映射 ✓")
 w.close()
 w2.close()
 w2b.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

@@ -3,8 +3,9 @@ import json
 import zipfile
 from datetime import datetime
 import shutil
-from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
+from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel, QTimer
 from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QListWidgetItem
 from .tool_base import BaseToolWidget
 from Utils.signals_AutoBackUp import backup_bus
@@ -16,12 +17,33 @@ from Threads.task_AutoBackUp import BackupTask
 from CodesUI.AutoBackUp import Ui_AutoBackUp
 
 
+def format_bytes(num_bytes: int) -> str:
+    """字节数格式化为易读单位（1024 进制，保留 1 位小数，整数时省略 .0）
+
+    示例：123456789 → "117.7 MB"；532 → "532 B"；1024 → "1 KB"
+    """
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    units = ["KB", "MB", "GB", "TB"]
+    value = float(num_bytes)
+    for unit in units:
+        value /= 1024
+        if value < 1024 or unit == "TB":
+            text = f"{value:.1f}"
+            if text.endswith(".0"):
+                text = text[:-2]  # 整数值省略小数（1024 → "1 KB"）
+            return f"{text} {unit}"
+    return f"{value:.1f} TB"
+
+
 class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
     """自动备份工具的主窗口类，继承自 BaseToolWidget 和 UI 类"""
     target_dir_path: str = ''  # 源文件夹路径（需要备份的原始文件所在目录）
     des_dir_path: str = ''     # 目标文件夹路径（备份文件保存到的压缩文件存放目录）
     saves_list: dict = {}      # 源文件夹下的所有文件路径映射 {文件名：绝对路径}
     back_up_list: dict = {}    # 用户选中的需要备份的文件列表 {列表项文本：文件绝对路径}
+    _ICON_NAMES = ("icon.png", "icon.jpg", "icon.jpeg", "icon.webp", "icon.bmp")  # 存档封面图标候选文件名
+    preferred_size = (628, 475)  # UI 设计尺寸，主窗口切到本 tab 时自适应
 
     def __init__(self, parent=None):
         """初始化自动备份工具窗口"""
@@ -34,6 +56,17 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         # 2.5 存档列表接入委托：MC 存档文件夹（内含 icon.png）的封面图标固定显示在行最右侧
         self._save_icon_delegate = RightIconDelegate(icon_size=32, parent=self.targetDirList)
         self.targetDirList.setItemDelegate(self._save_icon_delegate)
+
+        # 2.6 目录列表刷新防抖定时器：路径输入每变一次就重开 300ms 计时，
+        # 停止输入 300ms 后才真正刷新（避免逐字符刷新卡顿）
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(300)
+        self._refresh_timer.timeout.connect(self._do_refresh_dir_list)
+
+        # 2.7 存档图标缓存 {icon文件绝对路径: QPixmap}：同一目录多次刷新
+        # 时不重复读盘解码；目录变化时旧条目自然废弃
+        self._icon_cache = {}
 
         # 3. 重置进度条为 0（防止上次运行遗留状态）
         self.backUpProgress.setValue(0)
@@ -56,6 +89,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         self.finished_bytes = 0     # 已完成备份的数据量（字节）
         self.total_tasks = 0        # 备份任务总数
         self.failed_tasks = 0       # 失败的备份任务数量
+        self.is_backing_up = False  # 是否正在进行备份（重入保护：备份中拒绝再次发起；关闭保护：主窗口关窗前询问）
         self.is_auto_back_up = True # 是否进行自动备份
 
         # 7. 进程监测相关变量初始化
@@ -121,11 +155,18 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
     @Slot()
     def refresh_dir_list(self):
-        """当源路径文本框内容变化时触发：遍历源文件夹下的所有文件，并加载到列表框中
+        """当源路径文本框内容变化时触发：防抖后刷新文件夹列表
 
-        功能说明：
-        - 读取目标目录路径后，列出该目录下所有文件和子文件夹
-        - 将文件列表添加到 UI 列表框供用户选择
+        直接刷新代价高（listdir + 逐个加载存档 icon），逐字符触发会卡顿；
+        这里只重启 300ms 单次定时器，用户停止输入后才真正执行刷新。
+        """
+        self._refresh_timer.start()
+
+    def _do_refresh_dir_list(self):
+        """实际刷新逻辑（防抖到期后执行）：遍历源文件夹下的所有条目并加载到列表框
+
+        - 目录不存在 / 无法读取 → 列表显示一行不可选的提示项（不再静默空白）
+        - 正常时列出所有条目，MC 存档文件夹在名称右缘显示封面图标
         - 自动恢复之前保存的选中项状态（从配置中读取）
         """
         # 只有当设置了源路径时才执行，避免对空路径进行文件操作导致异常
@@ -134,17 +175,23 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             self.saves_list.clear()         # 清空字典（保持与列表框同步，用于存储文件名到绝对路径的映射关系）
 
             try:
-                # os.listdir 读取目标目录下的所有条目（文件和子文件夹名称），不包括符号链接
+                # 先校验目录可访问（不存在/权限不足时给出明确提示，而非静默空白）
+                if not os.path.isdir(self.target_dir_path):
+                    raise OSError("目录不存在")
+                # os.listdir 读取目标目录下的所有条目（文件和子文件夹名称，不包括符号链接）
                 items = os.listdir(self.target_dir_path)
 
                 for item in items:  # 遍历获取到的每个文件/文件夹名称
                     full_path = os.path.join(self.target_dir_path, item)  # 拼接文件名和目录路径得到文件的绝对路径
                     self.saves_list[item] = full_path  # 存入映射字典：键为文件名，值为绝对路径，便于后续通过文件名快速查找完整路径
 
-                self._add_list_items(items)  # 逐项构建列表项：MC 存档文件夹（内含 icon.png）在名称后方显示封面图标
+                self._add_list_items(items)  # 逐项构建列表项：MC 存档文件夹（内含 icon.png）在行右缘显示封面图标
 
             except OSError as e:  # 捕获目录不存在、权限不足、路径无效等操作系统相关异常
-                pass  # 静默处理，不弹出错误提示（配置会被记住用户上次选择的正确路径，避免误操作导致备份失败）
+                # 目录无效：显示一行不可选的置灰提示项，告知用户原因（不弹窗打扰）
+                self._show_dir_error_item(
+                    "无法读取源目录：" + self.target_dir_path + "（路径不存在或无权限）")
+                return  # 目录无效时没有条目可恢复选中，直接返回
 
             # 【关键功能】自动勾选之前保存配置时选中的项目：
             # 从配置文件读取用户之前选中的文件列表，恢复选中状态
@@ -158,6 +205,29 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
                         QItemSelectionModel.Select | QItemSelectionModel.Rows  # Select: 按整行选中所有子项；Rows: 同时选中该行中的所有单元格
                     )
 
+    def _show_dir_error_item(self, message: str):
+        """在列表中显示一行不可选的置灰提示（源目录无效时）"""
+        hint = QListWidgetItem(message)
+        hint.setFlags(Qt.ItemFlag.NoItemFlags)  # 不可选、不可交互
+        self.targetDirList.addItem(hint)
+
+    def _load_save_icon(self, full_path: str):
+        """加载存档文件夹的封面图标（带缓存），失败返回 None
+
+        候选文件名：icon.png / icon.jpg / icon.jpeg / icon.webp / icon.bmp；
+        缓存键为 icon 文件绝对路径，同一目录反复刷新不重复读盘解码。
+        """
+        for icon_name in self._ICON_NAMES:
+            icon_path = os.path.join(full_path, icon_name)
+            if icon_path in self._icon_cache:
+                return self._icon_cache[icon_path]
+            if os.path.exists(icon_path):
+                pixmap = QPixmap(icon_path)
+                if not pixmap.isNull():
+                    self._icon_cache[icon_path] = pixmap  # 缓存有效图标
+                    return pixmap
+        return None
+
     def _add_list_items(self, items):
         """将目录条目逐项添加到列表框，并为 MC 存档文件夹设置行右缘的封面图标
 
@@ -168,21 +238,13 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         注意：列表项的 text 必须保持原始文件夹名不变（它是 saves_list/back_up_list
         的字典键，选中恢复逻辑依赖 text 匹配），图标通过自定义数据角色携带，不影响 text。
         """
-        icon_names = ("icon.png", "icon.jpg", "icon.jpeg", "icon.webp", "icon.bmp")
         for name in items:
             list_item = QListWidgetItem(name)  # text 保持原始文件夹名
             full_path = self.saves_list.get(name, "")
-            pixmap = None
             if os.path.isdir(full_path):  # 只有文件夹才可能是地图存档（普通文件如 session.lock 跳过）
-                for icon_name in icon_names:
-                    icon_path = os.path.join(full_path, icon_name)
-                    if os.path.exists(icon_path):
-                        pixmap = QPixmap(icon_path)
-                        if not pixmap.isNull():
-                            break  # 加载成功，找到封面图标
-                        pixmap = None  # 加载失败（文件损坏/格式不支持），继续尝试下一个候选名
-            if pixmap is not None:
-                self._save_icon_delegate.set_right_icon(list_item, pixmap)
+                pixmap = self._load_save_icon(full_path)
+                if pixmap is not None:
+                    self._save_icon_delegate.set_right_icon(list_item, pixmap)
             self.targetDirList.addItem(list_item)
 
     def get_back_up_list(self):  # 获取用户选中的需要备份的文件列表
@@ -243,7 +305,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             self.des_dir_path = data.get("des_dir_path", "")
             self.back_up_list = data.get("back_up_list", {})
             self.target_process = data.get("target_process", "")
-            self.is_auto_back_up = data.get("is_auto_back_up", bool)
+            self.is_auto_back_up = data.get("is_auto_back_up", True)  # 缺省 True（首次启动默认开启自动备份）
 
             #更新UI
             self.targetDirPath.setText(self.target_dir_path)
@@ -274,7 +336,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
             "des_dir_path": getattr(self, "des_dir_path", ""),
             "back_up_list": getattr(self, "back_up_list", {}),
             "target_process": getattr(self, "target_process", ""),
-            "is_auto_back_up": getattr(self, "is_auto_back_up", bool)
+            "is_auto_back_up": getattr(self, "is_auto_back_up", True)
         }
         config_path = self.get_config_path()
         try:
@@ -303,12 +365,23 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         # 调用 save_config() 先将配置保存，确保配置文件为最新状态
         self.save_config()
 
+        # 重入保护：备份进行中拒绝再次发起（手动点击已被按钮禁用拦截，
+        # 此处主要拦截进程退出触发的自动备份，防止计数被重置导致进度错乱）
+        if self.is_backing_up:
+            self.informationBrowser.append("提示：已有备份正在进行，本次触发已忽略")
+            return
+
         if not self.back_up_list:
             # 向信息输出区提示用户需要先在上方添加备份项目
             self.informationBrowser.append("错误：备份列表为空，请先设置")
             return
 
-        # 自动创建目标备份目录（若不存在），避免写入时出错
+        if not self.des_dir_path:
+            # 目标目录未设置时 makedirs('') 会抛 FileNotFoundError，提前拦截
+            self.informationBrowser.append("错误：请先设置备份目标目录")
+            return
+
+        # 自动创建目标备份目录（若不存在），避免后续写入出错
         os.makedirs(self.des_dir_path, exist_ok=True)
 
         # ====== 阶段一：过滤有效文件，计算总大小 ======
@@ -320,7 +393,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
             if not os.path.exists(file_path):
                 # 用户输入的路径不存在（可能文件已删除或路径写错）
-                self.text_browser.append(f"警告：路径不存在，跳过 - {file_path}")
+                self.informationBrowser.append(f"警告：路径不存在，跳过 - {file_path}")
                 continue
 
             # 判断是文件夹还是单文件
@@ -339,7 +412,7 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
                 valid_paths.append(file_path)
             else:
                 # 既不是文件夹也不是文件的异常情况（理论上不会发生）
-                self.text_browser.append(f"警告：未知类型，跳过 - {file_path}")
+                self.informationBrowser.append(f"警告：未知类型，跳过 - {file_path}")
 
         if not valid_paths:
             # 所有路径都不合法或无效时终止备份流程
@@ -351,21 +424,37 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         self.finished_tasks = 0
         self.failed_tasks = 0
         self.total_tasks = len(valid_paths)
+        self.is_backing_up = True           # 标记备份进行中（重入保护 + 关闭保护）
         self.backUpProgress.setValue(0)
         self.informationBrowser.clear()
         # 禁用开始按钮防止重复点击
         self.startBackUp.setEnabled(False)
-        # 输出备份任务概览（含用户传入的 status 参数）
-        self.informationBrowser.append(f"开始{status}备份，总大小：{self.total_bytes} 字节，共 {self.total_tasks} 个文件")
+        # 备份期间禁用路径编辑与列表选择：防止用户修改路径/选区与正在进行的备份交错
+        self._set_backup_controls_enabled(False)
+        # 输出备份任务概览（含用户传入的 status 参数，总大小格式化为易读单位）
+        self.informationBrowser.append(
+            f"开始{status}备份，总大小：{format_bytes(self.total_bytes)}，共 {self.total_tasks} 个文件")
 
         # ====== 阶段三：提交任务到多线程池 ======
         for idx, item in enumerate(valid_paths):
-            print(item)
             file_path = item
             # 创建备份任务对象，传入文件路径和目标目录
             task = BackupTask(task_id=idx, file_path=file_path, dest_dir=self.des_dir_path)
             # 将任务提交到线程池异步执行
             self.thread_pool.start(task)
+
+    def _set_backup_controls_enabled(self, enabled: bool):
+        """备份期间禁用/恢复路径编辑与列表选择（按钮不在此列，由 finished 统一恢复）"""
+        self.chooseTargetDir.setEnabled(enabled)
+        self.targetDirPath.setReadOnly(not enabled)
+        self.targetDirList.setEnabled(enabled)
+
+    def can_close(self) -> bool:
+        """主窗口关闭前调用：备份进行中时告知用户并阻止关闭（避免留下不完整的 zip）
+
+        返回 True 表示可以关闭；False 表示正在备份，需用户确认后再关闭。
+        """
+        return not self.is_backing_up
 
     # -----------主线程槽函数-----------
     @Slot()
@@ -427,7 +516,9 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
         # 检查是否所有子任务都已完成
         if self.finished_tasks == self.total_tasks:
+            self.is_backing_up = False      # 清除备份进行中标志（重入/关闭保护解除）
             self.startBackUp.setEnabled(True)
+            self._set_backup_controls_enabled(True)  # 恢复路径编辑与列表选择
             if self.failed_tasks == 0:
                 self.informationBrowser.append("所有备份任务成功完成！")
                 NotificationWidget.Show("备份完成", "所有文件已成功备份。", 3000)

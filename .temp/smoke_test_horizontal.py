@@ -19,6 +19,21 @@ app = QApplication(sys.argv)
 from Tools.tool_EnchantCaculator import EnchantCalculatorWidget
 from Utils.enchanted_item_card import EnchantedItemCard
 
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染初始列表 ----------
+_session_path = EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 # ---------- 1. 流方向与换行配置 ----------
 widget = EnchantCalculatorWidget()
 widget.resize(658, 518)
@@ -77,4 +92,5 @@ print("4. 端到端：确认 → 卡片进入横排列表 ✓")
 
 widget.close()
 widget2.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

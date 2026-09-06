@@ -9,8 +9,11 @@ from Utils.anvil_optimizer import AnvilOptimizer, AnvilError, build_items_from_c
 from Utils.anvil_steps_tree import AnvilStepsTree
 from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+import os
+import json
 
 class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
+    preferred_size = (634, 518)  # UI 设计尺寸，主窗口切到本 tab 时自适应
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -51,6 +54,52 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         self._last_plan = None
         self._last_dm = None
 
+        # 双击卡片 → 编辑模式重新打开选择窗（预填该卡数据，确认后原位替换）
+        self.chosenItemList.itemDoubleClicked.connect(self._edit_card_at)
+
+        # 启动时恢复上次会话的卡片（异常时静默丢弃，不影响启动）
+        self._restore_session()
+
+    # ---------- 会话持久化（卡片重启不丢） ----------
+    def _session_path(self) -> str:
+        """会话文件路径（用户配置目录下 enchant_session.json）"""
+        config_dir = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+        if not config_dir:
+            config_dir = os.path.dirname(os.path.abspath(__file__))
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "enchant_session.json")
+
+    def _restore_session(self):
+        """启动时从会话文件恢复卡片列表（文件缺失/损坏时静默跳过）"""
+        path = self._session_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                cards = json.load(f)
+            if not isinstance(cards, list):
+                return
+            for data in cards:
+                # 逐项校验数据包结构，异常项跳过（不阻止其余恢复）
+                if (isinstance(data, dict) and data.get("item_name")
+                        and isinstance(data.get("enchants"), list)):
+                    self.chosenItemList.add_card(data)
+        except (OSError, ValueError) as e:
+            print(f"恢复附魔计算器会话失败: {e}")
+
+    def _save_session(self):
+        """把当前卡片列表写入会话文件（卡片结构变化时调用）"""
+        try:
+            with open(self._session_path(), 'w', encoding='utf-8') as f:
+                json.dump(self.chosenItemList.all_card_data(), f,
+                          ensure_ascii=False, indent=2)
+        except OSError as e:
+            print(f"保存附魔计算器会话失败: {e}")
+
+    def save_config(self):
+        """主窗口退出时调用（save_all_tools_config 协议）：保存卡片会话"""
+        self._save_session()
+
     # ---------- 实现基类接口 ----------
     @classmethod
     def tool_name(cls) -> str:
@@ -70,6 +119,7 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         # 确认后把物品卡片（图标+附魔方框）添加到展示列表
         if self.selected_stuff:
             self.add_item_card(self.selected_stuff)
+            self._save_session()  # 卡片变化，同步保存会话
 
     def allowed_item_types(self):
         """当前允许选择的物品类型集合（None = 不限制）
@@ -94,6 +144,25 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
                   {"item_name": str, "enchants": [{"id","name","level"}, ...]}
         """
         self.chosenItemList.add_card(data)
+
+    def _edit_card_at(self, item):
+        """双击卡片：编辑模式重新打开选择窗（预填该卡数据，确认后原位替换）
+
+        与新增的区别：确认后不是 append 而是替换被双击的卡片；取消则不动。
+        """
+        data = item.data(self.chosenItemList.CARD_DATA_ROLE)
+        if not data:
+            return
+        # 编辑时类型约束以「除本卡外的其它卡片」计算（本卡要被替换，不算既存类型）
+        others = [d for d in self.chosenItemList.all_card_data() if d is not data]
+        names = {d["item_name"] for d in others if d["item_name"] != "附魔书"}
+        allowed = ({"附魔书"} | names) if names else None
+        win = ChooseItemsWindow(self, allowed_item_names=allowed, prefill_data=data)
+        win.exec()
+        if win.selected_data:
+            # 原位替换：把新数据写回被双击的条目并重建卡片控件
+            self.chosenItemList.replace_card(item, win.selected_data)
+            self._save_session()  # 卡片变化，同步保存会话
 
     def _resolve_conflicts_for_calculate(self, cards, dm) -> bool:
         """开始计算时的冲突决策（统一在此处理，添加卡片时不再弹窗）
@@ -146,6 +215,7 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
         self._last_plan = None
         self._last_dm = None
         self.realSteps.clear_plan()
+        self._save_session()  # 卡片变化，同步保存会话（空列表）
 
     def do_start_calculate(self):
         """开始计算：收集卡片数据 → 冲突决策（自动+弹窗）→ 优化 → 步骤图展示

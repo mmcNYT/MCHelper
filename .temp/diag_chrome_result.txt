@@ -1,0 +1,6 @@
+初始(未选tab): frame=800x630 client=800x600 menuBar=33 tabW=782x529
+切附魔后: frame=658x678 client=658x648 menuBar=33 tabWidget=640x577 tool=634x548
+  chrome_w(frame-tool) = 24
+  chrome_h(frame-tool) = 130
+  分解: client-frame_h=-30 menuBar_h=33 tabWidget_h-tool_h=29
+切备份后: frame=652x635 tool=628x505 chrome_h=130

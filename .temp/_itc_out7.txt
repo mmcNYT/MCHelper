@@ -1,0 +1,1 @@
+{'A_mock_without_clear': 7}

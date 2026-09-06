@@ -98,6 +98,23 @@ print("3. 树状图模式默认行为不变（5 框）✓")
 # ========== 4. 模式切换即时重渲染（UI 集成） ==========
 import Tools.tool_EnchantCaculator as tec
 
+# ---------- 会话隔离：移走用户真实卡片会话 ----------
+# （master 新增 _restore_session：构造部件时自动恢复上次卡片；用户旧卡片
+#   可能带互斥附魔触发真实冲突弹窗 exec() 阻塞，且污染测试初始列表）
+_session_path = tec.EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
+
+def _restore_session_file():
+    """测试结束后恢复用户真实会话文件（移走前的内容）"""
+    if _saved_session is not None:
+        with open(_session_path, "w", encoding="utf-8") as f:
+            f.write(_saved_session)
+
+
 w = tec.EnchantCalculatorWidget()
 w.resize(800, 600)
 w.show()
@@ -141,6 +158,12 @@ assert w.realSteps.is_placeholder(), "无方案时切换模式应保持占位"
 print("5. 清空后恢复占位，模式切换不再渲染 ✓")
 
 # ========== 6. 步骤图圆标 tooltip 可用 ==========
+# 注意：用例 5 已清空卡片，此处必须重新添加，否则 do_start_calculate
+# 会弹「请先添加物品卡片」模态提示框，自动化无人点确认会永久阻塞
+w.chosenItemList.add_card(cards[0])
+w.chosenItemList.add_card(cards[1])
+w.chosenItemList.add_card(cards[2])
+app.processEvents()
 w.do_start_calculate()   # 当前 displayMode=1（步骤图）
 app.processEvents()
 assert len(w.realSteps.boxes()) == 6, "步骤图模式下计算应直接渲染线性"
@@ -151,13 +174,16 @@ assert any("累积惩罚" in t or "级" in t for t, _ in lines), lines
 print("6. 步骤图圆标 tooltip（步骤序号+计费明细）✓")
 
 # ========== 7. 过于昂贵步骤标签红色提示 ==========
-# 构造一个高花费方案：大量附魔书合并（锋利V 书合成多级）
-cards7 = [card("剑"),
-          card("附魔书", ("sharpness", "锋利", 5), ("looting", "抢夺", 3),
-               ("fire_aspect", "火焰附加", 2), ("knockback", "击退", 2),
-               ("sweeping_edge", "横扫之刃", 3)),
-          card("附魔书", ("mending", "经验修补", 1), ("unbreaking", "耐久", 3),
-               ("vanishing_curse", "消失诅咒", 1))]
+# 触发条件实测：优化器会尽量平衡合并规避 40 级，小组合必然全 <40；
+# 8 种满级书 ×4 本（共 32 步方案）实测产生 step31=41、step32=71 级
+books7 = []
+for eid, ename, lv in [("sharpness", "锋利", 5), ("looting", "抢夺", 3),
+                       ("fire_aspect", "火焰附加", 2), ("knockback", "击退", 2),
+                       ("sweeping_edge", "横扫之刃", 3), ("mending", "经验修补", 1),
+                       ("unbreaking", "耐久", 3), ("vanishing_curse", "消失诅咒", 1)]:
+    for _ in range(4):
+        books7.append(card("附魔书", (eid, ename, lv)))
+cards7 = [card("剑")] + books7
 plan7 = opt.optimize(build_items_from_cards(cards7))
 assert plan7.too_expensive_steps, "测试前提：应有过于昂贵步骤"
 tree.clear_plan()
@@ -174,4 +200,5 @@ assert any(it.brush().color() == _WARN_COLOR for it in labels), \
 print("7. 过于昂贵步骤：行末红色标签提示 ✓")
 
 w.close()
+_restore_session_file()
 print("\n全部冒烟测试通过")

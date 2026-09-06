@@ -40,6 +40,7 @@ try:
     widget.back_up_list = {}
     widget.target_dir_path = base
     widget.targetDirPath.setText(base)
+    widget._do_refresh_dir_list()  # 防抖 300ms，预览直接执行实际刷新
     app.processEvents()
 
     widget.resize(900, 800)

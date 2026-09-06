@@ -14,8 +14,13 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
     allowed_item_names: 可选，物品类型白名单（set[str]）。传入时从物品
     下拉框移除白名单之外的类型（如已添加剑卡片后只允许「附魔书、剑」），
     None 表示不限制。必须在连接信号之前过滤，避免触发切换清空联动。
+
+    prefill_data: 可选，编辑卡片时的预填数据包（与 on_confirm_clicked
+    生成的 selected_data 结构相同）。传入时恢复物品类型下拉框选中项并
+    重新拖入已选附魔；None 表示新建模式。预填在信号连接之后执行，
+    setCurrentIndex 引发的清空联动发生在预填拖入之前，不影响结果。
     """
-    def __init__(self, parent=None, allowed_item_names=None):
+    def __init__(self, parent=None, allowed_item_names=None, prefill_data=None):
         super().__init__(parent)
 
         self.data_manager = DataManager()
@@ -48,6 +53,17 @@ class ChooseItemsWindow(QDialog, Ui_enchantedItems):
         self.itemsList.currentIndexChanged.connect(self.on_item_type_changed)
         self.clearEnchantList.clicked.connect(self.on_clear_clicked)
         self.confirmItem.clicked.connect(self.on_confirm_clicked)
+
+        # 编辑模式预填：恢复物品类型选中项，再逐个拖入已选附魔
+        # （须在信号连接之后：若触发 on_item_type_changed 清空联动，
+        #   也发生在预填拖入之前，不影响结果；未找到类型时保持默认）
+        if prefill_data and prefill_data.get("item_name"):
+            item_name = prefill_data["item_name"]
+            idx = self.itemsList.findText(item_name)
+            if idx >= 0:
+                self.itemsList.setCurrentIndex(idx)
+            for e in prefill_data.get("enchants", []):
+                self.on_enchant_dropped(e.get("id"), e.get("level", 1))
 
         # 确认后的数据包（由 on_confirm_clicked 填充，供调用方在 exec() 返回后读取）
         self.selected_data = None

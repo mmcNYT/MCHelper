@@ -24,6 +24,13 @@ import Tools.tool_EnchantCaculator as tec
 from Utils.choose_items import ChooseItemsWindow
 from Utils.anvil_steps_tree import AnvilStepsTree
 
+# ---------- 会话隔离：移走用户真实卡片会话，防止 _restore_session 污染初始列表 ----------
+_session_path = tec.EnchantCalculatorWidget()._session_path()
+_saved_session = open(_session_path, "r", encoding="utf-8").read() \
+    if os.path.exists(_session_path) else None
+if os.path.exists(_session_path):
+    os.remove(_session_path)
+
 # ========== 1. 白名单过滤：下拉框只留白名单类型 ==========
 win = ChooseItemsWindow(allowed_item_names={"附魔书", "剑"})
 texts = [win.itemsList.itemText(i) for i in range(win.itemsList.count())]
@@ -88,6 +95,10 @@ finally:
 print("3. do_choose_items 端到端：约束随卡片实时计算 ✓")
 
 # ========== 4. 清空按钮联动步骤图 ==========
+# 注意：用例 3 通过 do_choose_items 真实添加过卡片，产品代码已把卡片
+# 写入会话文件；此处必须再次清空会话，否则 w2 构造时会恢复出多余卡片
+if os.path.exists(_session_path):
+    os.remove(_session_path)
 w2 = tec.EnchantCalculatorWidget()
 w2.resize(658, 518)
 w2.show()
@@ -123,6 +134,9 @@ w2.close()
 print("4. 清空按钮：卡片+步骤图+决策同步清空，且可重新选择任意类型 ✓")
 
 # ========== 5. 回归：clearItems 走 do_clear_cards（清图生效） ==========
+# 同用例 4：w2 期间的操作同样写回了会话，先清空再建部件
+if os.path.exists(_session_path):
+    os.remove(_session_path)
 w3 = tec.EnchantCalculatorWidget()
 w3.chosenItemList.add_card({"item_name": "剑", "enchants": []})
 w3.do_start_calculate()  # 单物品方案
@@ -135,4 +149,8 @@ assert not w3.realSteps.is_placeholder(), \
 w3.close()
 print("5. 回归：清图逻辑位于 do_clear_cards ✓")
 
+# 恢复用户真实会话文件
+if _saved_session is not None:
+    with open(_session_path, "w", encoding="utf-8") as f:
+        f.write(_saved_session)
 print("\n全部冒烟测试通过")
