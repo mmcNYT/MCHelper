@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """冒烟测试：跨卡片附魔冲突检测与解决
 1. 簇检测：无冲突 / 两附魔互斥 / 同附魔多卡合并 / 三方互斥 / 多簇独立
-2. 对话框：单选默认值 / choices 读取 / 多簇
+2. 对话框：单选默认值 / choices 读取 / 多簇 / defaults 预选
 3. remove_enchants_everywhere：按物品名移除附魔并重绘、无关节卡不动
-4. 集成：add_item_card 自动弹窗（自动应答确定/拒绝），弃用附魔从对应卡片移除
+4. 集成：add_item_card 自动弹窗（自动应答确定/拒绝）——决策只记录不移除卡片
 """
 import os
 import sys
@@ -112,6 +112,24 @@ c = dlg2.choices()
 assert c == {0: "smite", 1: "protection"}, f"多簇 choices 应独立，实际 {c}"
 print("2. 对话框：默认选中/choices 读取/多簇独立 ✓")
 
+# 2b. defaults 预选上次决策
+dlg3 = ConflictResolveDialog(clusters + clusters2,
+                             defaults={0: "sharpness", 1: "fire_protection"})
+checked3 = {eid for pairs in dlg3._radios for eid, rb in pairs if rb.isChecked()}
+assert checked3 == {"sharpness", "fire_protection"}, \
+    f"defaults 应预选上次决策，实际 {checked3}"
+# defaults 中的 ID 不在簇内（卡片已变）→ 回退选第一个
+dlg4 = ConflictResolveDialog(clusters, defaults={0: "protection"})
+checked4 = {eid for pairs in dlg4._radios for eid, rb in pairs if rb.isChecked()}
+assert len(checked4) == 1 and checked4 <= {"sharpness", "smite"}, \
+    f"无效 defaults 应回退选第一个，实际 {checked4}"
+# 文案：不再宣称"从卡片移除"，且说明未保留附魔仍计费
+from PySide6.QtWidgets import QLabel
+tip_text = " ".join(lb.text() for lb in dlg4.findChildren(QLabel))
+assert "移除" not in tip_text, f"文案不应包含'移除'，实际 {tip_text}"
+assert "计入合成花费" in tip_text, "文案应说明未保留附魔仍计费"
+print("2b. defaults 预选/无效回退/文案不提移除 ✓")
+
 # ========== 3. remove_enchants_everywhere ==========
 lst = CardListWidget()
 lst.add_card(card("剑", ("sharpness", "锋利", 5), ("unbreaking", "耐久", 3)))
@@ -137,7 +155,7 @@ app.processEvents()
 assert [e["id"] for e in lst.item(1).data(lst.CARD_DATA_ROLE)["enchants"]] == ["power"]
 print("3. remove_enchants_everywhere：目标卡移除重绘/无关节卡不动/幂等 ✓")
 
-# ========== 4. 集成：add_item_card 自动弹窗 ==========
+# ========== 4. 集成：add_item_card 自动弹窗（决策只记录，不改卡片） ==========
 import Tools.tool_EnchantCaculator as tec
 from PySide6.QtWidgets import QDialog
 
@@ -148,8 +166,9 @@ class FakeDlg:
     _keep = None
     instances = []
 
-    def __init__(self, clusters, parent=None):
+    def __init__(self, clusters, parent=None, defaults=None):
         self.clusters = clusters
+        self.defaults = defaults
         FakeDlg.instances.append(self)
 
     def exec(self):
@@ -175,47 +194,51 @@ FakeDlg.instances.clear()
 w.add_item_card(card("剑", ("sharpness", "锋利", 5), ("unbreaking", "耐久", 3)))
 app.processEvents()
 assert FakeDlg.instances == [], "无冲突不应弹窗"
+assert w.conflict_choices == {}, "无冲突时决策应为空"
 print("4a. 添加无冲突物品不弹窗 ✓")
 
-# 4b. 添加带互斥附魔的物品 → 弹窗，保留剑上的锋利 → 附魔书卡移除亡灵杀手
-FakeDlg._keep = "sharpness"
+# 4b. 添加带互斥附魔的物品 → 弹窗，保留亡灵杀手 → 决策被记录，卡片不变
+FakeDlg._keep = "smite"
 w.add_item_card(card("附魔书", ("smite", "亡灵杀手", 3), ("power", "力量", 5)))
 app.processEvents()
 assert len(FakeDlg.instances) == 1, "跨卡片冲突应弹窗一次"
 assert FakeDlg.instances[0].clusters[0][0]["id"] in ("sharpness", "smite")
-book_item = w.chosenItemList.item(1)
-assert [e["id"] for e in book_item.data(w.chosenItemList.CARD_DATA_ROLE)["enchants"]] == ["power"], \
-    "弹窗确定后附魔书卡片应移除亡灵杀手"
+assert w.conflict_choices == {0: "smite"}, \
+    f"确定后决策应记录为保留亡灵杀手，实际 {w.conflict_choices}"
+book_data = w.chosenItemList.item(1).data(w.chosenItemList.CARD_DATA_ROLE)
+assert [e["id"] for e in book_data["enchants"]] == ["smite", "power"], \
+    f"卡片不应被移除任何附魔（未保留的仍计费），实际 {book_data['enchants']}"
 sword_data = w.chosenItemList.item(0).data(w.chosenItemList.CARD_DATA_ROLE)
 assert [e["id"] for e in sword_data["enchants"]] == ["sharpness", "unbreaking"], "剑卡应保持不变"
-print("4b. 弹窗确定 → 弃用附魔从对应卡片移除 ✓")
+print("4b. 弹窗确定 → 决策记录到 conflict_choices，卡片保持不变 ✓")
 
-# 4c. 「暂不处理」：卡片维持现状（再次添加带亡灵杀手的书与剑的锋利冲突）
+# 4c. 「暂不处理」：决策维持现状，卡片不变
 FakeDlg._keep = None
 w.add_item_card(card("附魔书", ("smite", "亡灵杀手", 2)))
 app.processEvents()
 assert len(FakeDlg.instances) == 2, "存在跨卡片冲突应再次弹窗"
 assert w.chosenItemList.count() == 3, "拒绝后不应移除任何卡片"
-data0 = w.chosenItemList.item(0).data(w.chosenItemList.CARD_DATA_ROLE)
+assert w.conflict_choices == {0: "smite"}, "拒绝后决策应维持原值"
 data2 = w.chosenItemList.item(2).data(w.chosenItemList.CARD_DATA_ROLE)
-assert "sharpness" in [e["id"] for e in data0["enchants"]], "拒绝后剑卡锋利应保留"
 assert "smite" in [e["id"] for e in data2["enchants"]], "拒绝后书卡亡灵杀手应保留"
-print("4c. 暂不处理 → 卡片维持现状 ✓")
+# 拒绝时弹窗应预选上次决策
+assert FakeDlg.instances[1].defaults == {0: "smite"}, \
+    f"弹窗应预选上次决策，实际 {FakeDlg.instances[1].defaults}"
+print("4c. 暂不处理 → 决策维持现状（预选上次决策）✓")
 
-# 4d. 后续添加再次触发并应用新选择（改为保留亡灵杀手）
-FakeDlg._keep = "smite"
+# 4d. 后续添加再次触发并应用新选择（改为保留锋利）
+FakeDlg._keep = "sharpness"
 w.add_item_card(card("三叉戟", ("loyalty", "忠诚", 3)))  # 与冲突无关，但簇仍存在 → 弹窗
 app.processEvents()
 assert len(FakeDlg.instances) == 3
+assert w.conflict_choices == {0: "sharpness"}, \
+    f"改选锋利后决策应更新，实际 {w.conflict_choices}"
 data0 = w.chosenItemList.item(0).data(w.chosenItemList.CARD_DATA_ROLE)
+assert "sharpness" in [e["id"] for e in data0["enchants"]], "剑卡锋利应保留"
 data2 = w.chosenItemList.item(2).data(w.chosenItemList.CARD_DATA_ROLE)
-assert "sharpness" not in [e["id"] for e in data0["enchants"]], \
-    f"改选亡灵杀手后剑卡锋利应被移除，实际 {data0}"
-assert "unbreaking" in [e["id"] for e in data0["enchants"]], "剑卡其余附魔应保留"
-assert "smite" in [e["id"] for e in data2["enchants"]], "书卡亡灵杀手应保留"
-assert w.chosenItemList.card_enchant_ids(w.chosenItemList.item(0)) == ["unbreaking"], \
-    "CARD_IDS_ROLE 应同步更新"
-print("4d. 后续添加再次弹窗并应用新选择 ✓")
+assert "smite" in [e["id"] for e in data2["enchants"]], \
+    "未保留的亡灵杀手也应留在卡片上（仍计费）"
+print("4d. 后续添加再次弹窗并更新决策（卡片始终不变）✓")
 
 w.close()
 print("\n全部冒烟测试通过")

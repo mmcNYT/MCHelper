@@ -1,7 +1,9 @@
 # utils/conflict_resolver.py
 # 跨卡片附魔冲突检测与解决：
-# 多件物品最终合成到一件时，互斥附魔（conflicts 列表）不能共存，
-# 弹窗让用户为每组冲突选择最终保留的附魔，未保留的从对应卡片移除。
+# 多件物品最终合成到一件时，互斥附魔（conflicts 列表）不能共存于最终合成物，
+# 弹窗让用户为每组冲突选择最终合成物要保留的附魔。
+# 注意：弹窗只记录决策，不从卡片移除任何附魔——未保留的附魔仍留在卡片上
+# 并正常计入合成花费（互斥不转移时每次 +1 级），只是不会出现在最终合成物中。
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QRadioButton, QLabel,
     QPushButton, QHBoxLayout
@@ -70,31 +72,38 @@ def find_conflict_clusters(cards_data: list, data_manager) -> list:
 
 
 class ConflictResolveDialog(QDialog):
-    """附魔冲突选择对话框：每个冲突簇一组单选，用户勾选最终保留的附魔
+    """附魔冲突选择对话框：每个冲突簇一组单选，用户勾选最终合成物保留的附魔
 
     用法：
-        dlg = ConflictResolveDialog(clusters, parent)
+        dlg = ConflictResolveDialog(clusters, parent, defaults=last_choices)
         if dlg.exec() == QDialog.Accepted:
             choices = dlg.choices()   # {簇序号: 保留的附魔 ID}
-    未被保留的附魔由调用方从卡片中移除（本对话框只负责选择）。
+    决策由调用方作为 required_enchants 约束传给优化器；
+    本对话框不修改任何卡片数据（未保留的附魔也计费，不从卡片移除）。
     """
 
-    def __init__(self, clusters: list, parent=None):
+    def __init__(self, clusters: list, parent=None, defaults: dict = None):
+        """defaults: 可选 {簇序号: 附魔ID}，预选上次的保留决策"""
         super().__init__(parent)
         self.setWindowTitle("检测到附魔冲突")
         self.setMinimumWidth(380)
+        defaults = defaults or {}
 
         layout = QVBoxLayout(self)
         tip = QLabel("以下附魔互斥，不能同时存在于同一件物品。\n"
-                     "请为每组选择最终合成时保留的附魔，未保留的将从对应物品卡片中移除：")
+                     "请为每组选择最终合成物要保留的附魔。\n"
+                     "未选中的附魔仍保留在卡片上并正常计入合成花费，"
+                     "只是因互斥不会出现在最终合成物中：")
         tip.setWordWrap(True)
         layout.addWidget(tip)
 
-        # 每簇一个组框，组内每个附魔一个单选按钮（默认选第一个）
+        # 每簇一个组框，组内每个附魔一个单选按钮
+        # （预选 defaults 中记录的决策，无记录时选第一个）
         self._radios = []  # self._radios[簇序号] = [(附魔ID, QRadioButton), ...]
         for ci, members in enumerate(clusters):
             box = QGroupBox(f"冲突 {ci + 1}（{len(members)} 个附魔互斥）")
             vbox = QVBoxLayout(box)
+            preselect = defaults.get(ci)
             pairs = []
             for m in members:
                 items_text = "、".join(m["items"]) if m["items"] else "未知物品"
@@ -102,7 +111,15 @@ class ConflictResolveDialog(QDialog):
                     f"{m['name']} {int_to_roman(m['level'])} —— {items_text}")
                 vbox.addWidget(rb)
                 pairs.append((m["id"], rb))
-            pairs[0][1].setChecked(True)
+            checked = False
+            if preselect is not None:
+                for eid, rb in pairs:
+                    if eid == preselect:
+                        rb.setChecked(True)
+                        checked = True
+                        break
+            if not checked:
+                pairs[0][1].setChecked(True)
             self._radios.append(pairs)
             layout.addWidget(box)
 
@@ -119,7 +136,11 @@ class ConflictResolveDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def choices(self) -> dict:
-        """读取用户选择：{簇序号: 保留的附魔 ID}"""
+        """读取用户选择：{簇序号: 保留的附魔 ID}
+
+        该决策将作为 required_enchants 约束传给优化器；
+        未被选中的附魔不从卡片移除（仍计费）。
+        """
         result = {}
         for ci, pairs in enumerate(self._radios):
             for eid, rb in pairs:

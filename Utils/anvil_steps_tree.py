@@ -64,12 +64,13 @@ class AnvilStepsTree(QTreeWidget):
         self.clear()
         if not plan.steps:
             # 单物品：无步骤，直接展示物品
-            root = self._make_label_item(f"{plan.final_item.label}", bold=True)
+            root = self._make_label_item(
+                f"{plan.final_item.display_label(data_manager)}", bold=True)
             self.addTopLevelItem(root)
             return
 
         # 根节点 = 最终合成物
-        root_text = (f"最终合成物：{plan.final_item.label}"
+        root_text = (f"最终合成物：{plan.final_item.display_label(data_manager)}"
                      f"　—　总花费 {plan.total_cost} 级")
         root = self._make_label_item(root_text, bold=True,
                                      color=_TEXT_RESULT)
@@ -121,7 +122,8 @@ class AnvilStepsTree(QTreeWidget):
                                   data_manager)
             else:
                 # 叶子：原始卡片物品
-                leaf = QTreeWidgetItem([f"[{role}] {item_obj.label}"])
+                leaf = QTreeWidgetItem(
+                    [f"[{role}] {item_obj.display_label(data_manager)}"])
                 leaf.setForeground(0, QBrush(_TEXT_BASE))
                 node.addChild(leaf)
 

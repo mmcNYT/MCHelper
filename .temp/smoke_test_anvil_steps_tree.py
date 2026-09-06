@@ -55,14 +55,23 @@ assert plan.total_cost > 0 and str(plan.total_cost) in root.text(0)
 step_nodes = [root.child(i) for i in range(root.childCount())
               if root.child(i).text(0).startswith("第")]
 assert len(step_nodes) >= 1, "应至少有一个步骤节点"
-# 最后一步节点：子节点应为两个物品（目标在左=第一个，牺牲在右=第二个）
+# 最后一步节点：目标应是上一步产物的递归节点，牺牲是原始物品叶子
 last_step = step_nodes[0]
 children = [last_step.child(i) for i in range(last_step.childCount())]
-leaf_texts = [c.text(0) for c in children if c.text(0).startswith("[")]
-assert len(leaf_texts) == 2, f"步骤节点应有目标+牺牲两个物品子节点，实际 {leaf_texts}"
-assert leaf_texts[0].startswith("[目标（左格）]"), f"第一个子节点应为目标（左格），实际 {leaf_texts[0]}"
-assert leaf_texts[1].startswith("[牺牲（右格）]"), f"第二个子节点应为牺牲（右格），实际 {leaf_texts[1]}"
-print("3. 多步方案树结构（根/步骤/左右物品）✓")
+rec = [c for c in children if c.text(0).startswith("第")]
+leaf = [c for c in children if c.text(0).startswith("[")]
+detail = [c for c in children if c.text(0) not in
+          {c.text(0) for c in rec + leaf}]
+assert len(rec) == 1 and len(leaf) == 1, \
+    f"最后一步应为 1 个递归步骤 + 1 个物品叶子，实际 {[c.text(0) for c in children]}"
+assert leaf[0].text(0).startswith("[牺牲（右格）]"), \
+    f"叶子应为牺牲（右格），实际 {leaf[0].text(0)}"
+# 递归的上一级步骤节点下应恰好有两个原始物品叶子（目标在左、牺牲在右）
+inner = [rec[0].child(i) for i in range(rec[0].childCount())]
+inner_leaves = [c.text(0) for c in inner if c.text(0).startswith("[")]
+assert inner_leaves == [f"[目标（左格）] {items[0].display_label(dm)}",
+                        f"[牺牲（右格）] {items[1].display_label(dm)}"], inner_leaves
+print("3. 多步方案树结构（根/步骤/左右物品/递归）✓")
 
 # ========== 4. 递归展开（中间产物） ==========
 # 4 本书的方案必然存在"某步的输入是另一步的产物"——验证嵌套步骤节点存在
@@ -100,7 +109,7 @@ items5 = [
     AnvilItem.make("附魔书", [(e, lv)])
     for e, lv in [("thorns", 3), ("protection", 4), ("respiration", 3),
                   ("aqua_affinity", 1), ("unbreaking", 3), ("mending", 1),
-                  ("blast_protection", 4), ("fire_protection", 4)]]
+                  ("blast_protection", 4), ("fire_protection", 4)]
 ]
 # 全书方案中刺甲/爆炸保护/火焰保护/保护互斥——约束为空时允许只留一个
 plan5 = opt.optimize(items5)

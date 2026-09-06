@@ -65,6 +65,22 @@ class AnvilItem:
     def is_book(self) -> bool:
         return self.name == BOOK_ITEM
 
+    def display_label(self, data_manager=None) -> str:
+        """展示标签；label 为空时自动生成（有 dm 用中文名，无则用 ID）"""
+        if self.label:
+            return self.label
+        if not self.enchants:
+            return self.name
+        parts = []
+        for eid, lv in sorted(self.enchants):
+            name = eid
+            if data_manager is not None:
+                ench = data_manager.get_enchant_by_id(eid)
+                if ench:
+                    name = ench["name"]
+            parts.append(f"{name}{_roman(lv)}")
+        return f"{self.name}（{'、'.join(parts)}）"
+
 
 @dataclass
 class MergeStep:
@@ -309,7 +325,11 @@ class AnvilOptimizer:
 
     # ---------- 贪心降级（物品过多时） ----------
     def _search_greedy(self, items, required_enchants, required_type) -> AnvilPlan:
-        """每轮选合并对：优先不拦截保留附魔，其次本次花费最小，直到剩一件"""
+        """每轮选合并对：优先不拦截保留附魔，其次本次花费最小，直到剩一件
+
+        终态类型约束：输出类型 = 目标类型，故禁止"书做目标吞非书"的合并
+        （否则非书物品丢失，终态无法满足 required_type）。
+        """
         cur = list(items)
         steps = []
         while len(cur) > 1:
@@ -319,6 +339,10 @@ class AnvilOptimizer:
                     if i == j:
                         continue
                     if not self.mech.can_merge(cur[i], cur[j]):
+                        continue
+                    # 类型约束：目标为书而牺牲为非书 → 输出为书，非书物品丢失
+                    if (required_type and required_type != BOOK_ITEM
+                            and cur[i].is_book() and not cur[j].is_book()):
                         continue
                     result, fee, detail = self.mech.merge(cur[i], cur[j])
                     # 拦截了保留附魔的组合加重惩罚（虚拟代价，不改变实际花费）
