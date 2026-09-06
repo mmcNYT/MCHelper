@@ -1,13 +1,15 @@
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QSystemTrayIcon, QMenu, QStyle, QApplication, QMessageBox
-from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QTabBar, QSystemTrayIcon, QMenu, QStyle, QApplication, QMessageBox
+from PySide6.QtCore import QTimer, QStandardPaths
 from PySide6.QtGui import QIcon, QAction
 from Tools import TOOL_CLASSES
 from Tools.tool_Settings import SettingsWindow
 from CodesUI.MCHelperMainWindow import Ui_MCHelper
 from Utils.Settings.signals_Settings import settings_bus
+from Utils.MainWindow.draggable_tab_bar import DraggableTabBar
 import winreg
 import sys
 import os
+import json
 
 
 class MainWindow(QMainWindow,Ui_MCHelper):
@@ -20,7 +22,10 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         self.is_start_on_boot = False   #是否开机自启动
         self.is_quitting = False        #是否正在退出
 
-        # 遍历注册列表，加载所有工具
+        # 替换为支持拖拽重排的 TabBar（tab 顺序拖拽调整 + 自动保存）
+        self._setup_draggable_tab_bar()
+
+        # 按保存的顺序加载所有工具（无记录时用注册表默认顺序）
         self.load_tools()
 
         # 切换 tab 时窗口自适应当前工具的期望尺寸
@@ -38,16 +43,103 @@ class MainWindow(QMainWindow,Ui_MCHelper):
 
         self.creat_tray_icon()
 
+    def _setup_draggable_tab_bar(self):
+        """把 tabWidget 的原生 TabBar 替换为可拖拽重排的 DraggableTabBar。
+
+        QTabWidget 没有公开的 setTabBar 接口（PySide6 中是私有槽），
+        这里用 findChild 找到原生 tabBar 后直接换掉：新 TabBar 继承时
+        会自动带上 QTabWidget 的父子关系与样式。
+        """
+        # 创建新 TabBar 并接管（PySide6 中 setTabBar 是受保护槽，这里可直调）。
+        # 原生 TabBar 由 setTabBar 接管后即被 C++ 侧销毁，无需（也不可）再手动删除
+        self.tab_bar = DraggableTabBar(self.tabWidget)
+        self.tabWidget.setTabBar(self.tab_bar)
+        # 拖拽结束后保存顺序。
+        # 注意：不能用 QTabBar 自带的 tabMoved——拖动中途每次让位（moveTab）
+        # 都会发射它，而中途顺序不是最终顺序；orderChanged 只在拖动结束后发射
+        self.tab_bar.orderChanged.connect(self._save_tab_order)
+
+    @staticmethod
+    def tab_order_config_path_static() -> str:
+        """tab 顺序配置文件路径（静态版：不实例化主窗口即可获取，
+        供测试等外部代码使用；与 _tab_order_config_path 保持一致）"""
+        config_dir = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+        if not config_dir:
+            config_dir = os.path.dirname(os.path.abspath(__file__))
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "tab_order.json")
+
+    def _tab_order_config_path(self) -> str:
+        """tab 顺序配置文件路径（与 settings_config.json 同目录）"""
+        return MainWindow.tab_order_config_path_static()
+
+    def _load_tab_order(self) -> list | None:
+        """读取保存的工具顺序（工具名列表）；无文件/损坏时返回 None"""
+        path = self._tab_order_config_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                order = json.load(f)
+            if isinstance(order, list) and all(isinstance(n, str) for n in order):
+                return order
+        except (OSError, ValueError) as e:
+            print(f"加载 tab 顺序配置失败: {e}")
+        return None
+
+    def _save_tab_order(self):
+        """把当前 tab 顺序（工具名列表）写入配置（拖拽后与退出时调用）。
+
+        按各页 widget 的 tool_name() 取名而不是 tabText：tabText 是
+        展示文本，拖拽中途等场景下可能暂时为空，而 tool_name() 是
+        工具注册名，会话内唯一且稳定。
+        """
+        order = []
+        for i in range(self.tabWidget.count()):
+            widget = self.tabWidget.widget(i)
+            if widget is not None and hasattr(widget, "tool_name"):
+                order.append(widget.tool_name())
+            else:
+                order.append(self.tabWidget.tabText(i))
+        try:
+            with open(self._tab_order_config_path(), "w", encoding="utf-8") as f:
+                json.dump(order, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            print(f"保存 tab 顺序配置失败: {e}")
+
     def load_tools(self):
-        for tool_cls in TOOL_CLASSES:
-            # 1. 用 @classmethod 调用，不用加括号，不创建对象，直接拿名字
+        # 1. 按保存的顺序排工具类（无记录/记录不完整时自动回退默认顺序）
+        ordered = self._order_tool_classes()
+
+        for tool_cls in ordered:
+            # 用 @classmethod 调用拿名字，不创建对象
             tool_name = tool_cls.tool_name()
 
-            # 2. 这里才真正创建工具对象（加括号实例化）
+            # 这里才真正创建工具对象（加括号实例化）
             tool_widget = tool_cls(self)
 
-            # 3. 添加到 Tab 页
+            # 添加到 Tab 页
             self.tabWidget.addTab(tool_widget, tool_name)
+
+    def _order_tool_classes(self) -> list:
+        """按保存的顺序返回工具类列表。
+
+        兼容规则：
+        - 保存的顺序里包含全部工具 → 按保存顺序；
+        - 新增了工具（保存记录里没有）→ 新工具按注册顺序追加在后面；
+        - 保存记录里有已不存在的工具名 → 忽略（防止下次又存回去）。
+        """
+        default = list(TOOL_CLASSES)
+        saved = self._load_tab_order()
+        if not saved:
+            return default
+        by_name = {cls.tool_name(): cls for cls in default}
+        ordered = [by_name[n] for n in saved if n in by_name]
+        # 追加保存记录里没有的工具（新增工具）
+        ordered_names = {n for n in saved if n in by_name}
+        ordered += [cls for cls in default
+                    if cls.tool_name() not in ordered_names]
+        return ordered if ordered else default
 
     def adapt_window_to_tool(self, index: int):
         """切换 tab 时窗口自适应当前工具的期望尺寸。
@@ -121,6 +213,8 @@ class MainWindow(QMainWindow,Ui_MCHelper):
                     widget.save_config()
                 except Exception as e:
                     print(f"保存工具 {widget.tool_name()} 配置失败: {e}")
+        # 退出时同步保存 tab 顺序（拖拽后已即时保存过，这里双保险）
+        self._save_tab_order()
 
     def creat_tray_icon(self):
         # 创建托盘图标

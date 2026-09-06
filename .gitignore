@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 临时测试与草稿（冒烟测试脚本按项目规范放这里）
+.temp/
+
+# IDE
+.idea/
+.vscode/
+
+# 运行时数据（按需放开）
+*.log
