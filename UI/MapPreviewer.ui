@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>mapPreviewer</class>
+ <widget class="QWidget" name="mapPreviewer">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1081</width>
+    <height>801</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <widget class="QWidget" name="">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>10</y>
+     <width>1061</width>
+     <height>781</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0" rowspan="2">
+     <widget class="QLabel" name="labelVersion">
+      <property name="text">
+       <string>版本</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1" rowspan="2">
+     <widget class="QComboBox" name="comboVersion">
+      <item>
+       <property name="text">
+        <string>1.21</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1.20</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1.19</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1.18</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="3" rowspan="2">
+     <widget class="QLineEdit" name="editSeed"/>
+    </item>
+    <item row="0" column="4" rowspan="2">
+     <widget class="QLabel" name="labelRadius">
+      <property name="text">
+       <string>视野半径</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="6" rowspan="2">
+     <widget class="QPushButton" name="btnStructures">
+      <property name="text">
+       <string>结构 ▾</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="7" rowspan="2">
+     <widget class="QPushButton" name="btnCommon">
+      <property name="text">
+       <string>常用</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="8" rowspan="2">
+     <widget class="QPushButton" name="btnAll">
+      <property name="text">
+       <string>全选</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="9" rowspan="2">
+     <widget class="QPushButton" name="btnRender">
+      <property name="text">
+       <string>生成地图</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="5">
+     <widget class="QComboBox" name="comboRadius">
+      <item>
+       <property name="text">
+        <string>512</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>1024</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2048</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>4096</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="2" column="0" colspan="10">
+     <widget class="QGraphicsView" name="viewMap"/>
+    </item>
+    <item row="3" column="0" colspan="10">
+     <widget class="QProgressBar" name="progressRender">
+      <property name="value">
+       <number>24</number>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QLabel" name="labelSeed">
+      <property name="text">
+       <string>种子</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0" colspan="4">
+     <widget class="QLabel" name="labelHover">
+      <property name="text">
+       <string>悬停地图查看坐标与群系</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="7" colspan="3">
+     <widget class="QLabel" name="labelInfo">
+      <property name="text">
+       <string>就绪</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

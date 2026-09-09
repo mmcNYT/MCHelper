@@ -320,6 +320,50 @@ try:
           and w.informationBrowser.toPlainText() == ""
           and w._last_auto_fill_time is None and w._last_auto_fill_pos is None)
 
+    # ---------- 7c. tab 激活门控（仅最上层页自动监测；托盘隐藏继续生效） ----------
+    from PySide6.QtWidgets import QTabWidget, QWidget
+
+    # 把工具页放进 QTabWidget，再加一个「其它工具」页
+    gate_tabs = QTabWidget()
+    other_page = QWidget()
+    gate_tabs.addTab(other_page, "OtherTool")
+    gate_tabs.addTab(w, "StrongHoldFinder")
+    gate_tabs.resize(700, 420)
+    gate_tabs.show()
+    app.processEvents()
+
+    # 停在其它页：剪贴板变化被门控拦截，不自动填入
+    gate_tabs.setCurrentIndex(0)
+    app.processEvents()
+    QApplication.clipboard().setText(cmd_a)
+    w._on_clipboard_changed()
+    check("门控：非激活页剪贴板不自动填入",
+          w.coordinate1Edit.text() == "" and w.coordinate2Edit.text() == "",
+          w.coordinate1Edit.text()[:60])
+
+    # 切到本页（激活）：恢复自动填入
+    gate_tabs.setCurrentIndex(1)
+    app.processEvents()
+    w._on_clipboard_changed()
+    check("门控：切回激活页后恢复自动填入", w.coordinate1Edit.text() == cmd_a,
+          w.coordinate1Edit.text()[:60])
+
+    # 隐藏窗口（模拟最小化到托盘）：tab 当前页不变 → 自动监测继续生效
+    gate_tabs.hide()
+    app.processEvents()
+    w.clearCoordinates.click()   # 清空输入框与防抖状态，保证断言干净
+    QApplication.clipboard().setText(cmd_b)
+    w._on_clipboard_changed()
+    check("托盘隐藏后（tab 仍在本页）自动监测继续生效",
+          w.coordinate1Edit.text() == cmd_b, w.coordinate1Edit.text()[:60])
+
+    # 清理：把本页从 tab 容器取出恢复独立状态，避免影响后续线程测试
+    gate_tabs.removeTab(1)
+    w.setParent(None)
+    gate_tabs.setParent(None)
+    gate_tabs.deleteLater()
+    app.processEvents()
+
     # ---------- 8. 真实监听线程端到端 ----------
     # offscreen 平台的 Qt 剪贴板不一定写系统剪贴板，故用 ctypes 直接写系统剪贴板触发
     import ctypes

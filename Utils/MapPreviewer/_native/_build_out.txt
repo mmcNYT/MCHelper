@@ -1,0 +1,7 @@
+**********************************************************************
+** Visual Studio 2026 Developer PowerShell v18.9.1
+** Copyright (c) 2026 Microsoft Corporation
+**********************************************************************
+[build] cl /nologo /std:c++20 /utf-8 /O2 /EHsc /MD /LD /IC:\maomaochongD\Coding\PythonProject\MCHelper\.venv\Lib\site-packages\pybind11\include /IC:\maomaochongD\Coding\Python3.13\Include C:\maomaochongD\Coding\PythonProject\MCHelper\Utils\MapPreviewer\_native\_map_sampler.cpp /Fe:C:\maomaochongD\Coding\PythonProject\MCHelper\Utils\MapPreviewer\_native\_map_sampler.pyd /Fo:C:\maomaochongD\Coding\PythonProject\MCHelper\Utils\MapPreviewer\_native\_map_sampler.obj /link /LIBPATH:C:\maomaochongD\Coding\Python3.13\libs python313.lib
+[build] exit=0，详细输出见 C:\maomaochongD\Coding\PythonProject\MCHelper\Utils\MapPreviewer\_native\_build_map_log.txt
+[build] OK -> C:\maomaochongD\Coding\PythonProject\MCHelper\Utils\MapPreviewer\_native\_map_sampler.pyd

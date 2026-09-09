@@ -101,18 +101,26 @@ class NotificationWidget(QWidget):
         self.timer.start(self.duration)
 
     def _move_to_bottom_right(self):
-        """将窗口定位到屏幕右下角（考虑任务栏）
+        """将窗口定位到屏幕右下角（考虑任务栏），并钳制在可用区域内
 
         功能说明：
         - 使用 availableGeometry() 获取排除任务栏后的可用区域
         - 距右下边缘各留 20px 边距
+        - 通知尺寸超过可用区域时（消息过长/字号过大），钳制到区域内，
+          保证右/下边缘永不出屏（顶部超出时向下回推到可见）
         """
         screen = QApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()  # 可用区域（不含任务栏）
-        x = available.right() - self.width() - 20
-        y = available.bottom() - self.height() - 20
+        margin = 20
+        x = available.right() - self.width() - margin
+        y = available.bottom() - self.height() - margin
+        # 钳制：无论通知多宽/多高，右下边缘与屏幕左/上边缘都不越界
+        if x < available.left():
+            x = available.left()
+        if y < available.top():
+            y = available.top()
         self.move(x, y)
 
     def _adjust_positions(self):
@@ -122,16 +130,24 @@ class NotificationWidget(QWidget):
         - 以最新通知为基准（最靠右下角），较旧的通知依次向上偏移
         - 偏移量按各通知自身高度计算（不同通知高度可能不同）
         - _instances 顺序为创建顺序：[0] 最旧、[-1] 最新（最下面）
+        - 堆叠总高度超过可用区域时，最新的通知贴着底部边缘，较旧的
+          依次向上但钳制在可用区域顶部内（不越过屏幕上沿）
         """
         if not self._instances:
             return
         # 按照创建顺序（最旧→最新），最新的在最下面
         base_x = self._instances[0].x()  # 所有通知水平对齐（取最旧通知的 x）
+        # 可用区域顶沿（钳制堆叠不越过屏幕上沿；拿不到屏幕时跳过钳制）
+        screen = QApplication.primaryScreen()
+        top_limit = screen.availableGeometry().top() if screen else None
         # 先获取当前所有实例的高度（可能不同）
         # 从最新的开始，依次向上偏移
         for i, widget in enumerate(reversed(self._instances)):
             offset = i * (widget.height() + 10)  # 第 i 新的通知向上偏移 i 个（高度+10px）
-            widget.move(base_x, self._instances[-1].y() - offset)
+            y = self._instances[-1].y() - offset
+            if top_limit is not None and y < top_limit:
+                y = top_limit
+            widget.move(base_x, y)
 
     def start_fade_out(self):
         """淡出动画：将窗口不透明度从 1.0 渐变到 0.0（500ms，先快后缓）"""
@@ -149,6 +165,7 @@ class NotificationWidget(QWidget):
         功能说明：
         - 从 _instances 列表中注销自己，关闭窗口
         - 以剩余通知中最新的一条为基准，重新从下往上堆叠
+        - 堆叠超出可用区域顶部时钳制（与 _adjust_positions 一致）
         """
         if self in self._instances:
             self._instances.remove(self)
@@ -157,9 +174,14 @@ class NotificationWidget(QWidget):
         if self._instances:
             base_x = self._instances[0].x()   # 水平对齐
             base_y = self._instances[-1].y()  # 最新（最下）通知的 y 作为基准
+            screen = QApplication.primaryScreen()
+            top_limit = screen.availableGeometry().top() if screen else None
             for i, widget in enumerate(reversed(self._instances)):
                 offset = i * (widget.height() + 10)
-                widget.move(base_x, base_y - offset)
+                y = base_y - offset
+                if top_limit is not None and y < top_limit:
+                    y = top_limit
+                widget.move(base_x, y)
 
     @staticmethod
     def Show(title: str, message: str, duration: int = 3000,

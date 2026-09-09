@@ -9,6 +9,12 @@
 4. 两观测点相距 30 格以上时自动计算，并在屏幕右下角弹出要塞坐标通知；
    相距不足 30 格时信息框会提示，也可手动点击「计算」。
 
+自动监测的激活条件：
+- 仅当 StrongHoldFinder 是 tab 栏最上层页时才自动监测剪贴板；
+  切到其它工具页时自动填入暂停（手动粘贴不受影响），切回后恢复；
+- 主窗口最小化到系统托盘后自动监测继续生效（tab 仍停留在本页即可），
+  支持挂后台等定位结果的用法。
+
 自动填入防抖（仅作用于坐标一，手动粘贴不受影响）：
 - 距上次自动填入不足 8 秒，或与上次自动填入位置相距不足 10 格（1 格 = 1 米）
   的新观测会被忽略——避免站在原地对末影之眼反复按 F3+C 时来回覆盖；
@@ -23,7 +29,7 @@ import math
 import time
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTabWidget
 
 from .tool_base import BaseToolWidget
 from CodesUI.StrongHoldFinder import Ui_strongHoldFinder
@@ -68,6 +74,9 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
             "2. MCHelper 检测到剪贴板变化后会自动把内容填进坐标输入框（无需手动粘贴，\n"
             "   也可以手动粘贴或直接编辑输入框；8 秒内或与上次位置相距不足 10 格的\n"
             "   重复观测会被自动忽略）；\n"
+            "   注意：自动监测仅在本页位于 tab 栏最上层时生效，切到其它\n"
+            "   工具页会暂停、切回后恢复；窗口最小化到系统托盘后自动监测\n"
+            "   继续生效（tab 仍停留在本页即可）；\n"
             "3. 走到远处再对准一次；两观测点相距 30 格以上时会自动计算，\n"
             "   并在屏幕右下角弹出要塞坐标通知（含下界交通坐标）；\n"
             "4. 计算完成后传送命令会自动复制到剪贴板，可直接粘贴到游戏聊天栏。"
@@ -76,7 +85,9 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         self.doCaculate.clicked.connect(self._on_do_caculate_clicked)
         self.clearCoordinates.clicked.connect(self._on_clear_coordinates_clicked)
 
-        # 剪贴板监听：后台线程只监测变化，读剪贴板与填入在主线程执行
+        # 剪贴板监听：后台线程只监测变化，读剪贴板与填入在主线程执行。
+        # 监听线程常驻（轮询序号开销可忽略，停/启反而引入竞态）；
+        # 「仅激活页才自动填入」的门控在 _on_clipboard_changed 入口做。
         self._clipboard_thread = ClipboardListenerThread(self)
         self._clipboard_thread.clipboard_changed.connect(self._on_clipboard_changed)
         self._clipboard_thread.start()
@@ -106,6 +117,28 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         return "StrongHoldFinder"
 
     # ---------- 槽函数 ----------
+    def _is_active_tab_page(self) -> bool:
+        """本页是否处于 tab 栏最上层（当前激活页）。
+
+        仅用于门控自动监测：只有激活时才自动读剪贴板，切到其它工具页
+        时自动填入暂停，切回后恢复。规则：
+        - 本页不在任何 QTabWidget 内（独立使用/测试）：视为始终激活，
+          门控不生效；
+        - 在 tab 内：祖先 QTabWidget 的当前页是本页才算激活。
+          故意不看窗口可见性——最小化到托盘（hide）不改变 tab 当前页，
+          隐藏后自动监测继续生效，支持挂后台等定位结果的用法。
+        """
+        container = None
+        parent = self.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QTabWidget):
+                container = parent
+                break
+            parent = parent.parentWidget()
+        if container is None:
+            return True
+        return container.currentWidget() is self
+
     def _on_clear_coordinates_clicked(self) -> None:
         """清除：清空输入框、信息框，并重置自动填入的防抖状态。"""
         self.coordinate1Edit.clear()
@@ -115,7 +148,13 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
         self._last_auto_fill_pos = None
 
     def _on_clipboard_changed(self) -> None:
-        """剪贴板变化（主线程槽）：内容是 F3+C 时按规则自动填入。"""
+        """剪贴板变化（主线程槽）：内容是 F3+C 时按规则自动填入。
+
+        门控：仅当本页是 tab 栏最上层时才自动填入（托盘隐藏不改变
+        tab 当前页，隐藏后仍继续生效）；非激活页收到信号直接忽略。
+        """
+        if not self._is_active_tab_page():
+            return
         text = QApplication.clipboard().text()
         if not looks_like_f3c(text):
             return

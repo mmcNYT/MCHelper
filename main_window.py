@@ -21,6 +21,7 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         self.is_system_tray = False     #是否最小化到托盘
         self.is_start_on_boot = False   #是否开机自启动
         self.is_quitting = False        #是否正在退出
+        self._chrome_hint = None        #最近一次测得的合理窗口装饰开销 (宽, 高)
 
         # 替换为支持拖拽重排的 TabBar（tab 顺序拖拽调整 + 自动保存）
         self._setup_draggable_tab_bar()
@@ -142,12 +143,14 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         return ordered if ordered else default
 
     def adapt_window_to_tool(self, index: int):
-        """切换 tab 时窗口自适应当前工具的期望尺寸。
+        """切换 tab 时窗口自适应当前工具的期望尺寸，并钳制在屏幕可用区域内。
 
         工具通过类属性 preferred_size = (宽, 高) 声明内容区期望尺寸：
         - 声明了：窗口 resize 到 期望尺寸 + 窗口装饰差值（边框/标题栏/菜单栏/tab 栏，动态计算）
         - 未声明（None）：保持当前窗口大小不动
         - 窗口最大化/最小化/全屏时不干预
+        - 目标尺寸/位置超出当前屏幕可用区域（排除任务栏）时钳制到屏内
+          （小屏 / 高 DPI 缩放笔记本上 preferred 可能放不下）
         """
         if index < 0:
             return
@@ -163,13 +166,56 @@ class MainWindow(QMainWindow,Ui_MCHelper):
 
         # 客户区尺寸相对工具 widget 的固定开销 =
         #   菜单栏 + central widget 布局边距 + tab 栏 + tab 页边框
-        # 这些开销不随窗口大小变化，用当前尺寸差直接补偿即可
-        # 注意 resize() 设置的是客户区尺寸，不能用 frameGeometry()（含原生边框）
+        # 这些开销不随窗口大小变化，用当前尺寸差直接补偿即可。
+        # 注意 resize() 设置的是客户区尺寸，不能用 frameGeometry()（含原生边框）。
+        # 有效性校验：仅当页面能铺满窗口（窗口 ≥ 页面最小尺寸）时差值才可信；
+        # 窗口被钳制得比页面最小尺寸还小时页面被托住，差值会变负数——
+        # 此时改用最近一次测得的合理缓存值，避免把窗口 resize 到垃圾尺寸。
         chrome_w = self.width() - widget.width()
         chrome_h = self.height() - widget.height()
+        if chrome_w >= 0 and chrome_h >= 0:
+            self._chrome_hint = (chrome_w, chrome_h)
+        else:
+            chrome_w, chrome_h = self._chrome_hint or (0, 0)
 
         target_content_w, target_content_h = preferred
-        self.resize(target_content_w + chrome_w, target_content_h + chrome_h)
+        target_w = target_content_w + chrome_w
+        target_h = target_content_h + chrome_h
+
+        # 尺寸适配：目标窗口超出当前所在屏幕的可用区域（排除任务栏）时，
+        # 压缩到可用区域内。原生边框/标题栏开销一并扣除，保证整个窗口
+        # （含装饰）完整落在屏幕内；内容区被压缩后由各工具自身布局消化。
+        # 下限保护：可用区域异常小时不至于得到负数/极小窗。
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            # frameGeometry - geometry = 左右+上下原生边框（含标题栏）
+            frame_w = self.frameGeometry().width() - self.width()
+            frame_h = self.frameGeometry().height() - self.height()
+            target_w = min(target_w, max(available.width() - frame_w, 100))
+            target_h = min(target_h, max(available.height() - frame_h, 100))
+        self.resize(target_w, target_h)
+
+        # 位置适配：右/下边缘超出屏幕时向左/上移回屏内；再检查左/上
+        # 边缘（缩小后遗留的屏外位置、或窗口比屏幕还大的极端情况），
+        # 保证左上角至少在屏内（窗口管理器标准行为：标题栏/左上内容优先可见）。
+        # 不动用户本来就摆得好好的位置，只拉回越界部分。
+        if screen is not None:
+            available = screen.availableGeometry()
+            f = self.frameGeometry()
+            off_x = f.left() - self.x()   # move() 定位客户区左上角，
+            off_y = f.top() - self.y()    # 先算出边框相对客户区的偏移
+            left, top = f.left(), f.top()
+            if f.right() > available.right():
+                left = available.right() - f.width() + 1
+            if f.bottom() > available.bottom():
+                top = available.bottom() - f.height() + 1
+            if left < available.left():
+                left = available.left()
+            if top < available.top():
+                top = available.top()
+            if (left, top) != (f.left(), f.top()):
+                self.move(left - off_x, top - off_y)
 
     def closeEvent(self, event):
         """
