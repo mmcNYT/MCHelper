@@ -68,6 +68,7 @@ def sample_region(
     on_progress=None,
     cancel=None,
     want_depth: bool = False,
+    want_temp_humid: bool = False,
 ) -> dict:
     """采样矩形区域，返回 dict 载荷（线程与 UI 解耦）。
 
@@ -80,7 +81,9 @@ def sample_region(
         on_progress: on_progress(done, total, msg) 回调（节流由线程负责）。
         cancel: cancel() -> bool，返回 True 时尽快返回部分结果。
         want_depth: 是否同时返回 depth 参数矩阵（1.18+ 地形起伏骨架，
-            用于山体阴影；不额外增加采样成本）。
+            不额外增加采样成本）。
+        want_temp_humid: 是否同时返回温度/湿度参数矩阵（方块级草色
+            tint、水面渐变等渲染增强用；不额外增加采样成本）。
 
     Returns:
         dict: {
@@ -96,6 +99,10 @@ def sample_region(
             "elapsed": 秒,
             "cancelled": bool,
             "rows_done": 已完成行数（取消时为部分行）,
+            "depth": 仅 want_depth=True；climate 第 5 参数的 np 量化值
+                （depth*10000，海平面≈-1585）
+            "temp"/"humid": 仅 want_temp_humid=True；气候第 1/2 参数的
+                np 量化值（温度/湿度*10000）
         }
     """
     t0 = time.perf_counter()
@@ -119,6 +126,7 @@ def sample_region(
                 seed, btree_name, origin_nx, origin_nz, nw, nh, ny,
                 on_progress=on_progress, check_cancel=cancel,
                 want_depth=want_depth,
+                want_temp_humid=want_temp_humid,
             )
             biomes = np.asarray(res["biomes"], dtype=np.int32)
             cancelled = bool(res["cancelled"])
@@ -137,6 +145,9 @@ def sample_region(
             }
             if want_depth:
                 out["depth"] = np.asarray(res["depth"], dtype=np.int32)
+            if want_temp_humid:
+                out["temp"] = np.asarray(res["temp"], dtype=np.int32)
+                out["humid"] = np.asarray(res["humid"], dtype=np.int32)
             return out
         except Exception:
             # native 失败（btree 未初始化、内存不足等）→ 降级纯 Python
@@ -148,6 +159,9 @@ def sample_region(
 
     rgb = np.empty((nh, nw, 3), dtype=np.uint8)
     biomes = np.empty((nh, nw), dtype=np.int32)
+    depth = np.empty((nh, nw), dtype=np.int32) if want_depth else None
+    temp = np.empty((nh, nw), dtype=np.int32) if want_temp_humid else None
+    humid = np.empty((nh, nw), dtype=np.int32) if want_temp_humid else None
     cancelled = False
 
     total = nh
@@ -158,10 +172,13 @@ def sample_region(
             break
         nz = origin_nz + row
         for col in range(nw):
-            bid = climate_to_biome(
-                sampler.climate_point_xz(origin_nx + col, nz, ny), btree
-            )
-            biomes[row, col] = bid
+            np6 = sampler.climate_point_xz(origin_nx + col, nz, ny)
+            biomes[row, col] = climate_to_biome(np6, btree)
+            if depth is not None:
+                depth[row, col] = np6[4]
+            if temp is not None:
+                temp[row, col] = np6[0]
+                humid[row, col] = np6[1]
         done_rows = row + 1
         if on_progress is not None:
             on_progress(done_rows, total, "python")
@@ -179,21 +196,12 @@ def sample_region(
         "cancelled": cancelled,
         "rows_done": done_rows,
     }
-    if want_depth:
-        out["depth"] = _depth_for(sampler, origin_nx, origin_nz, nw, nh, ny)
+    if depth is not None:
+        out["depth"] = depth
+    if temp is not None:
+        out["temp"] = temp
+        out["humid"] = humid
     return out
-
-
-def _depth_for(sampler: BiomeSampler, origin_nx: int, origin_nz: int,
-               nw: int, nh: int, ny: int) -> np.ndarray:
-    """纯 Python 路径的 depth 矩阵（逐点重采，仅兜底路径使用）。"""
-    depth = np.empty((nh, nw), dtype=np.int32)
-    for row in range(nh):
-        nz = origin_nz + row
-        for col in range(nw):
-            depth[row, col] = sampler.climate_point_xz(
-                origin_nx + col, nz, ny)[4]
-    return depth
 
 
 def _colors_for(biomes: np.ndarray) -> np.ndarray:

@@ -34,11 +34,15 @@ import os
 import re
 from collections import Counter
 
-from PySide6.QtCore import QEvent, QStandardPaths, Qt, QTimer
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QComboBox, QHeaderView,
+from PySide6.QtCore import (QEvent, QSortFilterProxyModel, QRect, QSize,
+                            QStandardPaths, Qt, QTimer)
+from PySide6.QtGui import (QBrush, QColor, QIcon, QKeySequence, QShortcut,
+                           QStandardItem, QStandardItemModel)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox,
+                               QCompleter, QLineEdit, QHeaderView,
                                QInputDialog, QMenu, QMessageBox,
-                               QTreeWidgetItem)
+                               QStyledItemDelegate, QStyle,
+                               QStyleOptionViewItem, QTreeWidgetItem)
 
 from .tool_base import BaseToolWidget
 from CodesUI.SeedReverser import Ui_seedReverser
@@ -53,7 +57,12 @@ from Threads.task_WorldSeedRefine import (
 )
 from Utils.AutoBackUp.notification import NotificationWidget
 from Utils.SeedReverser import seed_math, structure_params
-from Utils.SeedReverser.biome_names import BIOME_CHOICES, biome_label, resolve_biome
+from Utils.SeedReverser.biome_names import (
+    BIOME_CHOICES,
+    biome_label,
+    icon_path,
+    resolve_biome,
+)
 from Utils.SeedReverser.structure_math import verify_candidate_seed
 from Utils.StrongHoldFinder.stronghold_math import (
     looks_like_f3c,
@@ -148,6 +157,173 @@ _REFINE_DETAIL_INITIAL = _BIOME_MODE_HELP_TEXT + (
     "尚未精化。精化结果（世界种子/多解/统计）将显示在这里。")
 
 
+class _NoEditDelegate(QStyledItemDelegate):
+    """屏蔽指定列的行内编辑器（双击编辑只开放给可安全校验的列）。"""
+
+    def __init__(self, readonly_columns=(), parent=None):
+        super().__init__(parent)
+        self._readonly = set(readonly_columns)
+
+    def createEditor(self, parent, option, index):
+        if index.column() in self._readonly:
+            return None
+        return super().createEditor(parent, option, index)
+
+
+class BiomeComboDelegate(_NoEditDelegate):
+    """群系下拉项委托：文字居左，16px 群系图标固定画在项的右侧。
+
+    图标按显示标签查表（icons: label -> QIcon），不依赖 model 的
+    DecorationRole——组合框下拉列表与补全浮层（两者 model 不同）
+    可共用同一 delegate。背景用完整矩形绘制（选中/悬停高亮满宽），
+    文字矩形向右缩窄，避免长标签与图标重叠。
+    """
+
+    ICON_SIZE = 16   # 图标边长（源图 16x16）
+    ICON_PAD = 6     # 图标与右边缘间距
+
+    def __init__(self, icons: dict, parent=None,
+                 icon_column: int | None = None, readonly_columns=()):
+        super().__init__(readonly_columns, parent)
+        self._icons = icons
+        # None = 任意列都尝试画图标（combo 单列模型）；
+        # 指定列号 = 仅该列画图标（多列树/表共用 delegate 时用）
+        self._icon_column = icon_column
+
+    def sizeHint(self, option, index):
+        """为右侧图标预留空间，防重叠（仅限画图标的列）。"""
+        size = super().sizeHint(option, index)
+        if (self._icon_column is not None
+                and index.column() != self._icon_column):
+            return size
+        if self._icon_column is None:
+            # combo 弹层：宽度不够会让长文字压到图标，加宽
+            return QSize(size.width() + self.ICON_SIZE + self.ICON_PAD * 2,
+                         max(size.height(), self.ICON_SIZE + 4))
+        # 树/表：图标列多为 Stretch 拉伸列，无需加宽，只保行高
+        return QSize(size.width(), max(size.height(), self.ICON_SIZE + 4))
+
+    def paint(self, painter, option, index) -> None:
+        if (self._icon_column is not None
+                and index.column() != self._icon_column):
+            super().paint(painter, option, index)
+            return
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        icon = self._icons.get(opt.text)
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+        if icon is None or icon.isNull():
+            super().paint(painter, option, index)
+            return
+        # 1) 完整矩形画背景（高亮/选中态满宽不缺角）
+        panel = QStyleOptionViewItem(option)
+        self.initStyleOption(panel, index)
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem,
+                            panel, painter, widget)
+        # 2) 缩窄矩形画文字（不画默认图标，图标位预留给右侧）
+        text_opt = QStyleOptionViewItem(option)
+        self.initStyleOption(text_opt, index)
+        text_opt.icon = QIcon()
+        text_opt.rect.adjust(0, 0, -(self.ICON_SIZE + self.ICON_PAD * 2), 0)
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem,
+                          text_opt, painter, widget)
+        # 3) 图标画在项的右侧（「选项后面」）
+        r = QRect(option.rect.right() - self.ICON_SIZE - self.ICON_PAD,
+                  option.rect.top(), self.ICON_SIZE + self.ICON_PAD,
+                  option.rect.height())
+        icon.paint(painter, r, Qt.AlignmentFlag.AlignRight
+                   | Qt.AlignmentFlag.AlignVCenter)
+
+
+class StructRowDelegate(_NoEditDelegate):
+    """structList 双击行内编辑：「类型」列下拉、「X/Z」列文本框。
+
+    #/区域/容差/状态列只读（区域与状态是坐标的派生值，容差由行内
+    下拉框承担）；编辑提交由 itemChanged 统一处理（见
+    _on_struct_item_changed：重算区域/偏移/边界并做冲突检查）。
+    """
+
+    def __init__(self, widget, parent=None):
+        super().__init__(readonly_columns=(0, 4, 5, 6), parent=parent)
+        self._w = widget
+
+    def createEditor(self, parent, option, index):
+        if index.column() == 1:
+            combo = QComboBox(parent)
+            version = self._w.versionCombo.currentText()
+            for key in structure_params.available_structures(version):
+                combo.addItem(structure_params.struct_key_to_name(key), key)
+            return combo
+        editor = super().createEditor(parent, option, index)
+        if index.column() == 2 and isinstance(editor, QLineEdit):
+            editor.setPlaceholderText("X（可粘 F3+C）")
+        elif index.column() == 3 and isinstance(editor, QLineEdit):
+            editor.setPlaceholderText("Z")
+        return editor
+
+    def setEditorData(self, editor, index):
+        if index.column() == 1 and isinstance(editor, QComboBox):
+            i = editor.findData(index.data(Qt.ItemDataRole.UserRole))
+            editor.setCurrentIndex(i if i >= 0 else 0)
+            return
+        super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        if index.column() == 1 and isinstance(editor, QComboBox):
+            model.setData(index, editor.currentData(),
+                          Qt.ItemDataRole.UserRole)
+            return
+        super().setModelData(editor, model, index)
+
+
+class BiomeRowDelegate(BiomeComboDelegate):
+    """biomeObsList 双击行内编辑 + 群系列行末图标（继承图标绘制）。
+
+    「群系」列为带图标下拉（复用主下拉的图标 delegate 与双语补全）；
+    X/Y/Z 为整数文本框（Y 可留空）；# 列只读。提交校验见
+    _on_biome_item_changed（同噪声格去重等）。
+    """
+
+    def __init__(self, widget, parent=None):
+        super().__init__(widget._biome_icons, parent,
+                         icon_column=4, readonly_columns=(0,))
+        self._w = widget
+
+    def createEditor(self, parent, option, index):
+        if index.column() == 4:
+            combo = QComboBox(parent)
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            model = QStandardItemModel(combo)
+            for label, _key in BIOME_CHOICES:
+                model.appendRow(QStandardItem(label))
+            proxy = QSortFilterProxyModel(combo)
+            proxy.setSourceModel(model)
+            proxy.setFilterCaseSensitivity(
+                Qt.CaseSensitivity.CaseInsensitive)
+            proxy.setFilterKeyColumn(0)
+            completer = QCompleter(proxy, combo)
+            completer.setCompletionMode(
+                QCompleter.CompletionMode.UnfilteredPopupCompletion)
+            completer.setCaseSensitivity(
+                Qt.CaseSensitivity.CaseInsensitive)
+            combo.setCompleter(completer)
+            # 弹层复用主下拉的图标 delegate（图标画在选项右侧）
+            combo.view().setItemDelegate(self._w._biome_delegate)
+            completer.popup().setItemDelegate(self._w._biome_delegate)
+            combo.lineEdit().textEdited.connect(proxy.setFilterFixedString)
+            return combo
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        if index.column() == 4 and isinstance(editor, QComboBox):
+            editor.lineEdit().setText(
+                index.data(Qt.ItemDataRole.DisplayRole) or "")
+            return
+        super().setEditorData(editor, index)
+
+
 class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     preferred_size = (1170, 826)
 
@@ -237,6 +413,74 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             QComboBox.InsertPolicy.NoInsert)
         self.biomeNameCombo.setCurrentIndex(-1)
 
+        # 包含式补全：输入任意片段（中文或英文）即过滤候选，
+        # UnfilteredPopup + 代理模型 contains 过滤（自带补全是前缀式，
+        # 对带空格的英文标签基本不可用）
+        self._biome_model = QStandardItemModel(self.biomeNameCombo)
+        for label, _key in BIOME_CHOICES:
+            self._biome_model.appendRow(QStandardItem(label))
+        self._biome_proxy = QSortFilterProxyModel(self.biomeNameCombo)
+        self._biome_proxy.setSourceModel(self._biome_model)
+        self._biome_proxy.setFilterCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive)
+        self._biome_proxy.setFilterKeyColumn(0)
+        self._biome_completer = QCompleter(
+            self._biome_proxy, self.biomeNameCombo)
+        self._biome_completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self._biome_completer.setCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive)
+        self.biomeNameCombo.setCompleter(self._biome_completer)
+        self.biomeNameCombo.lineEdit().textEdited.connect(
+            self._biome_proxy.setFilterFixedString)
+
+        # 群系图标：显示标签 → QIcon（biome_icons/<内部键>.png，16x16）。
+        # 1) 下拉列表/补全浮层用 delegate 把图标画在文字右侧；
+        # 2) 当前选中项用行编辑器尾部 action 显示图标（带浮层互斥联动）。
+        self._biome_icons: dict[str, QIcon] = {}
+        for label, key in BIOME_CHOICES:
+            path = icon_path(key)
+            if path:
+                icon = QIcon(path)
+                if not icon.isNull():
+                    self._biome_icons[label] = icon
+        self._biome_delegate = BiomeComboDelegate(
+            self._biome_icons, self.biomeNameCombo)
+        self.biomeNameCombo.view().setItemDelegate(self._biome_delegate)
+        self._biome_completer.popup().setItemDelegate(self._biome_delegate)
+        # 下拉视图高度按 54 项全显微调（默认视口可能过矮）
+        self.biomeNameCombo.view().setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # 群系观测列表：末列「群系」同样在行末尾画图标（共用 delegate，
+        # 仅作用于第 4 列；其余列走原生绘制）。图标固定在单元格右端，
+        # 列随窗口拉伸时图标仍贴行末，与下拉项视觉一致。
+        # BiomeRowDelegate 继承图标绘制并承担双击行内编辑
+        self._obs_delegate = BiomeRowDelegate(self, self.biomeObsList)
+        self.biomeObsList.setItemDelegate(self._obs_delegate)
+
+        # 双击行内编辑：类型列下拉 / X Z 群系列可编辑，
+        # 校验与回滚由 itemChanged 处理器统一负责（_init_signals 连接）
+        self.structList.setItemDelegate(
+            StructRowDelegate(self, self.structList))
+        self.structList.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked)
+        self.biomeObsList.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked)
+
+        # 当前项图标 action 先占位（无图标），选择/输入变化时联动更新；
+        # TrailingPosition = 行编辑器文字右侧，与下拉项右侧图标视觉一致
+        self._biome_trailing_action = \
+            self.biomeNameCombo.lineEdit().addAction(
+                QIcon(), QLineEdit.ActionPosition.TrailingPosition)
+        self._biome_trailing_action.setToolTip("当前群系图标")
+        self.biomeNameCombo.currentIndexChanged.connect(
+            self._update_biome_trailing_icon)
+        # textChanged 兜底：补全浮层确认文本不走 textEdited，
+        # 手动改字时则立即清除不再匹配的图标
+        self.biomeNameCombo.lineEdit().textChanged.connect(
+            self._update_biome_trailing_icon)
+
         # Y 输入框：可选（ Designer 无占位提示，这里设置）
         self.biomeYEdit.setPlaceholderText("Y(可不填)")
         self.biomeYEdit.setToolTip(
@@ -280,9 +524,12 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.coordZEdit.returnPressed.connect(self._on_add_clicked)
 
         self.structList.customContextMenuRequested.connect(self._on_list_context_menu)
+        # 双击行内编辑：提交校验统一走 itemChanged
+        self.structList.itemChanged.connect(self._on_struct_item_changed)
 
         self.biomeObsList.customContextMenuRequested.connect(
             self._on_biome_obs_context_menu)
+        self.biomeObsList.itemChanged.connect(self._on_biome_item_changed)
 
         self.calcButton.clicked.connect(self._on_calc_clicked)
         self.verifyButton.clicked.connect(self._on_verify_clicked)
@@ -485,6 +732,176 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
                 "玩家站位跨区块时可能导致区域判定偏差，建议换一个离边界远的结构。"
             )
 
+    # ---------- 结构观测：双击行内编辑提交 ----------
+    def _on_struct_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        """structList 行内编辑提交：校验 → 回滚或重算派生字段。
+
+        程序化回写同样会触发 itemChanged，回写用 blockSignals 包裹
+        防递归。合法提交后旧结果失效（与删除观测同一处理）。
+        """
+        idx = self.structList.indexOfTopLevelItem(item)
+        if not (0 <= idx < len(self._observations)):
+            return
+        obs = self._observations[idx]
+
+        # 类型列：数据写在 UserRole（DisplayRole 仍是中文名，由这里回写）
+        if column == 1:
+            new_key = item.data(1, Qt.ItemDataRole.UserRole)
+            if not new_key or new_key == obs["struct_key"]:
+                return
+            version = self.versionCombo.currentText()
+            try:
+                params = structure_params.get_params(new_key, version)
+            except KeyError:
+                # 新版本已移除的结构：回滚并提示
+                self.structList.blockSignals(True)
+                try:
+                    item.setData(1, Qt.ItemDataRole.UserRole,
+                                 obs["struct_key"])
+                finally:
+                    self.structList.blockSignals(False)
+                self.informationBrowser.setPlainText(
+                    f"当前版本不支持该结构类型，已回滚为「{obs['name']}」。")
+                return
+            # 新类型区域大小可能不同 → 先用旧坐标重算区域，再做查重
+            region_size = params["region_size"]
+            reg_x, reg_z = seed_math.compute_region(
+                obs["x"], obs["z"], region_size)
+            for i, o in enumerate(self._observations):
+                if i != idx and o["struct_key"] == new_key \
+                        and o["reg_x"] == reg_x and o["reg_z"] == reg_z:
+                    # 同区域同类型冲突：回滚 UserRole（DisplayRole 本就未变）
+                    self.structList.blockSignals(True)
+                    try:
+                        item.setData(1, Qt.ItemDataRole.UserRole,
+                                     obs["struct_key"])
+                    finally:
+                        self.structList.blockSignals(False)
+                    self.informationBrowser.setPlainText(
+                        f"修改未生效：该区域 (reg {reg_x}, {reg_z}) 已有"
+                        f"同类型结构「{params['name']}」，不能重复采集。\n"
+                        "提示：找下一个该类型结构时，至少要跨过一个区域。")
+                    return
+            obs["struct_key"] = new_key
+            obs["name"] = params["name"]
+            obs["params"] = params   # 同步新参数表（salt/region_size 等）
+            obs["reg_x"], obs["reg_z"] = reg_x, reg_z
+            obs["off_x"], obs["off_z"] = seed_math.compute_offset(
+                obs["x"], obs["z"], reg_x, reg_z, region_size)
+            # 容差回落新类型默认值并重建行内下拉框（闭包持同一 obs 引用）
+            obs["tol"] = structure_params.get_default_tolerance(new_key)
+            self._attach_tol_combo(item, obs)
+            # 类型变了 → 区域大小可能变 → 用旧坐标重算全部派生字段
+            status = self._recalc_struct_obs(obs)
+            self.structList.blockSignals(True)
+            try:
+                item.setText(1, obs["name"])
+                item.setText(4, f"({obs['reg_x']}, {obs['reg_z']})")
+                item.setText(6, status)
+                fg, bg = _STATUS_COLORS.get(status, (None, None))
+                item.setForeground(6, QColor(fg) if fg else QBrush())
+                item.setBackground(6, QColor(bg) if bg else QBrush())
+            finally:
+                self.structList.blockSignals(False)
+            self._after_struct_edit()
+            return
+
+        # X / Z 列：整数或整段 F3+C 文本
+        if column in (2, 3):
+            raw = item.text(column).strip()
+            if not raw:
+                self._rollback_struct_cell(item, obs, column, "坐标不能为空")
+                return
+            # _coerce_coord 返回 (本坐标值, 另一框文本)：X 列粘 F3+C 时
+            # 第二个返回值是解析出的 Z（与添加路径行为一致），纯整数时
+            # 是原 Z 的字符串形式；Z 列只取第一个返回值
+            if column == 2:
+                val, other = self._coerce_coord(raw, str(obs["z"]), is_x=True)
+                if val is None:
+                    self._rollback_struct_cell(
+                        item, obs, column,
+                        "坐标必须是整数方块坐标（如 -1234、567），或整段 F3+C 文本")
+                    return
+                x = int(val)
+                try:
+                    z = int(other)
+                except ValueError:
+                    self._rollback_struct_cell(
+                        item, obs, column, "无法从输入解析出有效坐标")
+                    return
+            else:
+                val, _ = self._coerce_coord(raw, "", is_x=False)
+                if val is None:
+                    self._rollback_struct_cell(
+                        item, obs, column,
+                        "坐标必须是整数方块坐标（如 -1234、567），或整段 F3+C 文本")
+                    return
+                z = int(val)
+                x = obs["x"]
+            # 区域/偏移重算 + 同区域同类型重复检查（排除自身）
+            region_size = obs["params"]["region_size"]
+            reg_x, reg_z = seed_math.compute_region(x, z, region_size)
+            for i, o in enumerate(self._observations):
+                if i != idx and o["struct_key"] == obs["struct_key"] \
+                        and o["reg_x"] == reg_x and o["reg_z"] == reg_z:
+                    self._rollback_struct_cell(
+                        item, obs, column,
+                        f"该区域 (reg {reg_x}, {reg_z}) 已有同类型结构"
+                        f"「{obs['name']}」，不能重复采集。\n"
+                        "提示：找下一个该类型结构时，至少要跨过一个区域。")
+                    return
+            obs["x"], obs["z"] = x, z
+            obs["reg_x"], obs["reg_z"] = reg_x, reg_z
+            obs["off_x"], obs["off_z"] = seed_math.compute_offset(
+                x, z, reg_x, reg_z, region_size)
+            status = self._recalc_struct_obs(obs)
+            self.structList.blockSignals(True)
+            try:
+                item.setText(2, str(x))
+                item.setText(3, str(z))
+                item.setText(4, f"({reg_x}, {reg_z})")
+                item.setText(6, status)
+                fg, bg = _STATUS_COLORS.get(status, (None, None))
+                item.setForeground(6, QColor(fg) if fg else QBrush())
+                item.setBackground(6, QColor(bg) if bg else QBrush())
+            finally:
+                self.structList.blockSignals(False)
+            self._after_struct_edit()
+            if status == "边界!":
+                self.informationBrowser.setPlainText(
+                    f"警告：观测「{obs['name']} ({x}, {z})」的区块偏移为 "
+                    f"({obs['off_x']}, {obs['off_z']})，离区域边界不足 "
+                    f"{_BORDER_THRESHOLD} 区块。\n"
+                    "玩家站位跨区块时可能导致区域判定偏差，建议换一个离边界远的结构。")
+
+    def _recalc_struct_obs(self, obs: dict) -> str:
+        """重算边界标志并返回状态文本（区域/偏移已由调用方更新）。"""
+        obs["near_boundary"] = seed_math.is_near_boundary(
+            obs["off_x"], obs["off_z"], obs["params"]["region_size"],
+            _BORDER_THRESHOLD)
+        return "边界!" if obs["near_boundary"] else "OK"
+
+    def _rollback_struct_cell(self, item: QTreeWidgetItem, obs: dict,
+                              column: int, reason: str) -> None:
+        """非法输入回滚：恢复旧显示文本，信息区提示原因。"""
+        old = {2: str(obs["x"]), 3: str(obs["z"])}.get(column, "")
+        self.structList.blockSignals(True)
+        try:
+            item.setText(column, old)
+        finally:
+            self.structList.blockSignals(False)
+        self.informationBrowser.setPlainText(
+            f"修改未生效：{reason}\n已恢复原值。")
+
+    def _after_struct_edit(self) -> None:
+        """合法提交后的公共收尾：结果失效 + 信息条 + 落盘。"""
+        self._last_candidates = []
+        self._result_version = None
+        if self._verify_running and self._verify_thread is not None:
+            self._verify_thread.request_cancel()
+        self._update_info_bar()
+        self._save_session()
+
     def _resize_struct_columns(self) -> None:
         """structList 列宽自适应（固定像素列宽在各 DPI/字体下的挤压问题）。
 
@@ -523,7 +940,12 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             self.biomeObsList.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
 
     def _append_list_row(self, seq: int, obs: dict, status: str) -> None:
-        """把观测追加为 structList 一行（第 6 列为行内容差下拉框）。"""
+        """把观测追加为 structList 一行（第 6 列为行内容差下拉框）。
+
+        程序化 setText 会触发 itemChanged，这里 blockSignals 包裹
+        （连接早于会话恢复，恢复路径同样经此函数）；类型列另存
+        UserRole（struct_key），供 delegate 编辑器回显与提交比对。
+        """
         item = QTreeWidgetItem([
             str(seq),
             obs["name"],
@@ -533,6 +955,9 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             "",          # 容差列：setItemWidget 注入 QComboBox，不存文本
             status,
         ])
+        item.setData(1, Qt.ItemDataRole.UserRole, obs["struct_key"])
+        # 列 1/2/3 允许双击行内编辑（只读列由 delegate createEditor 拦截）
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setTextAlignment(0, int(Qt.AlignmentFlag.AlignCenter))
         item.setTextAlignment(2, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         item.setTextAlignment(3, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
@@ -543,7 +968,11 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             item.setForeground(6, QColor(fg_color))
         if bg_color:
             item.setBackground(6, QColor(bg_color))
-        self.structList.addTopLevelItem(item)
+        self.structList.blockSignals(True)
+        try:
+            self.structList.addTopLevelItem(item)
+        finally:
+            self.structList.blockSignals(False)
         self._attach_tol_combo(item, obs)
 
     def _attach_tol_combo(self, item: QTreeWidgetItem, obs: dict) -> None:
@@ -1230,16 +1659,172 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self._save_session()
 
     def _append_biome_row(self, seq: int, obs: dict) -> None:
+        """把群系观测追加为 biomeObsList 一行（Y 缺省显示「—”）。
+
+        列 1/2/3/4 允许双击行内编辑（# 列由 delegate 拦截）；
+        blockSignals 包裹 addTopLevelItem 防程序化触发 itemChanged。
+        """
         item = QTreeWidgetItem([
             str(seq), str(obs["x"]),
             str(obs["y"]) if obs.get("y") is not None else "—",
             str(obs["z"]), biome_label(obs["biome_id"]),
         ])
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setTextAlignment(0, int(Qt.AlignmentFlag.AlignCenter))
         item.setTextAlignment(1, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         item.setTextAlignment(2, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
         item.setTextAlignment(3, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        self.biomeObsList.addTopLevelItem(item)
+        self.biomeObsList.blockSignals(True)
+        try:
+            self.biomeObsList.addTopLevelItem(item)
+        finally:
+            self.biomeObsList.blockSignals(False)
+
+    # ---------- 群系观测：双击行内编辑提交 ----------
+    def _on_biome_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        """biomeObsList 行内编辑提交：校验 → 回滚或规范化回写。
+
+        程序化回写用 blockSignals 包裹防递归。合法提交后
+        刷新精化按钮状态并落盘。
+        """
+        idx = self.biomeObsList.indexOfTopLevelItem(item)
+        if not (0 <= idx < len(self._biome_obs)):
+            return
+        obs = self._biome_obs[idx]
+
+        # X / Z 列：整数或整段 F3+C 文本
+        if column in (1, 3):
+            raw = item.text(column).strip()
+            if not raw:
+                self._rollback_biome_cell(item, obs, column, "坐标不能为空")
+                return
+            if column == 1 and looks_like_f3c(raw):
+                try:
+                    fx, fy, fz, _yaw = parse_f3c_command_full(raw)
+                except ValueError as exc:
+                    self._rollback_biome_cell(item, obs, column,
+                                              f"解析 F3+C 失败：{exc}")
+                    return
+                # 解析返回 float，噪声格运算与存储都用 int
+                x, y, z = int(fx), int(fy), int(fz)
+            else:
+                try:
+                    if column == 1:
+                        x = int(raw)
+                        z = int(item.text(3).strip())
+                    else:
+                        z = int(raw)
+                        x = int(item.text(1).strip())
+                    y = obs.get("y")
+                except ValueError:
+                    self._rollback_biome_cell(
+                        item, obs, column,
+                        "坐标必须是整数方块坐标（如 -1234），或整段 F3+C 文本")
+                    return
+            # 同噪声格去重（排除自身；带不同 Y 的同 (x,z) 点有效）
+            nx, nz = x >> 2, z >> 2
+            ny = (y >> 2) if y is not None else 0
+            for i, o in enumerate(self._biome_obs):
+                if i == idx:
+                    continue
+                if ((o["x"] >> 2) == nx and (o["z"] >> 2) == nz
+                        and ((o["y"] >> 2) if o.get("y") is not None
+                             else 0) == ny):
+                    self._rollback_biome_cell(
+                        item, obs, column,
+                        f"({x}, {z}, y={y if y is not None else '缺省'}) "
+                        "与已有观测位于同一噪声格，信息冗余")
+                    return
+            obs["x"], obs["z"] = x, z
+            if y is not None:
+                obs["y"] = y
+            else:
+                obs.pop("y", None)
+            self._rewrite_biome_row(item, obs)
+            self._after_biome_edit()
+            return
+
+        # Y 列：整数或留空（「—」视作留空）
+        if column == 2:
+            raw = item.text(2).strip()
+            if raw in ("", "—"):
+                y = None
+            else:
+                try:
+                    y = int(raw)
+                except ValueError:
+                    self._rollback_biome_cell(
+                        item, obs, column, "Y 必须是整数方块高度，或留空")
+                    return
+            # 换 Y 可能撞上同 (x,z) 噪声格的另一条观测
+            ny = (y >> 2) if y is not None else 0
+            for i, o in enumerate(self._biome_obs):
+                if i == idx:
+                    continue
+                if ((o["x"] >> 2) == (obs["x"] >> 2)
+                        and (o["z"] >> 2) == (obs["z"] >> 2)
+                        and ((o["y"] >> 2) if o.get("y") is not None
+                             else 0) == ny):
+                    self._rollback_biome_cell(
+                        item, obs, column,
+                        f"y={y if y is not None else '缺省'} "
+                        "与已有观测位于同一噪声格，信息冗余")
+                    return
+            if y is not None:
+                obs["y"] = y
+            else:
+                obs.pop("y", None)
+            self._rewrite_biome_row(item, obs)
+            self._after_biome_edit()
+            return
+
+        # 群系列：双语标签 / F3 别名解析（resolve_biome）
+        if column == 4:
+            text = item.text(4).strip()
+            bid = resolve_biome(text)
+            if bid is None:
+                self.biomeObsList.blockSignals(True)
+                try:
+                    item.setText(4, biome_label(obs["biome_id"]))
+                finally:
+                    self.biomeObsList.blockSignals(False)
+                self.refineInfoLabel.setText(
+                    f"无法识别群系名：{text!r}，已恢复原群系。\n"
+                    "可从下拉选择，或输入 F3 显示名（中/英文）")
+                return
+            obs["biome_id"] = bid
+            self._rewrite_biome_row(item, obs)
+            self._after_biome_edit()
+
+    def _rewrite_biome_row(self, item: QTreeWidgetItem, obs: dict) -> None:
+        """从 obs 规范化回写整行显示（Y 缺省显示「—」，群系用全标签）。"""
+        self.biomeObsList.blockSignals(True)
+        try:
+            item.setText(1, str(obs["x"]))
+            item.setText(2, str(obs["y"]) if obs.get("y") is not None else "—")
+            item.setText(3, str(obs["z"]))
+            item.setText(4, biome_label(obs["biome_id"]))
+        finally:
+            self.biomeObsList.blockSignals(False)
+
+    def _rollback_biome_cell(self, item: QTreeWidgetItem, obs: dict,
+                             column: int, reason: str) -> None:
+        """非法输入回滚：恢复旧显示文本，精化提示区说明原因。"""
+        old = {1: str(obs["x"]),
+               2: str(obs["y"]) if obs.get("y") is not None else "—",
+               3: str(obs["z"]),
+               4: biome_label(obs["biome_id"])}.get(column, "")
+        self.biomeObsList.blockSignals(True)
+        try:
+            item.setText(column, old)
+        finally:
+            self.biomeObsList.blockSignals(False)
+        self.refineInfoLabel.setText(f"修改未生效：{reason}\n已恢复原值。")
+
+    def _after_biome_edit(self) -> None:
+        """合法提交后的公共收尾：按钮状态 + 落盘。"""
+        self._update_refine_buttons()
+        self._save_session()
 
     def _on_paste_biome_f3c(self) -> None:
         """粘贴F3+C：解析剪贴板 F3+C 文本，填入群系面板的 X/Y/Z 输入框。
@@ -1268,6 +1853,17 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.biomeNameCombo.setCurrentIndex(-1)
         self.refineInfoLabel.setText(
             "已填入 X/Y/Z：请在下拉框选择或输入当前群系名，然后点「添加」")
+
+    def _update_biome_trailing_icon(self, *_args) -> None:
+        """选择/输入变化 → 联动行编辑器尾部的群系图标。
+
+        以 currentText() 精确匹配标准标签为准：匹配到 54 项之一则显示
+        对应图标；手动输入任意其他文本或清空选择时移除图标。
+        （可编辑组合框的 currentText 即行编辑器文本，两种事件源统一处理）
+        """
+        icon = self._biome_icons.get(self.biomeNameCombo.currentText())
+        self._biome_trailing_action.setIcon(icon if icon is not None
+                                            else QIcon())
 
     def _on_clear_biome_obs(self) -> None:
         self._biome_obs.clear()

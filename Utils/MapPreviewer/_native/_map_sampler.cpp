@@ -692,6 +692,8 @@ static void map_worker(u64 seed, const BTreeC& bt,
                        int nw, int ny, int row_begin, int row_end,
                        i64* biomes,          // (nh, nw) 行主序输出
                        i64* depth,           // (nh, nw) depth-10000 输出（可空）
+                       i64* temp,            // (nh, nw) 温度-10000 输出（可空）
+                       i64* humid,           // (nh, nw) 湿度-10000 输出（可空）
                        std::atomic<int>& done_rows,
                        const std::atomic<bool>& cancelled,
                        std::string& err) {
@@ -707,11 +709,15 @@ static void map_worker(u64 seed, const BTreeC& bt,
             const i64 nz = origin_nz + row;
             i64* out_row = biomes + (i64)row * nw;
             i64* dep_row = depth ? depth + (i64)row * nw : nullptr;
+            i64* tmp_row = temp ? temp + (i64)row * nw : nullptr;
+            i64* hum_row = humid ? humid + (i64)row * nw : nullptr;
             for (int col = 0; col < nw; ++col) {
                 climate_point(ctx, (double)(origin_nx + col),
                               (double)nz, (double)ny, np6);
                 out_row[col] = climate_to_biome(bt, np6);
                 if (dep_row) dep_row[col] = np6[4];
+                if (tmp_row) tmp_row[col] = np6[0];
+                if (hum_row) hum_row[col] = np6[1];
             }
             done_rows.fetch_add(1, std::memory_order_relaxed);
         }
@@ -733,7 +739,8 @@ static py::dict sample_map(
         int nw, int nh, int ny,
         py::object on_progress,
         py::object check_cancel,
-        bool want_depth) {
+        bool want_depth,
+        bool want_temp_humid) {
     if (nw <= 0 || nh <= 0) {
         throw std::runtime_error("nw/nh must be positive");
     }
@@ -752,6 +759,16 @@ static py::dict sample_map(
     if (want_depth) {
         depth_arr = py::array_t<i64>({(py::ssize_t)nh, (py::ssize_t)nw});
         depth = depth_arr.mutable_data();
+    }
+
+    py::array_t<i64> temp_arr, humid_arr;
+    i64* temp = nullptr;
+    i64* humid = nullptr;
+    if (want_temp_humid) {
+        temp_arr = py::array_t<i64>({(py::ssize_t)nh, (py::ssize_t)nw});
+        temp = temp_arr.mutable_data();
+        humid_arr = py::array_t<i64>({(py::ssize_t)nh, (py::ssize_t)nw});
+        humid = humid_arr.mutable_data();
     }
 
     unsigned hc = std::thread::hardware_concurrency();
@@ -827,10 +844,12 @@ static py::dict sample_map(
                 continue;
             }
             pool.emplace_back([useed, &bt, origin_nx, origin_nz, nw, ny,
-                               biomes, depth, &done_rows, &cancelled,
+                               biomes, depth, temp, humid,
+                               &done_rows, &cancelled,
                                begin, end, t, &errs]() {
                 map_worker(useed, bt, origin_nx, origin_nz, nw, ny,
-                           begin, end, biomes, depth, done_rows, cancelled, errs[t]);
+                           begin, end, biomes, depth, temp, humid,
+                           done_rows, cancelled, errs[t]);
             });
         }
         for (auto& th : pool) {
@@ -850,6 +869,10 @@ static py::dict sample_map(
     py::dict out;
     out["biomes"] = biomes_arr;
     if (want_depth) out["depth"] = depth_arr;
+    if (want_temp_humid) {
+        out["temp"] = temp_arr;
+        out["humid"] = humid_arr;
+    }
     out["rows_done"] = done_rows.load(std::memory_order_relaxed);
     out["cancelled"] = cancelled.load(std::memory_order_relaxed);
     return out;
@@ -897,8 +920,10 @@ PYBIND11_MODULE(_map_sampler, m) {
           py::arg("on_progress") = py::none(),   // on_progress(done, total, "map")
           py::arg("check_cancel") = py::none(),  // check_cancel() -> bool
           py::arg("want_depth") = false,        // 是否同时输出 depth 矩阵
+          py::arg("want_temp_humid") = false,   // 是否同时输出温度/湿度矩阵
           "多线程采样 (nw x nh) 噪声格区域，返回 {biomes: int32(nh,nw),"
-          " depth: int32(nh,nw)(want_depth), rows_done, cancelled}");
+          " depth: int32(nh,nw)(want_depth), temp/humid: int32(nh,nw)"
+          "(want_temp_humid), rows_done, cancelled}");
     m.def("sample_point", &sample_point,
           py::arg("seed"), py::arg("btree_name"),
           py::arg("x"), py::arg("y"), py::arg("z"),

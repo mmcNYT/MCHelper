@@ -266,6 +266,7 @@ class Ui_seedReverser(object):
         self.refineGroupBox.setTitle(QCoreApplication.translate("seedReverser", u"\u4e16\u754c\u79cd\u5b50\u7cbe\u5316\uff08\u7fa4\u7cfb\u9a8c\u8bc1\uff09", None))
         self.biomeXEdit.setPlaceholderText(QCoreApplication.translate("seedReverser", u"X", None))
         self.candidateFromCalcBtn.setText(QCoreApplication.translate("seedReverser", u"\u4ece\u8ba1\u7b97\u7ed3\u679c\u5bfc\u5165", None))
+        self.biomeNameCombo.setPlaceholderText(QCoreApplication.translate("seedReverser", u"\u7fa4\u7cfb\u540d", None))
         self.candidateSeedEdit.setPlaceholderText(QCoreApplication.translate("seedReverser", u"\u7ed3\u6784\u79cd\u5019\u9009", None))
         self.pushButton.setText(QCoreApplication.translate("seedReverser", u"\u7c98\u8d34F3+C", None))
         self.clearBiomeBtn.setText(QCoreApplication.translate("seedReverser", u"\u6e05\u7a7a\u5217\u8868", None))
