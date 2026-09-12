@@ -16,6 +16,13 @@
     每个像素 = 1 个噪声格 = 4x4 方块
     采样层固定 ny=16（方块层 y≈64~79，海平面地表层，与 F3 群系判定
     一致层，经用户真实数据校准）
+
+表面层模式（surface_mode，最高方块渲染）：
+    固定层切入高山山体（depth 参数 > 0，即采样层在真实地表之下）时
+    btree 最近邻会判到地下群系（174 滴水石/175 繁茂洞/183 深暗之域），
+    俯视图上表现为"地表随处可见溶洞"。surface_mode=True 时把这些格
+    的 depth 参数置 0（地表线 d=0）重判群系；d<=0（水面/低地）不动
+    → 水色零回归。depth 矩阵仍用原始 d（hillshade/水深渐变不变）。
 """
 
 from __future__ import annotations
@@ -69,6 +76,7 @@ def sample_region(
     cancel=None,
     want_depth: bool = False,
     want_temp_humid: bool = False,
+    surface_mode: bool = True,
 ) -> dict:
     """采样矩形区域，返回 dict 载荷（线程与 UI 解耦）。
 
@@ -84,6 +92,9 @@ def sample_region(
             不额外增加采样成本）。
         want_temp_humid: 是否同时返回温度/湿度参数矩阵（方块级草色
             tint、水面渐变等渲染增强用；不额外增加采样成本）。
+        surface_mode: 表面层重判（最高方块渲染）。采样层切入山体
+            （d>0）时置 depth=0 重判为地表群系，消除"地表溶洞"；
+            默认 True（俯视图语义），结构校验路径不经过此函数。
 
     Returns:
         dict: {
@@ -95,6 +106,7 @@ def sample_region(
             "origin_bx": 区域左上角方块 x（对齐 4）,
             "origin_bz": 区域左上角方块 z,
             "ny": ny,
+            "surface_mode": surface_mode,
             "engine": "native" | "python",
             "elapsed": 秒,
             "cancelled": bool,
@@ -127,6 +139,7 @@ def sample_region(
                 on_progress=on_progress, check_cancel=cancel,
                 want_depth=want_depth,
                 want_temp_humid=want_temp_humid,
+                surface_mode=surface_mode,
             )
             biomes = np.asarray(res["biomes"], dtype=np.int32)
             cancelled = bool(res["cancelled"])
@@ -138,6 +151,7 @@ def sample_region(
                 "origin_bx": origin_nx << 2,
                 "origin_bz": origin_nz << 2,
                 "ny": ny,
+                "surface_mode": surface_mode,
                 "engine": "native",
                 "elapsed": time.perf_counter() - t0,
                 "cancelled": cancelled,
@@ -173,9 +187,19 @@ def sample_region(
         nz = origin_nz + row
         for col in range(nw):
             np6 = sampler.climate_point_xz(origin_nx + col, nz, ny)
-            biomes[row, col] = climate_to_biome(np6, btree)
-            if depth is not None:
-                depth[row, col] = np6[4]
+            if surface_mode and np6[4] > 0:
+                # 表面层重判：采样层在真实地表之下（高山内部）→
+                # depth 参数置 0（地表线 d=0）重判群系；
+                # depth 矩阵仍记原始 d（与 native 路径一致）
+                d_raw = np6[4]
+                np6 = np6[:4] + (0,) + np6[5:]
+                biomes[row, col] = climate_to_biome(np6, btree)
+                if depth is not None:
+                    depth[row, col] = d_raw
+            else:
+                biomes[row, col] = climate_to_biome(np6, btree)
+                if depth is not None:
+                    depth[row, col] = np6[4]
             if temp is not None:
                 temp[row, col] = np6[0]
                 humid[row, col] = np6[1]
@@ -191,6 +215,7 @@ def sample_region(
         "origin_bx": origin_nx << 2,
         "origin_bz": origin_nz << 2,
         "ny": ny,
+        "surface_mode": surface_mode,
         "engine": "python",
         "elapsed": time.perf_counter() - t0,
         "cancelled": cancelled,

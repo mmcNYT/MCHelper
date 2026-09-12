@@ -16,14 +16,53 @@ isViableStructurePos 的 1.18+ 分支逐行移植（本文件内注释标注源�
       用 48 位结构种与用 64 位世界种子等价（structure_math 已实现）。
 
 仅支持 1.18~1.21 主世界结构（用户明确指示的工具范围）。
+
+下界/末地扩展（2026-09 功能①）：
+    - 下界要塞/堡垒遗迹/末地城为区域制，散布公式与主世界一致
+      （getFeaturePos / getLargeStructurePos 复用 structure_math），
+      但概率门/群系校验按 finders.c isViableStructurePos 的
+      DIM_NETHER / DIM_END 分支逐行移植：
+        · 1.18+ 要塞 = 同区域堡垒不生成（bastion 概率门失败或群系
+          白名单外）；堡垒概率门在 getStructurePos 层用 chunkGenerateRnd
+          （48 位结构种）→ nextInt(5) >= 2（finders.c L281-289）
+        · 堡垒采样点需 getVariant 尺寸表（4 种 start，L2079-2094）
+        · 末地城 = getLargeStructurePos + pos² ≥ 1008²（L247-249）
+          + chunk 级群系（scale=16，end_midlands/highlands）
+    - 群系采样用 nether_end_sampler（NetherSampler 逐点/EndSampler
+      chunk 级），BiomeSampler 仅支持主世界不可混用。
+
+扩展结构（本文件内移植，非 structure_math 区域制）：
+    - 埋藏的宝藏/沙漠水井/废弃矿井：getStructurePos 特殊分支与
+      getMineshafts 的逐行移植（含上游 rng.h 的 xNextLongJ/xNextFloat/
+      xNextIntJ 语义，本地 cubiomes 裁剪未含 rng.h）。
+    - 要塞：StrongholdIter 环形序列（initFirstStronghold/nextStronghold）
+      + locateBiome 1.18+ 分支。窗口批量采样用 native sample_map（与
+      rng 流无关，可安全解耦）；1.18/1.19（btree19 = 1.19.2 线）的
+      locateBiome 消耗共享 rnds 流，必须按序全扫 128 窗，不可跳窗。
 """
 
 from __future__ import annotations
 
+import math
+
+import numpy as np
+
 from Utils.SeedReverser import mc_random
 from Utils.SeedReverser import structure_params
 from Utils.SeedReverser.structure_math import get_structure_pos
-from Utils.SeedReverser.biome_noise import BiomeSampler
+from Utils.SeedReverser.biome_noise import BiomeSampler, Xoroshiro
+from Utils.MapPreviewer.nether_end_sampler import (
+    BASALT_DELTAS,
+    CRIMSON_FOREST,
+    END_BARRENS,
+    END_HIGHLANDS,
+    END_MIDLANDS,
+    EndSampler,
+    NETHER_WASTES,
+    NetherSampler,
+    SOUL_SAND_VALLEY,
+    WARPED_FOREST,
+)
 
 _MASK48 = (1 << 48) - 1
 _MASK64 = (1 << 64) - 1
@@ -41,11 +80,14 @@ RIVER = 7
 FROZEN_OCEAN = 10
 FROZEN_RIVER = 11
 SNOWY_PLAINS = 12            # snowy_tundra
+MUSHROOM_FIELDS = 14
+MUSHROOM_FIELD_SHORE = 15
 BEACH = 16
 DESERT_HILLS = 17
 JUNGLE = 21
 JUNGLE_HILLS = 22
 DEEP_OCEAN = 24
+STONE_SHORE = 25             # stony_shore
 SNOWY_BEACH = 26
 DARK_FOREST = 29
 SNOWY_TAIGA = 30
@@ -61,6 +103,7 @@ DEEP_COLD_OCEAN = 49
 DEEP_FROZEN_OCEAN = 50
 BAMBOO_JUNGLE = 168
 BAMBOO_JUNGLE_HILLS = 169
+MANGROVE_SWAMP = 184
 MEADOW = 177
 GROVE = 178
 SNOWY_SLOPES = 179
@@ -97,6 +140,7 @@ _FEATURE_WHITELIST = {
     "trail_ruins": {TAIGA, SNOWY_TAIGA, OLD_GROWTH_PINE_TAIGA,
                     OLD_GROWTH_SPRUCE_TAIGA, OLD_GROWTH_BIRCH_FOREST, JUNGLE},
     "mansion": {DARK_FOREST, DARK_FOREST_HILLS},
+    "buried_treasure": {BEACH, SNOWY_BEACH},   # finders.c L1236-1238
 }
 
 # finders.c L1252-1269 Outpost 1.18+ 白名单（12 种）
@@ -104,20 +148,45 @@ _OUTPOST_BIOMES = {DESERT, PLAINS, SAVANNA, SNOWY_PLAINS, TAIGA, MEADOW,
                    FROZEN_PEAKS, JAGGED_PEAKS, STONY_PEAKS, SNOWY_SLOPES,
                    GROVE, CHERRY_GROVE}
 
-# MapPreviewer 的版本→结构映射（覆盖全部 13 种，按图上易找程度排序；
-# 不同于 SeedReverser 的观测用版本表——前哨站虽不可逆推但可正向标注）
+# MapPreviewer 的版本→结构映射（覆盖全部 21 种，按图上易找程度排序；
+# 不同于 SeedReverser 的观测用版本表——前哨站/废弃传送门虽不可逆推
+# 但可正向标注；下界要塞/堡垒遗迹/末地城仅对应维度展示）
 _PREVIEW_ORDER = ("village", "pillager_outpost", "desert_pyramid",
                   "jungle_temple", "swamp_hut", "igloo", "shipwreck",
                   "ocean_ruin", "monument", "mansion", "ancient_city",
-                  "trail_ruins", "trial_chambers")
+                  "trail_ruins", "trial_chambers", "ruined_portal",
+                  "stronghold", "buried_treasure", "mineshaft",
+                  "desert_well",
+                  # 下界/末地扩展结构（1.16+ / 1.9+；仅对应维度可选）
+                  "nether_fortress", "bastion_remnant", "end_city")
 _VERSION_NUM = {"1.18": 118, "1.19": 119, "1.20": 120, "1.21": 121}
 
+# finders.c isViableFeatureBiome 下界/末地白名单（L1287-1299）
+_NETHER_FORTRESS_BIOMES = {NETHER_WASTES, SOUL_SAND_VALLEY, WARPED_FOREST,
+                           CRIMSON_FOREST, BASALT_DELTAS}
+_NETHER_BASTION_BIOMES = {NETHER_WASTES, SOUL_SAND_VALLEY, WARPED_FOREST,
+                          CRIMSON_FOREST}
+_END_CITY_BIOMES = {END_MIDLANDS, END_HIGHLANDS}
 
-def available_structures(version_key: str) -> tuple[str, ...]:
-    """返回某版本可标注的结构键元组（含 min_ver 过滤）。"""
+# 堡垒遗迹 getVariant 尺寸表（finders.c L2088-2094，未旋转 sx, sz；
+# start = 0:air_base(46x46) / 1:hoglin_stable(30x48) / 2:treasure(38x38)
+# / 3:bridge(16x32) 四种起点变体；rotation 1.18+ 无符号平移语义）
+_BASTION_TABLES = ((46, 46), (30, 48), (38, 38), (16, 32))
+
+
+def available_structures(version_key: str,
+                         dimension: str = "overworld") -> tuple[str, ...]:
+    """返回某版本、某维度可标注的结构键元组（含 min_ver 过滤）。
+
+    Args:
+        version_key: 版本键。
+        dimension: "overworld"/"nether"/"end"（主世界缺省兼容旧调用）。
+    """
     vnum = _VERSION_NUM.get(version_key, 121)
-    return tuple(k for k in _PREVIEW_ORDER
-                 if structure_params.STRUCT_PARAMS[k][4] <= vnum)
+    return tuple(
+        k for k in _PREVIEW_ORDER
+        if structure_params.STRUCT_PARAMS[k][4] <= vnum
+        and structure_params.STRUCT_DIMENSION.get(k, "overworld") == dimension)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +287,39 @@ def _variant_sample_point(chunk_x: int, chunk_z: int, vx: int, vz: int,
     sx_c = _c_div(chunk_x * 32 + 2 * vx + vsx - 1, 2)
     sz_c = _c_div(chunk_z * 32 + 2 * vz + vsz - 1, 2)
     return sx_c >> 2, sz_c >> 2
+
+
+def _bastion_variant(world_seed: int, chunk_x: int, chunk_z: int):
+    """Bastion 的 getVariant（finders.c L2079-2106）→ (vx, vz, vsx, vsz)。
+
+    rotation = nextInt(4)、start = nextInt(4)（1.16.1 交换，不适用）；
+    尺寸表 4 种起点；1.18+ 旋转平移无符号修正（与 Village 同式）。
+    """
+    rng = chunk_generate_rnd(world_seed, chunk_x, chunk_z)
+    rotation, rng = mc_random.next_int(rng, 4)
+    start, _ = mc_random.next_int(rng, 4)
+    sx, sz = _BASTION_TABLES[start]
+    if rotation == 0:
+        return 0, 0, sx, sz
+    if rotation == 1:
+        return 1 - sz, 0, sz, sx
+    if rotation == 2:
+        return 1 - sx, 1 - sz, sx, sz
+    return 0, 1 - sx, sz, sx
+
+
+def _bastion_probability(ws64: int, bx: int, bz: int) -> bool:
+    """Bastion 概率门（finders.c getStructurePos L281-289，mc >= 1.18）。
+
+    seed = chunkGenerateRnd(seed, pos.x>>4, pos.z>>4) → nextInt(5) >= 2。
+    chunkGenerateRnd 以完整 64 位世界种子参与乘法/异或；getStructurePos
+    调用方传 48 位截断值，结果上 setSeed(rnd, rnd) 后 state 相同
+    （乘法在 64 位域，48 位截断与 64 位种子高 16 位仅影响高位丢弃——
+    保守起见这里用完整 64 位世界种子，与 cubiomes 主流程一致）。
+    """
+    rnd = chunk_generate_rnd(ws64, bx >> 4, bz >> 4)
+    val, _ = mc_random.next_int(rnd, 5)
+    return val >= 2
 
 
 def _jigsaw_variant(struct_key: str, world_seed: int, bx: int, bz: int):
@@ -395,8 +497,273 @@ def _check_jigsaw(struct_key: str, sampler: BiomeSampler, world_seed: int,
     return bid != DEEP_DARK, bid
 
 
+# ---------------------------------------------------------------------------
+# 扩展结构：Xoroshiro Java 包装与人口种子（上游 rng.h 逐行移植）
+# ---------------------------------------------------------------------------
+
+def _x_next_long_j(xr: Xoroshiro) -> int:
+    """rng.h xNextLongJ：两次取 nextLong 高 32 位，按 Java int 符号拼接。"""
+    a = xr.next_long() >> 32
+    b = xr.next_long() >> 32
+    if a >= 1 << 31:
+        a -= 1 << 32
+    if b >= 1 << 31:
+        b -= 1 << 32
+    return ((a << 32) + b) & _MASK64
+
+
+def _x_next_float(xr: Xoroshiro) -> float:
+    """rng.h xNextFloat：nextLong 高 24 位 * 2^-24（消耗整个 64 位）。"""
+    return (xr.next_long() >> 40) * 5.9604645E-8
+
+
+def _x_next_int_pow2(xr: Xoroshiro, n_pow2: int) -> int:
+    """rng.h xNextIntJ 的 2 幂特判分支（本工具只用 16）。
+
+    x = n * (nextLong >> 33)；返回 (int)((int64_t)x >> 31)。
+    """
+    x = (n_pow2 * (xr.next_long() >> 33)) & _MASK64
+    if x >= 1 << 63:                  # 转回带符号 int64
+        x -= 1 << 64
+    return x >> 31                    # Python 算术移位与 int64 >> 一致
+
+
+def _c_round(v: float) -> int:
+    """C round()：半值远离零（Python round 是银行家舍入，负半值不同）。"""
+    return int(math.floor(v + 0.5)) if v >= 0 else -int(math.floor(-v + 0.5))
+
+
+def get_population_seed(world_seed: int, x: int, z: int) -> int:
+    """finders.c getPopulationSeed 1.18+ 分支（L27-55）。
+
+    a/b 为 Java nextLong（带符号拼接）且各 | 1；结果 (x*a + z*b) ^ ws。
+    """
+    ws = world_seed & _MASK64
+    xr = Xoroshiro.from_seed(ws)
+    a = _x_next_long_j(xr) | 1
+    b = _x_next_long_j(xr) | 1
+    return ((x * a + z * b) ^ ws) & _MASK64
+
+
+def _check_desert_well(sampler: BiomeSampler, bx: int, bz: int) -> tuple[bool, int]:
+    """Desert_Well 1.18+（finders.c L1560-1577 + isViableFeatureBiome L1243）。"""
+    bid = sampler.biome_at(bx >> 2, 319 >> 2, bz >> 2)
+    return bid == DESERT, bid
+
+
+def _stronghold_valid_sets() -> tuple[set[int], set[int]]:
+    """isStrongholdBiome（finders.c L798-832）预计算。
+
+    1.18+ 采样器只产主世界 id（不存在/非主世界返回 0 时校验即拒），
+    因此只需枚举「允许集合」：非海洋非河流滩非深暗非红树。
+    biomeExists 1.18 分支（biomes.c L5-82）确认 1.18 采样器可输出的
+    主世界 id 全集无 184 以外的版本差（1.19.2+ 才有红树/深暗，
+    由采样器输出端自然处理，此处集合保持全量）。
+    """
+    excluded = (_OCEANIC
+                | {RIVER, FROZEN_RIVER, BEACH, SNOWY_BEACH,
+                   STONE_SHORE, MANGROVE_SWAMP, DEEP_DARK})
+    return excluded, excluded        # (validB 集合, validM 集合)：同语义
+
+
+class _StrongholdWinSampler:
+    """要塞 locateBiome 窗口批量采样器（性能层）。
+
+    native 优先：sample_map 一次出 (2r+1)x(2r+1) 群系矩阵（多线程）；
+    native 不可用时逐点 Python 采样。两者与 rng 流无关，顺序消耗
+    在 StrongholdIter 侧。
+    """
+
+    def __init__(self, seed: int, version_key: str):
+        self._seed = seed & _MASK64
+        self._ext = None
+        try:
+            from Utils.MapPreviewer._native import _map_sampler as ext
+            from Utils.MapPreviewer.map_sampler import (
+                _NATIVE_BTREES, _ensure_native_btree)
+            self._ext = ext
+            self._ensure_btree = _ensure_native_btree
+            self._native_ready = _NATIVE_BTREES
+        except Exception:
+            self._ext = None
+        self._py = BiomeSampler(seed, version_key)
+        self._version_key = version_key
+
+    def window_ids(self, cx: int, cz: int, radius: int) -> np.ndarray:
+        """返回 (2r+1, 2r+1) int32 群系矩阵，覆盖噪声格
+        [cx-r, cx+r] x [cz-r, cz+r]（噪声格 y=0）。"""
+        r = radius
+        n = 2 * r + 1
+        if self._ext is not None:
+            try:
+                from Utils.MapPreviewer.biome_noise import VERSION_TO_BTREE
+            except Exception:
+                pass
+            try:
+                from Utils.SeedReverser.biome_noise import VERSION_TO_BTREE
+                self._ensure_btree(VERSION_TO_BTREE[self._version_key])
+                res = self._ext.sample_map(
+                    self._seed, VERSION_TO_BTREE[self._version_key],
+                    cx - r, cz - r, n, n, 0)
+                if not res.get("cancelled", False):
+                    return np.asarray(res["biomes"], dtype=np.int32)
+            except Exception:
+                self._ext = None        # 降级后不再重试
+        ids = np.empty((n, n), dtype=np.int32)
+        at = self._py.biome_at
+        for j in range(n):
+            row = ids[j]
+            for i in range(n):
+                row[i] = at(cx - r + i, 0, cz - r + j)
+        return ids
+
+
+class StrongholdIter:
+    """cubiomes StrongholdIter 的 1.18~1.21 移植（finders.c L834-936）。
+
+    版本分界：mc > MC_1_19_2（即 1.19.3+，对应 MCHelper "1.19.3"+，
+    项目版本线 1.20/1.21）locateBiome 用独立 lbr 流（rnds 只消耗
+    nextLong 一次）；btree19 = 1.19~1.19.2 线与 1.18 → 共享 rnds。
+    """
+
+    def __init__(self, world_seed: int, version_key: str,
+                 win_sampler: _StrongholdWinSampler):
+        s48 = world_seed & _MASK48
+        self._win = win_sampler
+        self._excluded, _ = _stronghold_valid_sets()
+        self._shared_rng_stream = version_key in ("1.18", "1.19")
+        # initFirstStronghold（L840-849，1.9+ 分支）
+        rnds = mc_random.set_seed(s48)
+        d1, rnds = mc_random.next_double(rnds)
+        self.angle = 2.0 * math.pi * d1
+        d2, rnds = mc_random.next_double(rnds)
+        dist = 128.0 + (d2 - 0.5) * 80.0
+        self.nextapprox = (_c_round(math.cos(self.angle) * dist) * 16 + 8,
+                           _c_round(math.sin(self.angle) * dist) * 16 + 8)
+        self.pos: tuple[int, int] | None = None
+        self.index = 0
+        self.ringnum = 0
+        self.ringmax = 3
+        self.ringidx = 0
+        self.dist = dist
+        self._rnds = rnds
+
+    def _locate_biome(self, ax: int, az: int) -> tuple[int, int]:
+        """locateBiome 1.18+（finders.c L650-675）+ rng 流消耗语义。
+
+        共享流（1.18/1.19.2 线）：nextInt 消耗 rnds 并回写；独立流
+        （1.19.3+）：lbr = setSeed(nextLong(rnds))，nextInt 消耗 lbr。
+        """
+        if self._shared_rng_stream:
+            rng = self._rnds
+        else:
+            nl, self._rnds = _java_next_long(self._rnds)
+            rng = mc_random.set_seed(nl)
+        out_x, out_z = ax, az
+        x, z, r = ax >> 2, az >> 2, 112 >> 2
+        ids = self._win.window_ids(x, z, r)
+        found = 0
+        excluded = self._excluded
+        for j in range(2 * r + 1):
+            row = ids[j]
+            bj = z - r + j
+            for i in range(2 * r + 1):
+                if int(row[i]) in excluded:
+                    continue
+                if found == 0:
+                    out_x, out_z = (x + i - r) * 4, bj * 4
+                    found = 1
+                    continue
+                val, rng = mc_random.next_int(rng, found + 1)
+                if val == 0:
+                    out_x, out_z = (x + i - r) * 4, bj * 4
+                found += 1
+        if self._shared_rng_stream:
+            self._rnds = rng
+        return out_x, out_z
+
+    def next(self) -> bool:
+        """nextStronghold 主流程（finders.c L868-936）：定位 → 修正 →
+        推进近似坐标。返回 False 表示 128 个已全部产生。"""
+        if self.index >= 128:
+            return False
+        px, pz = self._locate_biome(*self.nextapprox)
+        self.pos = ((px & ~15) + 4, (pz & ~15) + 4)
+        self.ringidx += 1
+        self.angle += 2.0 * math.pi / self.ringmax
+        if self.ringidx == self.ringmax:
+            self.ringnum += 1
+            self.ringidx = 0
+            self.ringmax = self.ringmax + 2 * self.ringmax // (self.ringnum + 1)
+            if self.ringmax > 128 - self.index:
+                self.ringmax = 128 - self.index
+            d, self._rnds = mc_random.next_double(self._rnds)
+            self.angle += d * math.pi * 2.0
+        # 1.9+：dist = 128 + 192*ringnum + (nd-0.5)*80
+        d, self._rnds = mc_random.next_double(self._rnds)
+        self.dist = 128.0 + 192.0 * self.ringnum + (d - 0.5) * 80.0
+        self.nextapprox = (
+            _c_round(math.cos(self.angle) * self.dist) * 16 + 8,
+            _c_round(math.sin(self.angle) * self.dist) * 16 + 8)
+        self.index += 1
+        return True
+
+
+def _check_nether(struct_key: str, ws: int, bx: int, bz: int,
+                  sampler) -> tuple[bool, int]:
+    """下界要塞/堡垒遗迹 1.18+ 判定（finders.c L1449-1486）。
+
+    - 要塞（L1457-1468）：1.18+ 生成在「堡垒不生成处」——
+      堡垒 getStructurePos 概率门失败 → 要塞直接 viable；
+      否则 viable = NOT 堡垒 viable（变体采样点群系在白名单内）。
+    - 堡垒（L1471-1486）：概率门（getStructurePos 层，L281-289）+
+      getVariant 尺寸表采样点 + 群系白名单（不含玄武岩三角洲）。
+    sampleY = 33 >> 2（1.19.2+），但下界群系不随 Y 变化，采样器忽略 y。
+
+    Args:
+        ws: 完整 64 位世界种子（chunkGenerateRnd 乘法域）。
+        bx/bz: 结构锚点方块坐标。
+        sampler: NetherSampler（该种子）。
+
+    Returns:
+        (viable, biome_id)：bid 为判定/展示采样点群系（-1 未采样）。
+    """
+    cx, cz = bx >> 4, bz >> 4
+    if struct_key == "nether_fortress":
+        if _bastion_probability(ws, bx, bz):
+            vx, vz, vsx, vsz = _bastion_variant(ws, cx, cz)
+            nx, nz = _variant_sample_point(cx, cz, vx, vz, vsx, vsz)
+            bid = sampler.biome_at(nx, nz)
+            if bid in _NETHER_BASTION_BIOMES:
+                return False, bid
+        # 堡垒不生成 → 要塞在任意下界群系 viable；展示群系取 chunk 中心
+        return True, sampler.biome_at(cx * 4 + 2, cz * 4 + 2)
+    # bastion_remnant
+    if not _bastion_probability(ws, bx, bz):
+        return False, -1
+    vx, vz, vsx, vsz = _bastion_variant(ws, cx, cz)
+    nx, nz = _variant_sample_point(cx, cz, vx, vz, vsx, vsz)
+    bid = sampler.biome_at(nx, nz)
+    return bid in _NETHER_BASTION_BIOMES, bid
+
+
+def _check_end(struct_key: str, bx: int, bz: int, sampler) -> tuple[bool, int]:
+    """末地城判定（finders.c getStructurePos L247-249 + isViableStructurePos
+    L1488-1505）。
+
+    - 距离门：pos² >= 1008²（位置层拒绝，pos 为方块坐标）。
+    - 群系：chunk 级 getBiomeAt(scale=16, chunkX, 0, chunkZ) ∈
+      {end_midlands, end_highlands}（末地图按 chunk 走 EndSampler）。
+    """
+    if bx * bx + bz * bz < 1008 * 1008:
+        return False, -1
+    bid = sampler.biome_at_chunk(bx >> 4, bz >> 4)
+    return bid in _END_CITY_BIOMES, bid
+
+
 def check_structure_at(struct_key: str, world_seed: int, bx: int, bz: int,
-                       version_key: str, sampler: BiomeSampler) -> tuple[bool, int]:
+                       version_key: str, sampler: BiomeSampler,
+                       nether_end=None) -> tuple[bool, int]:
     """判断结构在 (bx, bz) 锚点是否真实生成（群系校验）。
 
     Args:
@@ -404,7 +771,9 @@ def check_structure_at(struct_key: str, world_seed: int, bx: int, bz: int,
         world_seed: 64 位世界种子（有符号或无符号均可，内部按位处理）。
         bx/bz: 结构锚点方块坐标（get_structure_pos 的返回值）。
         version_key: 版本键。
-        sampler: 该种子的 BiomeSampler（调用方复用）。
+        sampler: 该种子的 BiomeSampler（主世界结构用，调用方复用）。
+        nether_end: 下界/末地结构所需的 NetherSampler / EndSampler
+            （None 时按维度惰性创建；主世界结构忽略此参数）。
 
     Returns:
         (viable, biome_id)：bid 为判定采样点群系（-1 表示未采样到）。
@@ -412,22 +781,199 @@ def check_structure_at(struct_key: str, world_seed: int, bx: int, bz: int,
     ws = world_seed & _MASK64
     chunk_x = bx >> 4
     chunk_z = bz >> 4
+    dim = structure_params.STRUCT_DIMENSION.get(struct_key, "overworld")
+    if dim == "nether":
+        return _check_nether(struct_key, ws, bx, bz,
+                             nether_end if nether_end is not None
+                             else NetherSampler(ws))
+    if dim == "end":
+        return _check_end(struct_key, bx, bz,
+                          nether_end if nether_end is not None
+                          else EndSampler(ws))
     if struct_key == "village":
         return _check_village(sampler, ws, chunk_x, chunk_z)
     if struct_key == "pillager_outpost":
         return _check_outpost(sampler, ws, chunk_x, chunk_z, version_key)
+    if struct_key == "ruined_portal":
+        # cubiomes finders.c L1208-1210：Ruined_Portal 的 biome 判定
+        # 恒为 true（可生成于任意群系，含地下），无额外 RNG 概率门
+        return True, -1
     if struct_key == "monument":
         return _check_monument(sampler, chunk_x, chunk_z)
     if struct_key == "mansion":
         return _check_mansion(sampler, chunk_x, chunk_z)
     if struct_key in ("ancient_city", "trial_chambers"):
         return _check_jigsaw(struct_key, sampler, ws, bx, bz)
+    if struct_key == "desert_well":
+        return _check_desert_well(sampler, bx, bz)
+    if struct_key in ("stronghold", "mineshaft"):
+        # getStructurePos 已含概率门/环形序列；isViableStructurePos 对
+        # Mineshaft 恒 viable（L1789-1790）；Stronghold 走专用迭代器
+        # （不在通用区域循环中，不会到达这里）
+        return True, -1
     return _check_feature(struct_key, sampler, chunk_x, chunk_z)
 
 
 # ---------------------------------------------------------------------------
-# 区域枚举主入口
+# 扩展结构专用枚举（getStructurePos 特殊分支的非区域制/逐 chunk 实现）
 # ---------------------------------------------------------------------------
+
+def _enum_treasure_well(
+    key: str, ws: int,
+    viewport: tuple[int, int, int, int],
+    sampler: BiomeSampler,
+    results: list[dict],
+    cancel=None,
+) -> None:
+    """埋藏的宝藏/沙漠水井：逐 chunk 枚举（region=1，每 chunk 至多一个）。
+
+    Treasure（finders.c L256-261）：seed' = cx*341873128712
+    + cz*132897987541 + ws + salt → setSeed → nextFloat < 0.01；
+    锚点 (cx*16+9, cz*16+9)；群系校验 L_feature (cx*4+2, 79, cz*4+2)
+    ∈ {beach, snowy_beach}（L1532 走 L_feature）。
+
+    Desert_Well（L293-321）：populationSeed = getPopulationSeed(ws,
+    cx*16, cz*16)；xSetSeed(pop + 40002) → xNextFloat < 0.001
+    → 锦点 += xNextIntJ(16)；群系校验锚点 (x>>2, 79, z>>2) == desert。
+    """
+    min_bx, min_bz, max_bx, max_bz = viewport
+    margin = 96
+    cx0 = (min_bx - margin) >> 4
+    cx1 = (max_bx + margin + 15) >> 4
+    cz0 = (min_bz - margin) >> 4
+    cz1 = (max_bz + margin + 15) >> 4
+    salt = structure_params.STRUCT_PARAMS[key][0]
+    for cz in range(cz0, cz1 + 1):
+        if cancel is not None and cancel():
+            return
+        for cx in range(cx0, cx1 + 1):
+            if key == "buried_treasure":
+                v = (cx * 341873128712 + cz * 132897987541
+                     + ws + salt) & _MASK64
+                st = mc_random.set_seed(v)
+                f, _ = mc_random.next_float(st)
+                if f >= 0.01:
+                    continue
+                bx, bz = cx * 16 + 9, cz * 16 + 9
+            else:
+                pop = get_population_seed(ws, cx * 16, cz * 16)
+                xr = Xoroshiro.from_seed(pop + salt)
+                if _x_next_float(xr) >= 0.001:
+                    continue
+                bx = cx * 16 + _x_next_int_pow2(xr, 16)
+                bz = cz * 16 + _x_next_int_pow2(xr, 16)
+            if not (min_bx - margin <= bx <= max_bx + margin
+                    and min_bz - margin <= bz <= max_bz + margin):
+                continue
+            if key == "buried_treasure":
+                viable, bid = _check_feature(key, sampler, cx, cz)
+            else:
+                viable, bid = _check_desert_well(sampler, bx, bz)
+            if not viable:
+                continue
+            results.append({
+                "struct": key,
+                "name": structure_params.STRUCT_NAMES.get(key, key),
+                "x": bx,
+                "z": bz,
+                "cx": bx >> 4,
+                "cz": bz >> 4,
+                "biome": bid,
+            })
+
+
+def _enum_mineshafts(
+    ws: int,
+    viewport: tuple[int, int, int, int],
+    results: list[dict],
+    cancel=None,
+) -> None:
+    """废弃矿井：getMineshafts（finders.c L332-386）1.13+ 分支。
+
+    a/b = setSeed(ws) 后两次 Java nextLong；逐 chunk
+    setSeed(aix ^ cz*b)（aix = cx*a ^ ws）→ nextDouble < 0.004 →
+    锦点 (cx*16, cz*16)。无群系校验。
+    """
+    min_bx, min_bz, max_bx, max_bz = viewport
+    margin = 96
+    cx0 = (min_bx - margin) >> 4
+    cx1 = (max_bx + margin + 15) >> 4
+    cz0 = (min_bz - margin) >> 4
+    cz1 = (max_bz + margin + 15) >> 4
+    state = mc_random.set_seed(ws)
+    a, state = _java_next_long(state)
+    b, state = _java_next_long(state)
+    for cx in range(cx0, cx1 + 1):
+        if cancel is not None and cancel():
+            return
+        aix = ((cx * a) ^ ws) & _MASK64
+        for cz in range(cz0, cz1 + 1):
+            st = mc_random.set_seed((aix ^ (cz * b)) & _MASK64)
+            pd, _ = mc_random.next_double(st)
+            if pd >= 0.004:
+                continue
+            bx, bz = cx * 16, cz * 16
+            results.append({
+                "struct": "mineshaft",
+                "name": structure_params.STRUCT_NAMES.get("mineshaft",
+                                                          "mineshaft"),
+                "x": bx,
+                "z": bz,
+                "cx": bx >> 4,
+                "cz": bz >> 4,
+                "biome": -1,
+            })
+
+
+def _enum_strongholds(
+    ws: int,
+    version_key: str,
+    viewport: tuple[int, int, int, int],
+    results: list[dict],
+    on_progress=None,
+    cancel=None,
+) -> None:
+    """要塞：StrongholdIter 全序扫 128 窗（共享流版本不可跳窗）。
+
+    共享流版本（1.18/1.19.2 线）的 locateBiome 水库采样消耗依赖
+    于窗口内容，跳窗会改变后续流状态，必须全序。性能上用
+    _StrongholdWinSampler（native 批量窗采样）+ dist 单调递增
+    提前终止；1.19.3+ 独立流理论上可跳，但保持同一实现简单可靠。
+    """
+    min_bx, min_bz, max_bx, max_bz = viewport
+    margin = 96
+    win = _StrongholdWinSampler(ws, version_key)
+    it = StrongholdIter(ws, version_key, win)
+    # 终止条件：当前近似点超过视野外扩范围（dist 单调递增，
+    # 近似点距原点随环号递增，一超过即可停）
+    reach = max(
+        max(abs(min_bx), abs(max_bx)),
+        max(abs(min_bz), abs(max_bz)),
+    ) + margin + 112 + 64
+    for _ in range(128):
+        if cancel is not None and cancel():
+            return
+        ax, az = it.nextapprox
+        if max(abs(ax), abs(az)) > reach and it.index > 0:
+            break
+        it.next()
+        px, pz = it.pos
+        if not (min_bx - margin <= px <= max_bx + margin
+                and min_bz - margin <= pz <= max_bz + margin):
+            continue
+        results.append({
+            "struct": "stronghold",
+            "name": structure_params.STRUCT_NAMES.get("stronghold",
+                                                      "stronghold"),
+            "x": px,
+            "z": pz,
+            "cx": px >> 4,
+            "cz": pz >> 4,
+            "biome": -1,
+        })
+    if on_progress is not None:
+        on_progress(1, 1, "stronghold")
+
 
 def enumerate_structures(
     seed: int,
@@ -436,6 +982,7 @@ def enumerate_structures(
     struct_keys=None,
     on_progress=None,
     cancel=None,
+    dimension: str = "overworld",
 ) -> list[dict]:
     """枚举视野内真实生成的结构。
 
@@ -444,9 +991,13 @@ def enumerate_structures(
         version_key: 版本键。
         viewport: (min_bx, min_bz, max_bz …) 即 (min_bx, min_bz, max_bx,
                   max_bz) 方块坐标（含端点）。
-        struct_keys: 要枚举的结构键列表（None = 该版本全部可标注结构）。
+        struct_keys: 要枚举的结构键列表（None = 该版本+维度全部可标注
+            结构）。
         on_progress: on_progress(done, total, stage) 回调（结构粒度）。
         cancel: cancel() -> bool。
+        dimension: "overworld"/"nether"/"end"。非主世界时只处理该维度的
+            结构（下界要塞/堡垒遗迹/末地城），群系校验走
+            nether_end_sampler（主世界 BiomeSampler 不创建，省开销）。
 
     Returns:
         list[dict]: {struct, name, x, z, cx, cz, biome}（x/z 为结构锚点
@@ -454,14 +1005,50 @@ def enumerate_structures(
     """
     ws = seed & _MASK64
     if struct_keys is None:
-        struct_keys = available_structures(version_key)
+        struct_keys = available_structures(version_key, dimension)
+    # 维度防御：混入其他维度结构键时按维度过滤（UI 侧不会发生）
+    if dimension != "overworld":
+        struct_keys = tuple(
+            k for k in struct_keys
+            if structure_params.STRUCT_DIMENSION.get(k, "overworld")
+            == dimension)
     min_bx, min_bz, max_bx, max_bz = viewport
 
-    sampler = BiomeSampler(seed, version_key)
+    # 主世界用 BiomeSampler；下界/末地走专用采样器（惰性创建复用）
+    if dimension == "nether":
+        dim_sampler = NetherSampler(ws)
+    elif dimension == "end":
+        dim_sampler = EndSampler(ws)
+    else:
+        dim_sampler = None
+    sampler = BiomeSampler(seed, version_key) if dim_sampler is None else None
 
+    # 主世界区域制结构 + treasure/desert_well 的 sampler 池共用；
+    # 要塞/矿井走专用枚举
     results = []
-    total = len(struct_keys)
+    region_keys = []
     for idx, key in enumerate(struct_keys):
+        if cancel is not None and cancel():
+            break
+        done = idx + 1
+        if key == "stronghold":
+            _enum_strongholds(ws, version_key, viewport, results,
+                              on_progress=on_progress, cancel=cancel)
+        elif key == "mineshaft":
+            _enum_mineshafts(ws, viewport, results, cancel=cancel)
+            if on_progress is not None:
+                on_progress(done, len(struct_keys), key)
+        elif key in ("buried_treasure", "desert_well"):
+            _enum_treasure_well(key, ws, viewport, sampler, results,
+                                cancel=cancel)
+            if on_progress is not None:
+                on_progress(done, len(struct_keys), key)
+        else:
+            region_keys.append(key)
+
+    total = len(region_keys)
+    base_done = len(struct_keys) - total
+    for idx, key in enumerate(region_keys):
         if cancel is not None and cancel():
             break
         params = structure_params.get_params(key, version_key)
@@ -487,7 +1074,8 @@ def enumerate_structures(
                         and min_bz - margin <= bz <= max_bz + margin):
                     continue
                 viable, bid = check_structure_at(key, ws, bx, bz,
-                                                 version_key, sampler)
+                                                 version_key, sampler,
+                                                 nether_end=dim_sampler)
                 if viable:
                     results.append({
                         "struct": key,
@@ -499,5 +1087,5 @@ def enumerate_structures(
                         "biome": bid,
                     })
         if on_progress is not None:
-            on_progress(idx + 1, total, key)
+            on_progress(base_done + idx + 1, len(struct_keys), key)
     return results

@@ -39,7 +39,7 @@ def _glint_texture() -> QPixmap:
         base_dir = os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__))))
         _GLINT_TEX_PATH = os.path.join(
-            base_dir, "assets", "icons", "enchanted_glint.png")
+            base_dir, "assets", "EnchantCaculator", "enchanted_glint.png")
     pix = QPixmap(_GLINT_TEX_PATH)
     return pix  # 文件不存在时为 null pixmap，调用方按无光效处理
 

@@ -26,31 +26,53 @@ _REG_Z_COEF = 132897987541
 # ---------------------------------------------------------------------------
 
 def calc_info_bits(observations) -> float:
-    """返回所有观测的累计约束比特数。
+    """返回所有观测的累计约束比特数（按各观测容差折减）。
 
-    线性散布结构：offX 与 offZ 各贡献 log2(chunkRange)（约 4.58 比特），
-    合计约 9.17 比特；三角散布（monument/mansion）四次 nextInt 取平均，
-    信息量约 log2(chunkRange)（单次 nextInt 的量）。
+    基础信息量：线性散布结构 offX/offZ 各贡献 log2(chunk_range)
+    （合计约 9.17 比特）；三角散布（monument 等）四次 nextInt 取
+    平均，约 log2(chunk_range)（单次 nextInt 的量）。
+
+    容差折减：站位容差 tol 把每维位置约束从 1 个值放宽为
+    min(2*tol+1, chunk_range) 个候选值（与求解器层 2 范围校验的
+    通过率口径一致，_estimate_tolerance_work），该维信息量按
+    log2(有效窗口/1) 折减；tol=0 时窗口为 1、无折减。
 
     Args:
-        observations: 观测对象列表，每项须有 chunk_range 与 scatter 属性
-            （可直接传 structure_params.get_params() 结果 dict 或观测对象）。
+        observations: 观测列表，每项为
+            - 观测 dict（含 "params" 与可选 "tol"，即 UI 的 obs 结构，
+              tol 缺省按 0 精确处理），或
+            - params dict / 带 chunk_range 与 scatter 属性的对象
+              （无容差概念，等效 tol=0，向后兼容）。
 
     Returns:
         累计比特数（float）。
     """
     total = 0.0
-    for obs in observations:
-        chunk_range = getattr(obs, "chunk_range", None)
-        if chunk_range is None:
-            chunk_range = obs.get("chunk_range", 0)
-        scatter = getattr(obs, "scatter", None)
-        if scatter is None:
-            scatter = obs.get("scatter", "linear")
-        if scatter == "triangle":
-            total += math.log2(max(chunk_range, 1))
+    for item in observations:
+        # 双形态条目：观测 dict（含 "params" + 可选 "tol"）或 params
+        # 本体（dict / 属性对象，无容差概念，等效 tol=0）
+        if isinstance(item, dict) and "params" in item:
+            params = item["params"]
+            raw_tol = item.get("tol", 0)
         else:
-            total += 2 * math.log2(max(chunk_range, 1))
+            params = item
+            raw_tol = 0
+        chunk_range = getattr(params, "chunk_range", None)
+        if chunk_range is None:
+            chunk_range = params.get("chunk_range", 0)
+        scatter = getattr(params, "scatter", None)
+        if scatter is None:
+            scatter = params.get("scatter", "linear")
+        # 容差钳制 0~2（与 structure_math._obs_tol、UI 行内下拉同域）
+        try:
+            tol = max(0, min(2, int(raw_tol)))
+        except (TypeError, ValueError):
+            tol = 0
+        # 每维有效窗口：tol 越大窗口越宽，上限 chunk_range
+        window = min(2 * tol + 1, max(chunk_range, 1))
+        dims = 1 if scatter == "triangle" else 2
+        # 每维信息量 = log2(r) - log2(window)；window=r 时该维归零
+        total += dims * math.log2(max(chunk_range, 1) / window)
     return total
 
 

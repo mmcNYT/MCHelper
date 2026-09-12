@@ -136,6 +136,48 @@ def struct_next_int(state: int, r: int) -> tuple[int, int]:
     return (nxt >> 17) % r, nxt
 
 
+def next_float(state: int) -> tuple[float, int]:
+    """Java Random.nextFloat 的标量版（rng.h nextFloat 语义）。
+
+    对应 rng.h：
+        nextFloat = next(24) / (float)(1 << 24)
+    消耗一次 next(24)，状态推进一步。
+
+    用途：埋藏的宝藏 1% 生成判定（finders.c Treasure 分支
+    nextFloat < 0.01）。
+
+    Args:
+        state: 当前 48 位状态。
+
+    Returns:
+        (float 值 ∈ [0,1), 迭代后的状态)。
+    """
+    return next_bits(state, 24) / float(1 << 24), next_state(state)
+
+
+def next_double(state: int) -> tuple[float, int]:
+    """Java Random.nextDouble 的标量版（rng.h nextDouble 语义）。
+
+    对应 rng.h / java.util.Random：
+        nextDouble = ((next(26) << 27) + next(27)) / 2^53
+    消耗 next(26) + next(27)，状态推进两步。
+
+    用途：废弃矿井 0.4% 生成判定（finders.c getMineshafts
+    1.13+ 分支 nextDouble < 0.004）。
+
+    Args:
+        state: 当前 48 位状态。
+
+    Returns:
+        (double 值 ∈ [0,1), 迭代两次后的状态)。
+    """
+    nxt = next_state(state)
+    hi = nxt >> (48 - 26)
+    nxt = next_state(nxt)
+    lo = nxt >> (48 - 27)
+    return ((hi << 27) + lo) / float(1 << 53), nxt
+
+
 def region_seed(structure_seed: int, reg_x: int, reg_z: int, salt: int) -> int:
     """cubiomes getRegionSeed：由结构种与区域坐标算出区域 LCG 初始状态。
 

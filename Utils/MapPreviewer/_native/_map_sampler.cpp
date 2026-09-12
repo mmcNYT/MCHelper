@@ -565,6 +565,15 @@ static void climate_point(const BiomeCtx& ctx, double x, double z,
     np6[5] = quant_np(w);
 }
 
+// 表面层重判（最高方块渲染）：固定采样层切入高山山体时
+// （d=1-ny*4/128-83/160+off > 0，即采样层位于真实地表之下），
+// btree 最近邻会判到地下群系（dripstone_caves/lush_caves/deep_dark），
+// 俯视图上表现为"地表随处可见溶洞"。表面模式下把 depth 参数置 0
+// （= 地表线 d=0）重跑 climate_to_biome，改判为地表群系；
+// d<=0（水面/低地/海洋，采样层在地表之上或就是地表）保持原判定
+// 不变 → 水色/低地零回归。depth 输出矩阵仍用原始 d（hillshade 与
+// 水深渐变的物理语义不变）。
+
 // ---------------------------------------------------------------------------
 // btree（数据由 Python set_btree 推入；搜索逻辑与 _biome_refine.cpp 一致）
 // ---------------------------------------------------------------------------
@@ -694,6 +703,7 @@ static void map_worker(u64 seed, const BTreeC& bt,
                        i64* depth,           // (nh, nw) depth-10000 输出（可空）
                        i64* temp,            // (nh, nw) 温度-10000 输出（可空）
                        i64* humid,           // (nh, nw) 湿度-10000 输出（可空）
+                       bool surface_mode,    // 表面层重判（最高方块渲染）
                        std::atomic<int>& done_rows,
                        const std::atomic<bool>& cancelled,
                        std::string& err) {
@@ -714,7 +724,17 @@ static void map_worker(u64 seed, const BTreeC& bt,
             for (int col = 0; col < nw; ++col) {
                 climate_point(ctx, (double)(origin_nx + col),
                               (double)nz, (double)ny, np6);
-                out_row[col] = climate_to_biome(bt, np6);
+                if (surface_mode && np6[4] > 0) {
+                    // 采样层在真实地表之下（高山内部）：置 depth=0
+                    // （地表线）重判群系；depth 矩阵保留原始 d。
+                    // quant_np(0.0)=0 即 depth 参数的地表线量化值
+                    const i64 d_raw = np6[4];
+                    np6[4] = 0;
+                    out_row[col] = climate_to_biome(bt, np6);
+                    np6[4] = d_raw;
+                } else {
+                    out_row[col] = climate_to_biome(bt, np6);
+                }
                 if (dep_row) dep_row[col] = np6[4];
                 if (tmp_row) tmp_row[col] = np6[0];
                 if (hum_row) hum_row[col] = np6[1];
@@ -740,7 +760,8 @@ static py::dict sample_map(
         py::object on_progress,
         py::object check_cancel,
         bool want_depth,
-        bool want_temp_humid) {
+        bool want_temp_humid,
+        bool surface_mode) {
     if (nw <= 0 || nh <= 0) {
         throw std::runtime_error("nw/nh must be positive");
     }
@@ -844,12 +865,12 @@ static py::dict sample_map(
                 continue;
             }
             pool.emplace_back([useed, &bt, origin_nx, origin_nz, nw, ny,
-                               biomes, depth, temp, humid,
+                               biomes, depth, temp, humid, surface_mode,
                                &done_rows, &cancelled,
                                begin, end, t, &errs]() {
                 map_worker(useed, bt, origin_nx, origin_nz, nw, ny,
                            begin, end, biomes, depth, temp, humid,
-                           done_rows, cancelled, errs[t]);
+                           surface_mode, done_rows, cancelled, errs[t]);
             });
         }
         for (auto& th : pool) {
@@ -921,6 +942,8 @@ PYBIND11_MODULE(_map_sampler, m) {
           py::arg("check_cancel") = py::none(),  // check_cancel() -> bool
           py::arg("want_depth") = false,        // 是否同时输出 depth 矩阵
           py::arg("want_temp_humid") = false,   // 是否同时输出温度/湿度矩阵
+          py::arg("surface_mode") = false,      // 表面层重判（最高方块渲染；
+                                                // 结构校验路径须保持 false）
           "多线程采样 (nw x nh) 噪声格区域，返回 {biomes: int32(nh,nw),"
           " depth: int32(nh,nw)(want_depth), temp/humid: int32(nh,nw)"
           "(want_temp_humid), rows_done, cancelled}");

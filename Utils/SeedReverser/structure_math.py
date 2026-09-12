@@ -11,6 +11,7 @@
           offZ = (st2 >> 17) % r,  st2 = LCG(st1)
           结构方块坐标 = ((regX*regionSize + offX) << 4, ...)
     - 三角散布（海底神殿/林地府邸）4 次取平均：offX = (v1+v2) >> 1
+      （mansion 仅 MapPreviewer 标注用，SeedReverser UI 已下架）
     - 前哨站：坐标同线性 + setAttemptSeed 概率判定 nextInt(5)==0
       （setAttemptSeed 作用在结构种子上，非区域种子——finders.c Outpost 分支）
 
@@ -32,7 +33,9 @@
     层 3：候选种子逐一精确正向复算全部观测（含三角/概率/2 幂结构）
 
     非 lifting 观测（monument/mansion 三角、ancient_city 2 幂 r、
-    outpost 概率）只参与层 3 精确验证。可 lifting 观测不足时抛错。
+    outpost 概率）只参与层 3 精确验证；mansion 参数仍可传入
+    （MapPreviewer 共用参数表），但 SeedReverser UI 已不再收录。
+    可 lifting 观测不足时抛错。
 
     站位容差（per-obs，可选）：玩家 F3+C 站位与结构锚点可差 ±tol 区块，
     三层比较从「精确相等」放宽为「距离 ≤ tol」：
@@ -84,9 +87,10 @@ _LIFT_BLOCK = 1 << 22
 
 # 容差模式守卫：耗时 / 候选数上限。超过任一上限提前抛 ValueError，
 # 避免用户等待数十分钟~数天，或得到百万级无法人工核对的候选。
-# 10 分钟：2026-09 实测校准（4×mod8 tol=1 实测 183s / 估算 220s；
-# tol=2 约 305s——挂机可接受），仍可拦住 mod2 混合的天级场景。
-_TOLERANCE_TIME_LIMIT_S = 600
+# 20 分钟（2026-09-09 应用户要求由 10 分钟放宽）：覆盖 8×mod8 tol=2
+# 端到端场景（实测约 5 分钟）并留充足余量；仍可拦住 mod2 混合的
+# 天级场景（估算 2.81e14 次验证远超 6e11 上限）。
+_TOLERANCE_TIME_LIMIT_S = 1200
 _NATIVE_VERIFY_RATE = 5e8   # native 层 2 实测吞吐（次验证/秒，2026-09 实测校准）
 _TOLERANCE_MAX_VERIFIES = _TOLERANCE_TIME_LIMIT_S * _NATIVE_VERIFY_RATE
 _TOLERANCE_MAX_CANDIDATES = 1_000_000   # 候选数可用性上限
@@ -176,7 +180,8 @@ def _next_offsets_linear(state: int, r: int) -> tuple[int, int]:
 
 
 def _next_offsets_triangle(state: int, r: int) -> tuple[int, int]:
-    """三角散布：4 次 struct_next_int 取两次平均（monument / mansion）。"""
+    """三角散布：4 次 struct_next_int 取两次平均（monument / mansion，
+    前者 SeedReverser 观测用，后者仅 MapPreviewer 标注用）。"""
     a1, state = mc_random.struct_next_int(state, r)
     a2, state = mc_random.struct_next_int(state, r)
     b1, state = mc_random.struct_next_int(state, r)
@@ -627,7 +632,8 @@ def solve_structure_seeds(observations, version_key: str = "1.21",
         raise ValueError(
             f"可用结构不足：需要至少 {_MIN_LIFT_OBS} 个可参与预筛的线性散布结构"
             "（沉船/沙漠神殿/雪屋/女巫小屋/丛林神庙/海底废墟等）。"
-            "海底神殿、林地府邸、远古城市、前哨站等不能单独用于逆推。"
+            "废弃传送门、海底神殿、林地府邸、远古城市、前哨站等"
+            "只能作为验证观测，不能单独用于逆推。"
         )
 
     # 位宽：取所有观测所需位宽的最大值（17 + log2(最大模数)）

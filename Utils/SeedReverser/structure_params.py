@@ -26,6 +26,10 @@ salt / regionSize / chunkRange 三项与 s_xxx 结构常量完全一致）。
     - ancient_city 的 r=16 是 2 的幂：next(31) 取的是状态高 31 位，偏移
       结果由高位决定，与低位枚举无关，故 lift_mod=0。
     - monument 的 r=27 为奇数且三角散布，lift_mod=0。
+
+注：mansion（林地府邸）参数保留供 MapPreviewer 地图标注使用；
+SeedReverser 逆推 UI 已下架该结构（锚点定位误差过大，无计算价值），
+_VERSION_STRUCTS 各版本均不再收录。
 """
 
 # 版本键（与 UI versionCombo 对应）
@@ -37,13 +41,17 @@ _VERSION_NUM = {"1.18": 118, "1.19": 119, "1.20": 120, "1.21": 121}
 # 每个版本可用的结构键（按 UI 易找程度排序）
 _VERSION_STRUCTS = {
     "1.21": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "mansion", "trial_chambers"),
+             "village", "ocean_ruin", "monument", "trial_chambers",
+             "ruined_portal"),
     "1.20": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "mansion", "trail_ruins"),
+             "village", "ocean_ruin", "monument", "trail_ruins",
+             "ruined_portal"),
     "1.19": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "mansion", "ancient_city"),
+             "village", "ocean_ruin", "monument", "ancient_city",
+             "ruined_portal"),
     "1.18": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "mansion"),
+             "village", "ocean_ruin", "monument",
+             "ruined_portal"),
 }
 
 # 结构显示名（UI 用）
@@ -61,6 +69,17 @@ STRUCT_NAMES = {
     "ancient_city": "远古城市",
     "trail_ruins": "古迹废墟",
     "trial_chambers": "试炼密室",
+    "ruined_portal": "废弃传送门",
+    # MapPreviewer 扩展结构（不可逆推，SeedReverser UI 不展示：
+    # _VERSION_STRUCTS 不含这些键；参数表仅供地图枚举使用）
+    "stronghold": "要塞",
+    "buried_treasure": "埋藏的宝藏",
+    "mineshaft": "废弃矿井",
+    "desert_well": "沙漠水井",
+    # MapPreviewer 下界/末地扩展结构（中文 Minecraft Wiki 标准译名）
+    "nether_fortress": "下界要塞",
+    "bastion_remnant": "堡垒遗迹",
+    "end_city": "末地城",
 }
 
 # 结构参数：(salt, region_size, chunk_range, scatter, min_ver, lift_mod)
@@ -79,6 +98,34 @@ STRUCT_PARAMS = {
     "ancient_city":     (20083232,  24, 16, "linear",   119, 0),  # 2 幂 r 不可 lift
     "trail_ruins":      (83469867,  34, 26, "linear",   120, 2),
     "trial_chambers":   (94251327,  34, 22, "linear",   121, 2),
+    # 废弃传送门（finders.c Ruined_Portal：salt/region/chunk 已对拍验证）。
+    # r=25 为奇数，「off mod 2」不等于「状态低位 mod 2」（2^17 全枚举出
+    # 98303 反例且预筛会漏真种子），故 lift_mod=0，只能作验证观测。
+    "ruined_portal":    (34222645, 40, 25, "linear",   116, 0),
+    # ---- MapPreviewer 扩展结构（非区域制 / 特殊算法，不做逆推） ----
+    # 要塞：非区域制，环形分布由 initFirstStronghold/nextStronghold 决定；
+    #   salt 字段无意义占 0。1.9+ 起 y=0 校验（finders.c isStrongholdBiome）。
+    "stronghold":       (0,          0,  0,  "linear",   109, 0),
+    # 埋藏的宝藏：s_treasure = {10387320, 1, 1}，锚点 (cx*16+9, cz*16+9)，
+    # 1% 概率用 nextFloat（非区域偏移），概率结构不可 lift。
+    "buried_treasure":  (10387320,   1,  1,  "linear",   113, 0),
+    # 废弃矿井：getMineshafts 专用算法（a=nextLong, b=nextLong 后
+    # aix^bz 双乘散列 + nextDouble<0.004），无 salt/region 概念。
+    "mineshaft":        (0,          0,  0,  "linear",   103, 0),
+    # 沙漠水井：s_desert_well = {40002, 1, 1, rarity=0.001}，基于
+    # getPopulationSeed + xNextIntJ(16) 偏移，概率结构不可 lift。
+    "desert_well":      (40002,      1,  1,  "linear",   101, 0),
+    # ---- MapPreviewer 下界/末地扩展结构（finders.c 已核对）----
+    # 下界要塞：s_fortress = {30084232, 27, 23}，1.16+，线性散布，
+    #   群系校验覆盖下界全部 5 群系（isViableStructurePos L1457-1468）。
+    "nether_fortress":  (30084232, 27, 23, "linear",   116, 0),
+    # 堡垒遗迹：s_bastion = {30084232, 27, 23}，1.16+，线性散布，
+    #   额外 2/5 概率门（chunkGenerateRnd nextInt(5)>=2）与群系白名单
+    #   （basalt_deltas 不生成），均不可 lift（finders.c L1471-1486）。
+    "bastion_remnant":  (30084232, 27, 23, "linear",   116, 0),
+    # 末地城：s_end_city = {10387313, 20, 9}，1.9+，triangle 散布，
+    #   pos² >= 1008² 距离拒绝 + 群系须为 end_midlands/highlands。
+    "end_city":         (10387313, 20,  9, "triangle", 109, 0),
 }
 
 
@@ -86,10 +133,10 @@ STRUCT_PARAMS = {
 # 依据锚点可辨认程度（见 tool_SeedReverser._ANCHOR_HINTS）：
 #     0 = 小型单模板结构：锚点为模板一角，站位与锚点偏差通常 <1 区块，
 #         容差 0 保留全部信息量（mod8 预筛最强）；
-#     2 = 大型 / 无中心 / 深埋结构：站位误差常超 1 区块（村庄无全局
-#         中心、神殿深埋、府邸体量极大），默认 2 提高生存可用性
-#         （试炼密室 mod2 在 tol≥1 时层 1 失效，tol=0 又几乎必然
-#         因站位偏差失配——默认 2 是唯一自洽选择）。
+    # 2 = 大型 / 无中心 / 深埋结构：站位误差常超 1 区块（村庄无全局
+    #     中心、神殿深埋），默认 2 提高生存可用性（试炼密室 mod2 在
+    #     tol≥1 时层 1 失效，tol=0 又几乎必然因站位偏差失配——默认 2
+    #     是唯一自洽选择）。
 DEFAULT_TOLERANCES = {
     "shipwreck": 0,
     "desert_pyramid": 0,
@@ -98,12 +145,41 @@ DEFAULT_TOLERANCES = {
     "jungle_temple": 0,
     "ocean_ruin": 0,
     "pillager_outpost": 0,
+    "ruined_portal": 0,
     "village": 2,
     "trial_chambers": 2,
     "trail_ruins": 2,
     "ancient_city": 2,
     "monument": 2,
-    "mansion": 2,
+    # MapPreviewer 扩展结构（不进 SeedReverser UI，取值仅为完整性）：
+    # 要塞内部房间入口即定位中心，偏差通常 <1 区块；宝藏锚点 (9,9)
+    # 与箱子偏移固定；矿井以入口走廊中心为观测点，取 1；水井锚点为
+    # 中心块，偏差小。
+    "stronghold": 1,
+    "buried_treasure": 0,
+    "mineshaft": 1,
+    "desert_well": 0,
+    # 下界/末地扩展结构（体量大、无中心，取 2 提高生存可用性）
+    "nether_fortress": 2,
+    "bastion_remnant": 2,
+    "end_city": 2,
+}
+
+
+# 结构键 → 所在维度（"overworld"/"nether"/"end"）。
+# MapPreviewer 维度分组与标注路由用：未列出的键一律视为主世界。
+# （下界要塞/堡垒遗迹与主世界结构无键冲突，末地城同理。）
+STRUCT_DIMENSION = {
+    "nether_fortress": "nether",
+    "bastion_remnant": "nether",
+    "end_city": "end",
+}
+
+# 维度键 → 显示名（worldCombo 与选择窗分组标题用）
+DIMENSION_NAMES = {
+    "overworld": "主世界",
+    "nether": "下界",
+    "end": "末地",
 }
 
 
@@ -149,6 +225,16 @@ def available_structures(version_key: str) -> tuple[str, ...]:
 def get_default_tolerance(struct_key: str) -> int:
     """结构键 → 默认站位容差（区块）。未知键兜底 0。"""
     return DEFAULT_TOLERANCES.get(struct_key, 0)
+
+
+def is_reversible(struct_key: str) -> bool:
+    """结构键 → 是否可参与低位预筛逆推（linear 且 lift_mod >= 2）。
+
+    与求解器 _lift_split 的分组语义严格一致：False = 仅验证观测
+    （层 3 过滤假阳性，不参与层 1/2 预筛与进度条统计）。
+    """
+    entry = STRUCT_PARAMS.get(struct_key)
+    return bool(entry) and entry[3] == "linear" and entry[5] >= 2
 
 
 def struct_key_to_name(struct_key: str) -> str:

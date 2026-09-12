@@ -90,16 +90,6 @@ class Ui_seedReverser(object):
 
         self.gridLayout.addWidget(self.pasteF3CButton, 3, 9, 1, 1)
 
-        self.informationBrowser = QTextBrowser(self.layoutWidget)
-        self.informationBrowser.setObjectName(u"informationBrowser")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
-        sizePolicy2.setHorizontalStretch(0)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.informationBrowser.sizePolicy().hasHeightForWidth())
-        self.informationBrowser.setSizePolicy(sizePolicy2)
-
-        self.gridLayout.addWidget(self.informationBrowser, 7, 0, 1, 9)
-
         self.versionCombo = QComboBox(self.layoutWidget)
         self.versionCombo.setObjectName(u"versionCombo")
         sizePolicy.setHeightForWidth(self.versionCombo.sizePolicy().hasHeightForWidth())
@@ -211,18 +201,18 @@ class Ui_seedReverser(object):
 
         self.refineClearBtn = QPushButton(self.refineGroupBox)
         self.refineClearBtn.setObjectName(u"refineClearBtn")
-        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        sizePolicy3.setHorizontalStretch(0)
-        sizePolicy3.setVerticalStretch(0)
-        sizePolicy3.setHeightForWidth(self.refineClearBtn.sizePolicy().hasHeightForWidth())
-        self.refineClearBtn.setSizePolicy(sizePolicy3)
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.refineClearBtn.sizePolicy().hasHeightForWidth())
+        self.refineClearBtn.setSizePolicy(sizePolicy2)
 
         self.gridLayout_2.addWidget(self.refineClearBtn, 4, 1, 1, 1)
 
         self.refineButton = QPushButton(self.refineGroupBox)
         self.refineButton.setObjectName(u"refineButton")
-        sizePolicy3.setHeightForWidth(self.refineButton.sizePolicy().hasHeightForWidth())
-        self.refineButton.setSizePolicy(sizePolicy3)
+        sizePolicy2.setHeightForWidth(self.refineButton.sizePolicy().hasHeightForWidth())
+        self.refineButton.setSizePolicy(sizePolicy2)
 
         self.gridLayout_2.addWidget(self.refineButton, 4, 0, 1, 1)
 
@@ -242,6 +232,21 @@ class Ui_seedReverser(object):
         self.coordZEdit.setMinimumSize(QSize(0, 0))
 
         self.gridLayout.addWidget(self.coordZEdit, 1, 5, 1, 1)
+
+        self.informationBrowser = QTextBrowser(self.layoutWidget)
+        self.informationBrowser.setObjectName(u"informationBrowser")
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
+        sizePolicy3.setHorizontalStretch(0)
+        sizePolicy3.setVerticalStretch(0)
+        sizePolicy3.setHeightForWidth(self.informationBrowser.sizePolicy().hasHeightForWidth())
+        self.informationBrowser.setSizePolicy(sizePolicy3)
+
+        self.gridLayout.addWidget(self.informationBrowser, 7, 0, 1, 6)
+
+        self.anchorPreviewLabel = QLabel(self.layoutWidget)
+        self.anchorPreviewLabel.setObjectName(u"anchorPreviewLabel")
+
+        self.gridLayout.addWidget(self.anchorPreviewLabel, 6, 6, 2, 4)
 
 
         self.retranslateUi(seedReverser)
@@ -277,5 +282,6 @@ class Ui_seedReverser(object):
         self.refineClearBtn.setText(QCoreApplication.translate("seedReverser", u"\u6e05\u9664\u7cbe\u5316", None))
         self.refineButton.setText(QCoreApplication.translate("seedReverser", u"\u5f00\u59cb\u7cbe\u5316", None))
         self.coordZEdit.setPlaceholderText(QCoreApplication.translate("seedReverser", u"Z", None))
+        self.anchorPreviewLabel.setText("")
     # retranslateUi
 

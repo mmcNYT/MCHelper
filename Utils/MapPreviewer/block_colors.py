@@ -1,33 +1,40 @@
 # -*- coding: utf-8 -*-
-"""JourneyMap 风格方块级俯视渲染（1 方块 = 1 像素）。
+"""游戏地图色板系俯视渲染（1 方块 = 1 像素，可柔化）。
 
 输入为噪声格分辨率（1 噪声格 = 4x4 方块）的群系/气候矩阵
 （map_sampler.sample_region 输出），输出 4 倍边长的 uint8 RGB 矩阵。
-色彩规则参考 Minecraft 原版材质语义与地图类模组（JourneyMap/Xaero）
-的俯视观感：
+色彩骨架对齐 Minecraft 原版地图物品色板（Map item format 的 base
+color 表），再向参考风格（低饱和灰调大地色、柔和沉稳）整体收敏：
 
-- 草地/树叶：温度 x 湿度双梯度草色（原版 colormap 语义），
-  群系系数微调出各群系身份色；热带草原类固定原版草色
-  #BFB755（不随气候插值）；
-- 水面：按 depth 参数固定物理映射的深浅渐变（深水暗/浅水亮），
-  河流固定浅亮蓝、深海加深，冻洋/冻河渲染为冰面；
-- 恶地：按 depth 高度分档的陶瓦色带（原版 badlands 条带语义）；
+- 草地/树叶：温度 x 湿度双梯度草色（原版 colormap 语义，锚点取
+  原版 colormap 高饱和骨架后整体去饱和），群系系数微调身份色；
+  热带草原类固定原版草色 #BFB755（不随气候插值）；
+- 水面：基准色 = 原版地图 WATER base #4040FF，按 depth 固定物理
+  映射的深浅渐变（深水暗/浅水亮），河流固定浅亮段、冻洋/冻河冰面；
+- 恶地：按 depth 高度分档的陶瓦色带（原版地图 TERRACOTTA 系色）；
 - 山地：石面/雪面/草面按群系与低频 patch 噪声混合；雪坡林地面
   雪底云杉冠；
 - 洞穴群系（溶洞/滴水石/深暗之域）：1.18+ 噪声源可能输出，
-  按旧版观感渲染（溶洞棕绿苔藓、深暗之域黑底幽匿微光）；
+  按旧版观感渲染；
 - 全体方块级伪随机颗粒（噪声哈希以 (方块坐标, 种子) 为输入，
   同参数结果可复现），森林类群系叠加树冠斑点、繁花森林点缀花色。
 
 架构：噪声格级（cell）算基色 → 4x 上采样到方块级 → 方块级遮罩
 （树冠/泥土/水洼/冰裂等）+ 颗粒扰动。低频 patch 场以全局坐标为
-哈希输入，跨渲染块无缝衔接。
+哈希输入，跨渲染块无缝衔接。可选 hillshade 地形阴影：以 depth
+为高程场按 GDAL/ArcGIS 标准 horn 公式（西北光源 315°、高度角
+40°）计算 [0,1] 阴影场，乘法混合压暗背光坡（水面跳过，详见
+_hillshade_shade）。色块间的柔化过渡由展示端平滑插值放大提供
+（cell 瓦片 SmoothTransformation），渲染层保持逐格确定性、
+跨瓦片无缝。
 
 群系 id 语义与 cubiomes biomes.h BiomeID 一致（含 +128 变体与
-1.18+ 新 id 177~186）；未收录 id 按平原草色兜底，不致渲染失败。
+1.18+ 新 id 177~186）；未收录 id 按平原草色兑底，不致渲染失败。
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 
@@ -44,30 +51,32 @@ _CAT_BADLAND = 5
 _CAT_SWAMP = 6
 _CAT_MUSHROOM = 7
 
-# 恶地陶瓦色带（原版 badlands 条带常用色序，高原顶→谷底）
+# 恶地陶瓦色带（对齐原版地图 TERRACOTTA 系后整体去饱和 12%，
+# 高原顶→谷底；参考风格的柔和灰调大地色，避免焦土感）：
 _TERRACOTTA = np.array([
-    (216, 151, 74), (186, 133, 35), (167, 104, 48), (161, 83, 37),
-    (152, 94, 67), (144, 71, 35), (142, 60, 46), (134, 96, 67),
+    (205, 178, 162), (178, 131, 46), (151, 84, 49), (147, 92, 72),
+    (137, 70, 51), (135, 66, 55), (73, 52, 44), (132, 107, 101),
 ], dtype=np.float32)
 
-# 草色双梯度四角锚点（近似原版 grass colormap）：
-# 行=温度（冷→热），列=湿度（干→湿）
-_GRASS_TL = np.array([128, 180, 151], dtype=np.float32)  # 冷干
-_GRASS_TR = np.array([110, 172, 128], dtype=np.float32)  # 冷湿
-_GRASS_BL = np.array([191, 183, 85], dtype=np.float32)   # 热干（热带草原）
-_GRASS_BR = np.array([89, 201, 60], dtype=np.float32)    # 热湿（丛林）
+# 草色双梯度四角锚点（原版 grass colormap 骨架 x 地图色板系收敏）：
+# 行=温度（冷→热），列=湿度（干→湿）；整体降饱和 +G 提权重，
+# 契合参考风格的柔和大地色调
+_GRASS_TL = np.array([145, 178, 148], dtype=np.float32)  # 冷干
+_GRASS_TR = np.array([125, 172, 130], dtype=np.float32)  # 冷湿
+_GRASS_BL = np.array([183, 176, 98], dtype=np.float32)   # 热干（热带草原，去饱和）
+_GRASS_BR = np.array([95, 190, 72], dtype=np.float32)    # 热湿（丛林）
 
-_DIRT_RGB = np.array([134, 96, 67], dtype=np.float32)
-_SNOW_RGB = np.array([238, 243, 246], dtype=np.float32)
-_ICE_RGB = np.array([168, 196, 238], dtype=np.float32)
-_SAND_RGB = np.array([219, 207, 163], dtype=np.float32)
-_STONE_RGB = np.array([127, 127, 127], dtype=np.float32)
-_GRAVEL_RGB = np.array([136, 126, 126], dtype=np.float32)
-_MYCELIUM_RGB = np.array([122, 110, 116], dtype=np.float32)
-_SWAMP_GRASS = np.array([106, 112, 57], dtype=np.float32)
+_DIRT_RGB = np.array([151, 109, 77], dtype=np.float32)   # 地图 DIRT base
+_SNOW_RGB = np.array([243, 246, 248], dtype=np.float32)  # 地图 SNOW base
+_ICE_RGB = np.array([170, 182, 231], dtype=np.float32)   # 地图 ICE base 柔化
+_SAND_RGB = np.array([240, 230, 175], dtype=np.float32)  # 地图 SAND base 柔化
+_STONE_RGB = np.array([136, 136, 136], dtype=np.float32) # 地图 STONE base 柔化
+_GRAVEL_RGB = np.array([140, 133, 133], dtype=np.float32)
+_MYCELIUM_RGB = np.array([134, 122, 131], dtype=np.float32)  # PURPLE base 柔化
+_SWAMP_GRASS = np.array([122, 129, 75], dtype=np.float32)    # GREEN base 柔化
 _SWAMP_WATER = np.array([89, 125, 105], dtype=np.float32)
-_MANGROVE_GRASS = np.array([96, 114, 58], dtype=np.float32)
-_BLUE_ICE_RGB = np.array((170, 205, 235), dtype=np.float32)
+_MANGROVE_GRASS = np.array([103, 123, 70], dtype=np.float32)
+_BLUE_ICE_RGB = np.array((172, 206, 236), dtype=np.float32)
 _WOODED_BAD_TOP = np.array((172, 162, 90), dtype=np.float32)
 _MYCELIUM_SPECK = np.array((150, 90, 110), dtype=np.float32)
 _CHERRY_CANOPY = np.array([231, 168, 193], dtype=np.float32)
@@ -81,10 +90,11 @@ _CAVE_DRIPSTONE = np.array([150, 132, 106], dtype=np.float32)
 _CAVE_DEEPDARK = np.array([42, 46, 58], dtype=np.float32)
 _SCULK_SPECK = np.array([96, 150, 170], dtype=np.float32)
 
-# 水色锚点（基准≈原版 #3F76E4）
-_WATER_SHALLOW = np.array([96, 156, 240], dtype=np.float32)
-_WATER_BASE = np.array([63, 118, 228], dtype=np.float32)
-_WATER_DEEP = np.array([30, 54, 140], dtype=np.float32)
+# 水色锚点：参考风格的低饱和柔和灰蓝（非原版亮蓝，避免与暖色
+# 地貌对比过冲）；亮/暗端同色相收敏
+_WATER_SHALLOW = np.array([96, 128, 200], dtype=np.float32)
+_WATER_BASE = np.array([76, 100, 180], dtype=np.float32)
+_WATER_DEEP = np.array([52, 70, 138], dtype=np.float32)
 
 # 花色点缀（繁花森林/草甸）
 _FLOWER_COLORS = np.array([
@@ -127,7 +137,7 @@ def _build_luts():
     # 草色群系系数（乘在双梯度 tint 上）
     mult = np.ones((256, 3), dtype=np.float32)
     for b in (1, 129):            # plains
-        mult[b] = (1.10, 1.01, 0.83)
+        mult[b] = (1.06, 1.02, 0.88)
     for b in (4, 18):             # forest
         mult[b] = (0.98, 1.00, 0.90)
     mult[132] = (1.05, 1.02, 0.88)   # flower_forest
@@ -273,6 +283,15 @@ _WATER_SPAN = 2400.0           # 水面（-depth 0→2400）亮→暗映射跨�
 _BAD_BASE = -500.0
 _BAD_SPAN = 7000.0            # 恶地谷底→高原顶的条带映射跨度
 
+# 地形阴影（hillshade）参数：JourneyMap 式西北光源。
+# depth 量化值量级：海面 0 上下（谷底/海底约 -2600），陆地高原可到
+# 数千。典型梯度：平原每噪声格约 50、丘陵约 400、山地 1000+。
+# z' = depth * _HS_ZSCALE，xy 单位 = 噪声格（间距 1），丘陵坡
+# g≈400 -> tan(slope)≈0.4（约 22°）、山地 g≈1500 -> 约 56°。
+_HS_AZ = math.radians(315.0)        # 光源罗盘方位（315° = 西北）
+_HS_ZEN = math.radians(90.0 - 40.0)  # 天顶角（光源高度角 40°，阴影更长）
+_HS_ZSCALE = 0.001                  # depth -> 高程缩放系数
+
 
 def _norm_fixed(dq: np.ndarray, base: float, span: float,
                 invert: bool = False) -> np.ndarray:
@@ -323,7 +342,7 @@ def _cell_base(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
         wu = np.where((bid == 7) | (bid == 44), 0.12 + 0.18 * water_u, wu)
         w_rgb = (_WATER_SHALLOW * (1 - wu[..., None])
                  + _WATER_DEEP * wu[..., None])
-        base[liquid] = (0.75 * w_rgb + 0.25 * _WATER_BASE)[liquid]
+        base[liquid] = w_rgb[liquid]
     if is_frozen.any():
         base[is_frozen] = _ICE_RGB
 
@@ -425,12 +444,12 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     # ---- 方块级细节（在上采样基色上覆盖）----
     base4 = _up4(base)                          # (H,W,3)
 
-    # 水波/沙丘明暗（低频 patch）
+    # 水波/沙丘明暗（低频 patch，幅度克制保持柔和）
     bright = np.ones(patch.shape, dtype=np.float32)
     liq4 = _up4(liquid)
     sand4 = _up4(is_sand)
-    bright[liq4] += (patch[liq4] - 0.5) * 0.10
-    bright[sand4] += (patch[sand4] - 0.5) * 0.16
+    bright[liq4] += (patch[liq4] - 0.5) * 0.07
+    bright[sand4] += (patch[sand4] - 0.5) * 0.10
     base4 *= bright[..., None]
 
     # 泥土斑点（草地）
@@ -438,7 +457,9 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     dirt4 = grass4 & (n1 < _up4(_DIRT_DENS[bid]))
     base4[dirt4] = _DIRT_RGB
 
-    # 树冠斑点（密度阈值 + 低频成簇）
+    # 树冠斑点（密度阈值 + 低频成簇）+ 伪高度立体感：
+    # 真实游戏树冠高出地表 5~7 格，地图渲染中树冠顶面亮度随簇
+    # 高度变化、北缘受光/南缘背光，形成疙状起伏而非平涂色点
     crown4 = grass4 & (n2 < _up4(_CANOPY_DENS[bid])) & (patch > 0.30)
     if crown4.any():
         crown_rgb = _up4(gt * (_CANOPY_MULT * _GRASS_MULT)[bid])
@@ -446,8 +467,15 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
         if abs4.any():
             crown_rgb = np.where(abs4[..., None],
                                  _up4(_CANOPY_ABS[bid]), crown_rgb)
-        crown_rgb = crown_rgb * (0.88 + 0.24 * n1[..., None])
+        crown_h = np.clip((patch - 0.30) / 0.50, 0.0, 1.0)  # 簇高 0..1
+        crown_rgb = crown_rgb * ((0.88 + 0.20 * crown_h)
+                                 * (0.92 + 0.14 * n1))[..., None]
         base4[crown4] = crown_rgb[crown4]
+        # 北缘受光提亮 / 南缘背光压暗（与 hillshade 同向：北=向光）
+        nlit = crown4 & ~np.roll(crown4, 1, axis=0)
+        sdark = crown4 & ~np.roll(crown4, -1, axis=0)
+        base4[nlit] = np.clip(base4[nlit] * 1.12, 0, 255)
+        base4[sdark] = base4[sdark] * 0.86
 
     # 花色点缀（繁花森林/草甸，避开树冠）
     flower4 = (grass4 & _up4(_one_hot((132, 177))[bid])
@@ -482,7 +510,7 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
         if bad_u is not None:
             bidx4 = np.clip(
                 _up4(bad_idx)
-                + np.round((n2 - 0.5) * 1.4).astype(np.int64),
+                + np.round((n2 - 0.5) * 0.6).astype(np.int64),
                 0, len(_TERRACOTTA) - 1)
             base4[bad4] = _TERRACOTTA[bidx4][bad4]
         bgm4 = bad4 & _up4(bid == 38) & (patch > 0.62)
@@ -493,12 +521,16 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     pud4 = sw4 & (patch < 0.22) & (n1 < 0.85)
     base4[pud4] = _SWAMP_WATER
 
-    # 雪坡林地：雪底上的云杉冠斑（grove 178）
+    # 雪坡林地：雪底上的云杉冠斑（grove 178，同样带北亮南暗立体感）
     crown_snow4 = sn4 & _up4(bid == 178) \
         & (n2 < _up4(_CANOPY_DENS[bid])) & (patch > 0.30)
     if crown_snow4.any():
         base4[crown_snow4] = (
-            _SNOW_TAIGA_CROWN * (0.88 + 0.24 * n1[..., None]))[crown_snow4]
+            _SNOW_TAIGA_CROWN * (0.92 + 0.16 * n1[..., None]))[crown_snow4]
+        nlit_s = crown_snow4 & ~np.roll(crown_snow4, 1, axis=0)
+        sdark_s = crown_snow4 & ~np.roll(crown_snow4, -1, axis=0)
+        base4[nlit_s] = np.clip(base4[nlit_s] * 1.12, 0, 255)
+        base4[sdark_s] = base4[sdark_s] * 0.86
 
     # 洞穴群系方块级：溶洞苔藓 patch、深暗之域幽匿微光
     base4[_up4(bid == 174) & (patch > 0.55)] = _CAVE_MOSS
@@ -510,8 +542,8 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     speck4 = mu4 & _up4(bid == 14) & (n1 > 0.95)
     base4[speck4] = _MYCELIUM_SPECK
 
-    # 全体方块级颗粒扰动
-    base4 *= (1 + (n0 - 0.5) * 0.08)[..., None]
+    # 全体方块级颗粒扰动（轻微，脏噪控制）
+    base4 *= (1 + (n0 - 0.5) * 0.045)[..., None]
 
     return np.clip(base4, 0, 255).astype(np.uint8)
 
@@ -539,11 +571,68 @@ def _norm_fields(biomes: np.ndarray,
     return water_u, bad_u
 
 
+def _liquid_mask(biomes: np.ndarray) -> np.ndarray:
+    """液态水掩码（非冰），与 _cell_base 的 liquid 定义一致。"""
+    bid = np.clip(biomes, 0, 255)
+    return np.isin(bid, _WATER_IDS) & ~np.isin(bid, _FROZEN_WATER_IDS)
+
+
+def _hillshade_shade(depth: np.ndarray,
+                     liquid: np.ndarray) -> np.ndarray:
+    """depth 高程场 -> [0,1] 山体阴影场（噪声格分辨率，整图一次）。
+
+    GDAL/ArcGIS 标准 horn 公式：光源罗盘方位 315°（西北）、高度角
+    40°；z = depth * _HS_ZSCALE，xy 单位 = 噪声格。shade 已除以
+    cos(天顶角) 归一化：平坦地形 =1（乘法混合下不改变原色）、背光
+    坡 <1 压暗、向光坡 clip 到 1，配合 (0.40+0.60*shade) 混合增强
+    明暗层次。水面（liquid，非冰）跳过阴影（=1）。单瓦片边界
+    用线性外推 pad（局部坡面近似线性时与真实边界梯度一致，消除
+    接缝；edge 复制会引入 Δ/2 的梯度误差）。
+    """
+    z = depth.astype(np.float32) * np.float32(_HS_ZSCALE)
+    p = np.pad(z, 1, mode="edge")
+    # 四边线性外推：pad 值 = 2*边界 - 次边界（一次场精确复原）
+    p[0, 1:-1] = 2.0 * z[0] - z[1]
+    p[-1, 1:-1] = 2.0 * z[-1] - z[-2]
+    p[1:-1, 0] = 2.0 * z[:, 0] - z[:, 1]
+    p[1:-1, -1] = 2.0 * z[:, -1] - z[:, -2]
+    # 角点双向外推（仅影响最近 1 格梯度的 1/8 权重，精度足够）
+    p[0, 0] = 2.0 * p[0, 1] - p[0, 2]
+    p[0, -1] = 2.0 * p[0, -2] - p[0, -3]
+    p[-1, 0] = 2.0 * p[-1, 1] - p[-1, 2]
+    p[-1, -1] = 2.0 * p[-1, -2] - p[-1, -3]
+    # horn 3x3 加权和：行向下 = 南（bz+），列向右 = 东（bx+）
+    sum_e = p[:-2, 2:] + 2.0 * p[1:-1, 2:] + p[2:, 2:]
+    sum_w = p[:-2, :-2] + 2.0 * p[1:-1, :-2] + p[2:, :-2]
+    sum_n = p[:-2, :-2] + 2.0 * p[:-2, 1:-1] + p[:-2, 2:]
+    sum_s = p[2:, :-2] + 2.0 * p[2:, 1:-1] + p[2:, 2:]
+    dzdx = (sum_e - sum_w) / 8.0            # ∂z/∂x（向东为正）
+    dzdy = (sum_n - sum_s) / 8.0            # ∂z/∂y（向北为正）
+    slope = np.arctan(np.sqrt(dzdx * dzdx + dzdy * dzdy))
+    # 坡面朝向 = 下坡方向的罗盘方位；下坡向量 = (−dzdx, −dzdy)
+    # （x 东 / y 北），罗盘方位 = atan2(x 分量, y 分量)
+    aspect = np.arctan2(-dzdx, -dzdy)
+    shade = (np.cos(_HS_ZEN) * np.cos(slope)
+             + np.sin(_HS_ZEN) * np.sin(slope)
+             * np.cos(_HS_AZ - aspect))
+    shade = np.clip(shade / np.cos(_HS_ZEN), 0.0, 1.0).astype(np.float32)
+    # 3x3 均值平滑（edge pad）：逐格明暗碎跳 → 平滑渐变
+    # （线性坡的局部均值=中心值，解析性质不变）；瓦片扩边 1 格
+    # 后裁剪，内区与整图平滑结果一致，接缝不受影响
+    p = np.pad(shade, 1, mode="edge")
+    shade = (p[:-2, :-2] + p[:-2, 1:-1] + p[:-2, 2:]
+             + p[1:-1, :-2] + p[1:-1, 1:-1] + p[1:-1, 2:]
+             + p[2:, :-2] + p[2:, 1:-1] + p[2:, 2:]) * np.float32(1 / 9)
+    shade[liquid] = 1.0
+    return shade
+
+
 def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
                      humid: np.ndarray | None, depth: np.ndarray | None,
                      seed: int = 0, origin_bx: int = 0,
                      origin_bz: int = 0,
-                     on_progress=None) -> np.ndarray:
+                     on_progress=None,
+                     hillshade: bool = False) -> np.ndarray:
     """方块级渲染主入口（LOD 精细档，1 像素 = 1 方块）。
 
     Args:
@@ -552,6 +641,8 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
         seed: 世界种子（方块纹理哈希输入，保证跨次渲染可复现）。
         origin_bx/origin_bz: 区域左上角方块坐标（哈希输入）。
         on_progress: on_progress(done_rows, total_rows)（噪声格行）。
+        hillshade: 是否叠加地形阴影（需 depth 非 None；西北光源，
+            乘法混合压暗背光坡，水面跳过）。
 
     Returns:
         (nh*4, nw*4, 3) uint8 RGB 矩阵，1 像素 = 1 方块。
@@ -563,6 +654,9 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
         else humid.astype(np.float32)
 
     water_u, bad_u = _norm_fields(biomes, depth)
+    shade = None
+    if hillshade and depth is not None:
+        shade = _hillshade_shade(depth, _liquid_mask(biomes))
 
     H, W = nh * CELL, nw * CELL
     out = np.empty((H, W, 3), dtype=np.uint8)
@@ -571,24 +665,31 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
     chunk = max(1, int(2_000_000 // max(1, W)))
     for rs in range(0, nh, chunk):
         re = min(nh, rs + chunk)
-        out[rs * CELL:re * CELL] = _render_chunk(
+        blk = _render_chunk(
             biomes[rs:re], tq[rs:re], hq[rs:re],
             None if water_u is None else water_u[rs:re],
             None if bad_u is None else bad_u[rs:re],
             seed, origin_bx, origin_bz + rs * CELL)
+        if shade is not None:
+            # 乘法混合压暗背光坡（shade 场水面处=1，已跳过）
+            blk = blk.astype(np.float32)
+            blk *= (0.40 + 0.60 * _up4(shade[rs:re]))[..., None]
+            blk = np.clip(blk, 0, 255).astype(np.uint8)
+        out[rs * CELL:re * CELL] = blk
         if on_progress is not None:
             on_progress(re, total)
     return out
 
 
 def render_cell_rgb(biomes: np.ndarray, temp: np.ndarray | None,
-                    humid: np.ndarray | None,
-                    depth: np.ndarray | None) -> np.ndarray:
+                    humid: np.ndarray | None, depth: np.ndarray | None,
+                    hillshade: bool = False) -> np.ndarray:
     """cell 级快速渲染（LOD 快速档，1 像素 = 4x4 方块）。
 
     与方块级渲染共用基色规则（草色 tint/水深渐变/恶地色带/洞穴
     群系自绘），仅省去方块级颗粒/树冠/斑点遮罩与 4x 上采样，色彩
     基调一致；输出 (nh, nw, 3) uint8，展示端再放大到方块尺度。
+    hillshade 语义与 render_block_rgb 相同（需 depth 非 None）。
     """
     nh, nw = biomes.shape
     tq = np.zeros((nh, nw), np.float32) if temp is None \
@@ -597,4 +698,7 @@ def render_cell_rgb(biomes: np.ndarray, temp: np.ndarray | None,
         else humid.astype(np.float32)
     water_u, bad_u = _norm_fields(biomes, depth)
     base, _ = _cell_base(biomes, tq, hq, water_u, bad_u)
+    if hillshade and depth is not None:
+        sh = _hillshade_shade(depth, _liquid_mask(biomes))
+        base *= (0.40 + 0.60 * sh)[..., None]
     return np.clip(base, 0, 255).astype(np.uint8)

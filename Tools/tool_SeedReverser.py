@@ -15,6 +15,10 @@
 
 说明：
 - 只支持 1.18~1.21+ 参数线（salt / regionSize / chunkRange 不随小版本变化）；
+- 结构类型下拉按「可逆推 / 仅验证」分组（横线分隔）：可逆推（沉船/神殿/
+  雪屋等 mod≥2 线性结构）参与预筛，进度条也只统计这类观测；废弃传送门/
+  前哨站/海底神殿/远古城市只能作验证观测（层 3 过滤假阳性）；
+  林地府邸已下架（锚点定位误差过大，无计算价值）；
 - 会话持久化：已采集的结构/群系观测、候选种子与版本/群系模式
   选择实时落盘（用户配置目录 seed_reverser_session.json），重启自动恢复；
 - 「群系模式」勾选后显示下方「世界种子精化」面板（默认隐藏，结果区自动加高）；
@@ -34,7 +38,8 @@ import os
 import re
 from collections import Counter
 
-from PySide6.QtCore import (QEvent, QSortFilterProxyModel, QRect, QSize,
+from PySide6.QtCore import (QEvent, QPersistentModelIndex,
+                            QSortFilterProxyModel, QRect, QSize,
                             QStandardPaths, Qt, QTimer)
 from PySide6.QtGui import (QBrush, QColor, QIcon, QKeySequence, QShortcut,
                            QStandardItem, QStandardItemModel)
@@ -56,7 +61,9 @@ from Threads.task_WorldSeedRefine import (
     WorldSeedRefineThread,
 )
 from Utils.AutoBackUp.notification import NotificationWidget
-from Utils.SeedReverser import seed_math, structure_params
+from Utils.MapPreviewer import structure_icons as struct_icons
+from Utils.SeedReverser import (seed_math, structure_params,
+                                structure_3dview, structure_preview)
 from Utils.SeedReverser.biome_names import (
     BIOME_CHOICES,
     biome_label,
@@ -107,19 +114,16 @@ _SEED_HEX_RE = re.compile(r"0x[0-9A-Fa-f]{1,16}")
 # 单模板结构（神殿/雪屋/小屋等）的生成锚点为模板包围盒一角，
 # 结构整体向东南（+X/+Z）展开。
 _ANCHOR_HINTS = {
-    "village": "无严格中心；水井或钟（meeting point）附近最接近锚点",
-    "desert_pyramid": "约21×21神殿的西北角（神殿向东南展开），常埋沙下",
-    "igloo": "雪屋一角（屋子向东南展开）",
-    "swamp_hut": "小屋一角（小屋向东南展开）",
-    "jungle_temple": "庙宇一角（长廊向东南延伸）",
-    "shipwreck": "船体一角（常见半埋沙滩/海底，看露出部分一角）",
-    "ocean_ruin": "废墟一角（遗迹向东南展开）",
-    "pillager_outpost": "瞭望塔底座一角",
-    "monument": "神殿主体一角（向东南展开）",
-    "mansion": "府邸一角（主体向东南展开）",
-    "ancient_city": "城区内（范围极大，站位误差常超容差）",
-    "trail_ruins": "废墟中心附近（多埋地下）",
-    "trial_chambers": "入口走廊附近（多在深地下）",
+    "village": "无严格中心；水井或钟（meeting point）附近最接近锚点（容差建议2）",
+    "desert_pyramid": "约21×21神殿的西北角，但神庙中心蓝色陶瓦所在区块就是（容差建议0）",
+    "igloo": "雪屋一角（容差建议0）",
+    "swamp_hut": "小屋一角（容差建议0）",
+    "jungle_temple": "庙宇一角（容差建议0）",
+    "shipwreck": "船体一角（常见半埋沙滩/海底，看露出部分一角）（容差建议1）",
+    "ocean_ruin": "大型废墟主体一角（遗迹向东南展开）（容差据遗迹大小决定）",
+    "monument": "建筑最上层正中心4个方块各属四个区块，找区块西北角的方块（容差建议0）",
+    "trial_chambers": "两个水池附近（容差建议1）",
+    "ruined_portal": "区块西北角（容差建议1）",
 }
 
 # 精化功能最少群系观测点数（refine_world_seeds 内部同样校验）
@@ -146,8 +150,6 @@ _BIOME_MODE_HELP_TEXT = (
     "· 填 Y：按该高度的群系判定，与游戏 F3 显示完全一致——推荐。\n"
     "  X 框粘贴 F3+C 复制的完整文本可自动填入 X/Y/Z。\n"
     "· 不填：按深层（y≈0）群系判定，与地表 F3 可能有出入：\n"
-    "  实测一致率仅 70%~88%，繁茂洞穴/溶洞会在深层大面积\n"
-    "  覆盖地表群系，导致真种子被误拒。\n"
     "· 建议站在开阔地表采样，避开洞穴内、海底与山地陡坡。")
 
 # 精化结果区初始内容 = 完整使用说明 + 待精化提示（常驻说明，精化结果覆盖显示）
@@ -158,16 +160,64 @@ _REFINE_DETAIL_INITIAL = _BIOME_MODE_HELP_TEXT + (
 
 
 class _NoEditDelegate(QStyledItemDelegate):
-    """屏蔽指定列的行内编辑器（双击编辑只开放给可安全校验的列）。"""
+    """屏蔽指定列的行内编辑器（双击编辑只开放给可安全校验的列）。
+
+    同时负责「编辑中不绘制 item 文字」：编辑器打开期间视图仍会
+    重绘该单元格，item 文字会透过（不完全遮盖底色的）下拉编辑器
+    形成重影（用户截图实证）。这里用 createEditor/destroyEditor
+    跟踪正在编辑的 index，paint 时该单元格只画背景不画文字，
+    当前值改由编辑器自己显示。
+    """
 
     def __init__(self, readonly_columns=(), parent=None):
         super().__init__(parent)
         self._readonly = set(readonly_columns)
+        # 正被行内编辑的 index（编辑器打开→销毁期间非 None）
+        self._edit_index = None
 
     def createEditor(self, parent, option, index):
         if index.column() in self._readonly:
             return None
-        return super().createEditor(parent, option, index)
+        editor = super().createEditor(parent, option, index)
+        if editor is not None:
+            self._track_editor(editor, option, index)
+        return editor
+
+    def _track_editor(self, editor, option, index) -> None:
+        """记录正在编辑的 index，并立即重绘该单元格清掉旧文字。"""
+        self._edit_index = QPersistentModelIndex(index)
+        # deleteLater 关闭路径兑底：编辑器销毁后解除跟踪
+        editor.destroyed.connect(self._clear_edit_index)
+        view = option.widget
+        if view is not None:
+            view.viewport().update(view.visualRect(index))
+
+    def destroyEditor(self, editor, index):
+        self._edit_index = None
+        return super().destroyEditor(editor, index)
+
+    def _clear_edit_index(self, *_args) -> None:
+        self._edit_index = None
+
+    def _is_editing(self, index) -> bool:
+        return self._edit_index is not None and index == self._edit_index
+
+    def _paint_item(self, painter, option, index,
+                    with_text: bool = True) -> None:
+        """统一单元格绘制入口（with_text=False 用于编辑中防重影）。"""
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        if not with_text:
+            opt.text = ""
+            opt.icon = QIcon()
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem,
+                          opt, painter, widget)
+
+    def paint(self, painter, option, index) -> None:
+        self._paint_item(painter, option, index,
+                         with_text=not self._is_editing(index))
 
 
 class BiomeComboDelegate(_NoEditDelegate):
@@ -204,6 +254,10 @@ class BiomeComboDelegate(_NoEditDelegate):
         return QSize(size.width(), max(size.height(), self.ICON_SIZE + 4))
 
     def paint(self, painter, option, index) -> None:
+        if self._is_editing(index):
+            # 编辑中：不画 item 文字/图标，防透过编辑器形成重影
+            super().paint(painter, option, index)
+            return
         if (self._icon_column is not None
                 and index.column() != self._icon_column):
             super().paint(painter, option, index)
@@ -253,7 +307,11 @@ class StructRowDelegate(_NoEditDelegate):
             combo = QComboBox(parent)
             version = self._w.versionCombo.currentText()
             for key in structure_params.available_structures(version):
-                combo.addItem(structure_params.struct_key_to_name(key), key)
+                name = structure_params.struct_key_to_name(key)
+                if not structure_params.is_reversible(key):
+                    name += "（仅验证）"
+                self._w._add_struct_combo_item(combo, name, key)
+            self._track_editor(combo, option, index)
             return combo
         editor = super().createEditor(parent, option, index)
         if index.column() == 2 and isinstance(editor, QLineEdit):
@@ -313,6 +371,7 @@ class BiomeRowDelegate(BiomeComboDelegate):
             combo.view().setItemDelegate(self._w._biome_delegate)
             completer.popup().setItemDelegate(self._w._biome_delegate)
             combo.lineEdit().textEdited.connect(proxy.setFilterFixedString)
+            self._track_editor(combo, option, index)
             return combo
         return super().createEditor(parent, option, index)
 
@@ -370,9 +429,33 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     # ---------- 初始化 ----------
     def _init_ui(self) -> None:
         """填充下拉框、设置列表表头、初始文本与按钮状态。"""
+        # 锚点 3D 预览：用 Structure3DView 替换 UI 编译产物里的占位
+        # anchorPreviewLabel（保留同名属性引用，外部引用不破）。
+        self._anchor_view = structure_3dview.Structure3DView()
+        self._anchor_view.setObjectName("anchor3DView")
+        # 渲染报错 -> 信息框（模型构建失败/上传失败/绘制异常统一走此链路）
+        self._anchor_view.render_error.connect(self._on_render_error)
+        self.gridLayout.replaceWidget(self.anchorPreviewLabel,
+                                      self._anchor_view)
+        self.anchorPreviewLabel.hide()
+        self._anchor_preview_key = None
+        self._anchor_preview_size = None
+
         # 版本下拉（1.21 默认）
         self.versionCombo.addItems(structure_params.VERSION_KEYS)
         self.versionCombo.setCurrentIndex(0)
+
+        # 结构图标：内部键 → QIcon（复用 MapPreviewer 的 Wiki EnvSprite
+        # 资产，assets/MapPreviewer/EnvSprite_*.png，16x16）。缺图时
+        # 走无图标回退路径（icon_path 文件缺失返回 None 自动跳过）。
+        # 必须在 _reload_struct_combo 首次调用前构建（下拉加项时查表）。
+        self._struct_icons: dict[str, QIcon] = {}
+        for key in structure_params.STRUCT_NAMES:
+            spath = struct_icons.icon_path(key)
+            if spath:
+                icon = QIcon(spath)
+                if not icon.isNull():
+                    self._struct_icons[key] = icon
 
         # 结构类型下拉（随版本过滤）
         self._reload_struct_combo()
@@ -387,10 +470,12 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.structList.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._resize_struct_columns()
 
-        # 信息量条：0~48 比特，不显示数字文字（infoHintLabel 承担提示）
+        # 信息量条：0~48 比特，条内显示累计值（如 27bit / 48bit），
+        # infoHintLabel 承担文字提示
         self.infoProgressBar.setRange(0, 48)
         self.infoProgressBar.setValue(0)
-        self.infoProgressBar.setTextVisible(False)
+        self.infoProgressBar.setTextVisible(True)
+        self.infoProgressBar.setFormat("%vbit / 48bit")
 
         # 群系模式：世界种子精化面板开关（勾选启用，不再阻塞结构逆推）
         self.biomeModeCheckBox.setToolTip(
@@ -434,7 +519,7 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.biomeNameCombo.lineEdit().textEdited.connect(
             self._biome_proxy.setFilterFixedString)
 
-        # 群系图标：显示标签 → QIcon（biome_icons/<内部键>.png，16x16）。
+        # 群系图标：显示标签 → QIcon（assets/SeedReverser/<内部键>.png，16x16）。
         # 1) 下拉列表/补全浮层用 delegate 把图标画在文字右侧；
         # 2) 当前选中项用行编辑器尾部 action 显示图标（带浮层互斥联动）。
         self._biome_icons: dict[str, QIcon] = {}
@@ -559,17 +644,53 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         delete_sc.setContext(Qt.ShortcutContext.WidgetShortcut)
         delete_sc.activated.connect(self._delete_selected)
 
+    def _add_struct_combo_item(self, combo, text: str, key: str) -> None:
+        """给结构选择下拉加项（带 Wiki EnvSprite 图标，缺图回退无图标）。
+
+        结构类型主下拉与行内编辑下拉共用；参数顺序与
+        combo.addItem(text, userData) 一致。图标存 DecorationRole
+        由原生绘制，弹层宽度自适应含图标。
+        """
+        icon = self._struct_icons.get(key)
+        if icon is not None:
+            combo.addItem(icon, text, key)
+        else:
+            combo.addItem(text, key)
+
     def _reload_struct_combo(self) -> None:
-        """按当前版本刷新结构类型下拉（尽量保留原选中项）。"""
+        """按当前版本刷新结构类型下拉，按「可逆推 / 仅验证」分组：
+
+        可逆推（linear 且 lift_mod>=2）在前并标注信息量；之后插入
+        不可选中的横线分隔项，仅验证观测（lift_mod=0，层 3 过滤假
+        阳性）在后并标注「仅验证」。进度条统计口径与分组一致。
+        """
         version = self.versionCombo.currentText()
         keep_key = self.structTypeCombo.currentData()
         self.structTypeCombo.blockSignals(True)
         self.structTypeCombo.clear()
+        reversible, verify_only = [], []
         for key in structure_params.available_structures(version):
+            (reversible if structure_params.is_reversible(key)
+             else verify_only).append(key)
+        for key in reversible:
             params = structure_params.get_params(key, version)
             bits = seed_math.calc_info_bits([params])
             name = structure_params.struct_key_to_name(key)
-            self.structTypeCombo.addItem(f"{name}（约 {bits:.1f} 比特/个）", key)
+            self._add_struct_combo_item(
+                self.structTypeCombo,
+                f"{name}（约 {bits:.1f} 比特/个）", key)
+        if verify_only:
+            sep_idx = self.structTypeCombo.count()
+            self.structTypeCombo.addItem("─" * 24, None)
+            sep_item = self.structTypeCombo.model().item(sep_idx)
+            if sep_item is not None:
+                # 去掉可选标记：分隔项仅供视觉分组，不可选中
+                sep_item.setFlags(
+                    sep_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            for key in verify_only:
+                name = structure_params.struct_key_to_name(key)
+                self._add_struct_combo_item(
+                    self.structTypeCombo, f"{name}（仅验证）", key)
         # 恢复原选中项（新版本仍可用时）
         if keep_key is not None:
             idx = self.structTypeCombo.findData(keep_key)
@@ -580,16 +701,36 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
 
     # ---------- 信息量条与按钮状态 ----------
     def _update_info_bar(self) -> None:
-        """重算信息量、刷新进度条颜色与提示文本、联动按钮状态。"""
-        params_list = [obs["params"] for obs in self._observations]
-        bits = seed_math.calc_info_bits(params_list)
-        self.infoProgressBar.setValue(int(round(bits)))
+        """重算信息量、刷新进度条颜色与提示文本、联动按钮状态。
+
+        进度条只统计可逆推观测（linear 且 lift_mod>=2）：仅验证观测
+        不约束低位预筛，计入会虚高信息量误导用户。
+        """
+        # 传完整观测 dict（含 tol）：容差把每维位置约束从 1 值放宽为
+        # min(2tol+1, chunk_range) 候选值，信息量按窗口折减（与求解
+        # 器容差通过率同口径，见 seed_math.calc_info_bits）
+        obs_list = [obs for obs in self._observations
+                    if structure_params.is_reversible(obs["struct_key"])]
+        bits = seed_math.calc_info_bits(obs_list)
+        # 钳到 [0, maximum] 再 setValue：QProgressBar 对超上限 setValue
+        # 静默忽略且 value 停在初始 -1（Qt 6.11 实测，.temp/test_pb_probe3
+        # G6，真实 GUI 显示为 "0bit / 48bit" 空条）——观测足够多时 bits
+        # 可超 48，重启恢复路径首帧即触发，条显示 0 与"信息量非常充足"
+        # 提示矛盾；钳制后信息量拉满显示满格 48bit / 48bit
+        self.infoProgressBar.setValue(
+            max(0, min(self.infoProgressBar.maximum(), int(round(bits)))))
         color = _INFO_BAR_COLOR_GOOD
         for upper, sec_color in _INFO_BAR_SECTIONS:
             if bits < upper:
                 color = sec_color
                 break
+        # 轨道彻底隐形必须加控件级规则：只写 ::groove/::chunk 子控件规则时
+        # QStyleSheetStyle 对本体绘制仍回退原生样式（底部灰色凹槽边框线即
+        # 原生 trough），控件级 background+border 声明触发样式表完全接管，
+        # 凹槽按规则画"空"才真正消失（value=0 时仅剩 xxbit / 48bit 文本）
         self.infoProgressBar.setStyleSheet(
+            "QProgressBar { background: transparent; border: none; }"
+            "QProgressBar::groove { background: transparent; border: none; }"
             f"QProgressBar::chunk {{ background-color: {color}; }}"
         )
         self.infoHintLabel.setText(seed_math.info_hint(bits))
@@ -682,6 +823,12 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
 
         # 3~5. 区域 / 偏移计算
         struct_key = self.structTypeCombo.currentData()
+        if not struct_key:
+            # 分组分隔线（横线）被键盘选中时 currentData 为 None
+            self.informationBrowser.setPlainText(
+                "请选择一个结构类型（不要选分隔线）。"
+            )
+            return
         version = self.versionCombo.currentText()
         params = structure_params.get_params(struct_key, version)
         region_size = params["region_size"]
@@ -796,6 +943,9 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             self.structList.blockSignals(True)
             try:
                 item.setText(1, obs["name"])
+                icon = self._struct_icons.get(new_key)
+                if icon is not None:
+                    item.setIcon(1, icon)
                 item.setText(4, f"({obs['reg_x']}, {obs['reg_z']})")
                 item.setText(6, status)
                 fg, bg = _STATUS_COLORS.get(status, (None, None))
@@ -956,6 +1106,11 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             status,
         ])
         item.setData(1, Qt.ItemDataRole.UserRole, obs["struct_key"])
+        # 类型列首部画结构图标（原生 DecorationRole 绘制；图标随类型
+        # 变更同步，见 _on_struct_item_changed）
+        icon = self._struct_icons.get(obs["struct_key"])
+        if icon is not None:
+            item.setIcon(1, icon)
         # 列 1/2/3 允许双击行内编辑（只读列由 delegate createEditor 拦截）
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setTextAlignment(0, int(Qt.AlignmentFlag.AlignCenter))
@@ -992,6 +1147,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
 
         def _on_tol_changed(idx: int, _ob=obs, _c=combo):
             _ob["tol"] = int(_c.itemData(idx))
+            # 容差改变直接影响该观测的信息量贡献，信息条即时联动
+            self._update_info_bar()
             self._save_session()
 
         combo.currentIndexChanged.connect(_on_tol_changed)
@@ -1089,14 +1246,41 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             tip += f"\n锚点位置：{anchor}"
             self.infoHintLabel.setText(f"锚点: {anchor}")
         self.structTypeCombo.setToolTip(tip)
+        # 右侧示意图：侧视 + 俯视 + 锚点标注（左上角）随结构切换刷新
+        self._update_anchor_preview()
+
+    def _update_anchor_preview(self) -> None:
+        """结构切换 -> 3D 视口更新（模型走 build_model 缓存）。
+
+        原平面示意图（structure_preview）已由 3D 视口取代；
+        保留方法名与调用点，减少外部引用破坏。
+        """
+        key = self.structTypeCombo.currentData()
+        if not key:
+            self._anchor_view.set_structure(None)
+            self._anchor_preview_key = None
+            return
+        if key == self._anchor_preview_key:
+            return
+        self._anchor_preview_key = key
+        name = structure_params.struct_key_to_name(key)
+        self._anchor_view.set_structure(key, name)
+
+    def _on_render_error(self, msg: str) -> None:
+        """3D 视口渲染报错：写入信息框（换行追加，保留已有内容）。"""
+        self.informationBrowser.append(f"[3D 视口] {msg}")
 
     def _on_biome_mode_toggled(self, checked: bool) -> None:
-        """群系模式开关：显隐精化面板，结果区高度随布局自然伸缩。
+        """群系模式开关：显隐精化面板与结构 3D 视口。
 
-        informationBrowser 为垂直 Expanding：隐藏 refineGroupBox 时
-        自动吃掉让出的空间（结果区加高）；显示时布局把空间还给
-        groupbox（结果区缩短），无需手动干预高度。
+        群系模式只采群系观测，结构模型预览无用武之地——隐藏右侧
+        3D 视口把空间让给精化面板；关闭时恢复显示（模型仍跟随
+        结构下拉，重显即原样）。informationBrowser 为垂直 Expanding：
+        隐藏 refineGroupBox 时自动吃掉让出的空间（结果区加高）；
+        显示时布局把空间还给 groupbox（结果区缩短），无需手动干预。
         """
+        # 3D 视口与精化面板互斥显隐（群系模式=纯群系观测，无结构预览）
+        self._anchor_view.setHidden(checked)
         if checked:
             if not self.refineGroupBox.isVisible():
                 self.refineGroupBox.setVisible(True)
@@ -1234,7 +1418,7 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self._last_candidates = list(candidates)
         self._result_version = self.versionCombo.currentText()
         version = self.versionCombo.currentText()
-        bits = seed_math.calc_info_bits([obs["params"] for obs in self._observations])
+        bits = seed_math.calc_info_bits(list(self._observations))
 
         # 决策点 5A：群系模式开启时自动把候选回填到精化面板
         if self.biomeModeCheckBox.isChecked() and candidates:
@@ -1328,7 +1512,7 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             f"{message}\n"
             "\n"
             "提示：沉船 / 沙漠神殿 / 雪屋 / 女巫小屋 / 丛林神庙等线性结构"
-            "最适合参与逆推；海底神殿、林地府邸、远古城市、前哨站只能"
+            "最适合参与逆推；海底神殿、远古城市、前哨站只能"
             "作为附加验证观测。"
         )
         NotificationWidget.Show(
@@ -1515,14 +1699,14 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
             "1. 在游戏中找到结构（推荐沉船——海滩常见、易辨认）；\n"
             "2. 站在结构旁，按 F3 读出 X/Z 坐标（或按 F3+C 复制）；\n"
             "3. 在上方选择结构类型，粘贴或输入坐标，点「添加」；\n"
-            "4. 重复采集 3~6 个不同结构（不同区域）的坐标；\n"
+            "4. 重复采集 5 个以上结构（不同区域）的坐标；\n"
             "5. 信息量达标后点「计算」，工具将逆推 48 位结构种候选；\n"
             "6. 计算完成自动验证全部候选并显示比对明细；双击种子可复制，\n"
             "   也可点「验证候选种子」对任意 48 位种子做正向比对。\n"
             "\n"
             "关于站位容差：\n"
+            "· 锚点一定在区块的西北角"
             "· 生存模式 F3+C 得到的是玩家站位，不是结构生成锚点；\n"
-            "· 精确模式（容差 0）需要站在锚点方块上，几乎不可用；\n"
             "· 建议容差 2：站位与锚点差 ±2 区块内均可命中；\n"
             "· 容差会降低信息量：村庄/试炼几乎失效，请以小型结构为主。\n"
             "\n"
@@ -1535,7 +1719,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
 
     # ---------- 结果区交互 ----------
     def eventFilter(self, obj, event) -> bool:
-        """双击信息框中的种子 hex → 复制到剪贴板。"""
+        """双击信息框种子 hex 复制。（锚点 3D 视口自带交互，
+        原 label Resize 重绘分支已随平面版移除。）"""
         if (obj is self.informationBrowser
                 and event.type() == QEvent.Type.MouseButtonDblClick):
             cursor = self.informationBrowser.textCursor()
@@ -1549,8 +1734,10 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         return super().eventFilter(obj, event)
 
     def _restore_info_hint(self) -> None:
-        """复制提示超时后恢复信息量提示文本。"""
-        bits = seed_math.calc_info_bits([obs["params"] for obs in self._observations])
+        """复制提示超时后恢复信息量提示文本（与信息条同口径）。"""
+        obs_list = [obs for obs in self._observations
+                    if structure_params.is_reversible(obs["struct_key"])]
+        bits = seed_math.calc_info_bits(obs_list)
         self.infoHintLabel.setText(seed_math.info_hint(bits))
 
     # ---------- 输入校验反馈 ----------
@@ -2182,7 +2369,10 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         在候选间检查（单候选微秒级，随时可停）；精化枚举在候选间与
         高位步进间检查（native 引擎下整轮不到 1 秒）。
         wait(5000) 足够；不使用 terminate（强杀线程会破坏 Qt 状态）。
+        另：停掉 3D 视口的变种轮播 QTimer——退出阶段运行中的
+        QTimer 被析构会 0xC0000409 崩溃（PySide6 已知坑）。
         """
+        self._anchor_view.stop_variant_timer()
         for thread in (self._calc_thread, self._verify_thread, self._refine_thread):
             if thread is None:
                 continue

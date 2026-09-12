@@ -3,7 +3,11 @@
 
 id 依据 cubiomes biomes.h BiomeID 枚举（与 Utils/SeedReverser/biome_names.py
 同源）；配色参考 Amidst/cubiomes mapview 风格并按俯视观感微调。
-覆盖 1.18+ 主世界表层常见群系，未收录 id 兜底灰色，不致渲染失败。
+覆盖 1.18+ 主世界表层、下界五群系与末地五群系常见群系，未收录 id 兜底灰色，不致渲染失败。
+
+中文群系名（悬停/图例）以 Utils/SeedReverser/biome_names.py 的 54 项
+权威对照表为唯一数据源动态生成，与 SeedReverser 显示严格一致；
+其余非自然生成变种与下界/末地为本地兑底表。
 """
 
 # biome id -> (r, g, b)
@@ -20,7 +24,7 @@ BIOME_COLORS: dict[int, tuple[int, int, int]] = {
     47: (64, 112, 210),    # deep_warm_ocean
     48: (56, 102, 200),    # deep_lukewarm_ocean
     49: (52, 92, 195),     # deep_cold_ocean
-    50: (88, 110, 215),    # deep_frozen_ocean 深寒海洋
+    50: (88, 110, 215),    # deep_frozen_ocean 深冻洋
 
     # --- 平原/草原/沼泽 ---
     1: (141, 179, 96),     # plains 平原
@@ -53,12 +57,12 @@ BIOME_COLORS: dict[int, tuple[int, int, int]] = {
     5: (85, 110, 78),      # taiga 针叶林
     19: (79, 102, 73),     # taiga_hills
     133: (82, 106, 76),    # taiga_mountains
-    30: (120, 140, 130),   # snowy_taiga 雪林
+    30: (120, 140, 130),   # snowy_taiga 积雪针叶林
     31: (112, 132, 122),   # snowy_taiga_hills
     158: (108, 128, 118),  # snowy_taiga_mountains
-    32: (91, 115, 88),     # old_growth_pine_taiga 原始松针叶林
+    32: (91, 115, 88),     # old_growth_pine_taiga 原始松木针叶林
     33: (86, 110, 84),     # old_growth_spruce_taiga
-    34: (90, 112, 85),     # windswept_forest 疏林山地
+    34: (90, 112, 85),     # windswept_forest 风袭森林
     12: (164, 175, 190),   # snowy_plains 雪原
     13: (158, 169, 184),   # snowy_mountains
     26: (140, 165, 190),   # snowy_beach 雪滩
@@ -73,7 +77,7 @@ BIOME_COLORS: dict[int, tuple[int, int, int]] = {
     17: (100, 105, 88),    # desert_hills
     25: (120, 120, 120),   # stony_shore 石岸
     177: (108, 152, 88),   # meadow 草甸
-    178: (160, 172, 178),  # grove 雪坡林地
+    178: (160, 172, 178),  # grove 雪林
     179: (200, 210, 220),  # snowy_slopes 雪坡
     180: (225, 232, 240),  # jagged_peaks 尖峭山峰
     181: (215, 224, 235),  # frozen_peaks 冰封山峰
@@ -94,31 +98,67 @@ BIOME_COLORS: dict[int, tuple[int, int, int]] = {
     186: (140, 150, 145),  # pale_garden 苍白之园
     174: (140, 120, 90),   # dripstone_caves
     175: (90, 140, 95),    # lush_caves
+
+    # --- 下界（1.16+，getNetherBiome 五群系）---
+    8: (90, 45, 45),       # nether_wastes 下界荒地
+    170: (91, 67, 52),     # soul_sand_valley 灵魂沙峡谷
+    171: (112, 30, 30),    # crimson_forest 绯红森林
+    172: (45, 110, 95),    # warped_forest 诡异森林
+    173: (72, 66, 78),     # basalt_deltas 玄武岩三角洲
+
+    # --- 末地（the_end 中心岛 + 外围小岛/内陆/高地/荒芜边缘）---
+    # 游戏语义：chunk 级 25x25 邻域无小岛场 → small_end_islands，
+    # 实际渲染为虚空（F3 在虚空处显示该群系）；4 方块/像素下小岛
+    # 本身近乎不可见，画深色才能与外岛群系形成主岛+虚空+外岛结构
+    9: (222, 222, 165),    # the_end 末地
+    40: (12, 12, 20),      # small_end_islands → 虚空底色（近似黑）
+    41: (214, 214, 155),   # end_midlands 末地内陆
+    42: (226, 226, 172),   # end_highlands 末地高地
+    43: (204, 204, 150),   # end_barrens 末地荒芜之地
 }
 
 # 未收录 id 的兜底色（灰）
 FALLBACK_COLOR = (128, 128, 128)
 
-# id -> 中文群系名（悬停信息条/图例用）
-BIOME_CN_NAMES: dict[int, str] = {
-    0: "海洋", 1: "平原", 2: "沙漠", 3: "风袭丘陵", 4: "森林", 5: "针叶林",
-    6: "沼泽", 7: "河流", 10: "冻洋", 11: "冻河", 12: "雪原", 13: "雪山",
-    14: "蘑菇岛", 15: "蘑菇岛岸", 16: "海滩", 17: "沙漠丘陵", 18: "山地森林",
-    19: "针叶林丘陵", 20: "山地边缘", 21: "丛林", 22: "丛林丘陵", 23: "稀疏丛林",
-    24: "深海", 25: "石岸", 26: "雪滩", 27: "桦木森林", 28: "桦木森林丘陵",
-    29: "黑森林", 30: "雪林", 31: "雪林丘陵", 32: "原始松针叶林",
-    33: "原始云杉针叶林", 34: "疏林山地", 35: "热带草原", 36: "热带高原",
-    37: "恶地", 38: "繁茂恶地", 39: "恶地高原", 44: "暖水海洋",
-    45: "温水海洋", 46: "冷水海洋", 47: "深暖水海洋", 48: "深温水海洋",
-    49: "深冷水海洋", 50: "深寒海洋", 129: "向日葵平原", 130: "沙漠湖泊",
-    131: "风袭砾质丘陵", 132: "繁花森林", 133: "针叶林山地", 134: "沼泽丘陵",
-    140: "冰刺之地", 155: "原始桦木森林", 156: "高大桦木丘陵", 157: "黑森林丘陵",
-    158: "雪林山地", 163: "风袭热带草原", 164: "风袭热带草原高原",
-    165: "被风蚀的恶地", 168: "竹林", 169: "竹林丘陵", 174: "溶洞",
-    175: "繁茂洞穴", 177: "草甸", 178: "雪坡林地", 179: "雪坡",
-    180: "尖峭山峰", 181: "冰封山峰", 182: "裸岩山峰", 183: "深暗之域",
-    184: "红树林沼泽", 185: "樱花树林", 186: "苍白之园",
+# id -> 中文群系名兑底表（悬停信息条/图例用）。
+# 主世界 1.18+ 自然生成 54 项由 SeedReverser 权威表动态生成（见下方
+# _build_biome_cn_names）；本表只收录其余 id：1.18+ 不再自然生成的
+# 主世界变种、下界/末地群系。译名风格与 MapPreviewer 群系下拉
+# （task_MapPreviewer.DIM_BIOME_TABLES）一致；33/160 修正：
+# 33 是原始松木针叶林的丘陵变种，160 才是原始云杉针叶林本体。
+_BASE_CN_NAMES: dict[int, str] = {
+    8: "下界荒地", 9: "末地",
+    13: "雪山", 15: "蘑菇岛岸", 17: "沙漠丘陵", 18: "繁茂丘陵",
+    19: "针叶林丘陵", 20: "山地边缘", 22: "丛林丘陵",
+    28: "桦木森林丘陵", 31: "积雪针叶林丘陵", 33: "原始松木针叶林丘陵",
+    39: "恶地高原", 47: "深暖水海洋",
+    130: "沙漠湖泊", 133: "针叶林山地", 134: "沼泽丘陵",
+    156: "高大桦木丘陵", 157: "繁茂黑森林", 158: "积雪针叶林山地",
+    161: "原始云杉针叶林丘陵", 164: "风袭热带草原高原",
+    169: "竹林丘陵",
+    40: "末地小型岛屿", 41: "末地中部高地", 42: "末地高地",
+    43: "末地荒地",
+    170: "灵魂沙峡谷", 171: "绯红森林", 172: "诡异森林",
+    173: "玄武岩三角洲",
 }
+
+
+def _build_biome_cn_names() -> dict[int, str]:
+    """兑底表 + SeedReverser 权威 54 项（id→中文前缀）合并。
+    权威表导入失败时仅用兑底表，悬停不致报错。"""
+    names: dict[int, str] = dict(_BASE_CN_NAMES)
+    try:
+        from Utils.SeedReverser.biome_names import BIOME_CHOICES, resolve_biome
+        for label, _key in BIOME_CHOICES:
+            bid = resolve_biome(label)
+            if bid is not None:
+                names[int(bid)] = label.split(" ")[0]
+    except Exception:
+        pass
+    return names
+
+
+BIOME_CN_NAMES: dict[int, str] = _build_biome_cn_names()
 
 
 def biome_color(bid: int) -> tuple[int, int, int]:
@@ -127,5 +167,5 @@ def biome_color(bid: int) -> tuple[int, int, int]:
 
 
 def biome_cn_name(bid: int) -> str:
-    """biome id → 中文群系名，未知返回 id=N。"""
+    """biome id → 中文群系名（SeedReverser 权威名优先），未知返回 id=N。"""
     return BIOME_CN_NAMES.get(bid, f"id={bid}")
