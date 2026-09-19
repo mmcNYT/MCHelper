@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import sys
 import time
 
 import numpy as np
@@ -113,7 +114,7 @@ def refine_world_seeds(
         可选 {"y": 方块Y}（F3 所示脚下高度）。坐标为方块坐标，内部 >>2
         换算为噪声坐标（与游戏 F3 群系显示一致）；缺 y 按深层噪声层 y=0。
     version_key : str
-        版本键（"1.18"/"1.19"/"1.20"/"1.21"），决定 btree 表与气候参数。
+        版本键（"26.2"/"1.21.11"/"1.21"），决定 btree 表与气候参数。
     on_progress : callable(done, total, msg) | None
         进度回调，done/total 为已枚举高位候选数；节流为每 64 步一次，另有
         候选切换、开始与结束时的即时回调。
@@ -202,8 +203,11 @@ def refine_world_seeds(
                 },
                 "cancelled": was_cancelled,
             }
-        except Exception:
-            pass  # native 异常 → 落到纯 Python 路径
+        except Exception as e:
+            # native 失败（未知 btree/数据异常等）→ 降级纯 Python；
+            # 原先静默吞掉会让"极慢"无从排查，此处留一行诊断
+            print(f"[refine] native 路径失败，降级纯 Python：{e!r}",
+                  file=sys.stderr)
 
     # 开始回调
     if on_progress is not None:

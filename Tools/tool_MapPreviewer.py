@@ -67,7 +67,7 @@ from Utils.MapPreviewer import structure_icons as st_icons
 from Utils.MapPreviewer.biome_colors import biome_cn_name
 from Utils.MapPreviewer.choose_structure import ChooseStructureWindow
 from Utils.MapPreviewer.structure_map import available_structures
-from Utils.SeedReverser import biome_names
+from Utils.SeedReverser import biome_names, structure_params
 from Utils.SeedReverser.structure_params import DIMENSION_NAMES, STRUCT_NAMES
 
 # 会话文件名（用户配置目录下）
@@ -323,9 +323,10 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._scan_timer.setInterval(180)
         self._scan_timer.timeout.connect(self._ensure_structure_scan)
 
-        # 版本下拉默认 1.21（UI 已置项，代码再兜底一次）
-        if self.comboVersion.currentIndex() < 0:
-            self.comboVersion.setCurrentIndex(0)
+        # 版本下拉：收敛为 26.2/1.21.11/1.21（.ui 内旧占位项运行时清空；
+        # 会话恢复可覆盖）
+        self.comboVersion.clear()
+        self.comboVersion.addItems(structure_params.VERSION_KEYS)
         # 视野半径默认 2048（下拉仅剩 2048/4096 两档）
         self.comboRadius.setCurrentIndex(0)
         # 维度下拉默认主世界（UI 已置三项：主世界/下界/末地）

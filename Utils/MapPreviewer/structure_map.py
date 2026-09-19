@@ -50,7 +50,8 @@ import numpy as np
 from Utils.SeedReverser import mc_random
 from Utils.SeedReverser import structure_params
 from Utils.SeedReverser.structure_math import get_structure_pos
-from Utils.SeedReverser.biome_noise import BiomeSampler, Xoroshiro
+from Utils.SeedReverser.biome_noise import (
+    BiomeSampler, Xoroshiro, climate_to_biome_dat)
 from Utils.MapPreviewer.nether_end_sampler import (
     BASALT_DELTAS,
     CRIMSON_FOREST,
@@ -114,6 +115,9 @@ DEEP_DARK = 183
 OLD_GROWTH_BIRCH_FOREST = 155
 DARK_FOREST_HILLS = 157
 CHERRY_GROVE = 185
+PALE_GARDEN = 186
+# 26.2 硫磺洞穴：MCHelper 封闭系统自定 id（biome_noise.BIOME_ID 同源）
+SULFUR_CAVES = 187
 
 # biomes.c isOceanic / isDeepOcean
 _OCEANIC = {OCEAN, FROZEN_OCEAN, WARM_OCEAN, LUKEWARM_OCEAN, COLD_OCEAN,
@@ -159,7 +163,7 @@ _PREVIEW_ORDER = ("village", "pillager_outpost", "desert_pyramid",
                   "desert_well",
                   # 下界/末地扩展结构（1.16+ / 1.9+；仅对应维度可选）
                   "nether_fortress", "bastion_remnant", "end_city")
-_VERSION_NUM = {"1.18": 118, "1.19": 119, "1.20": 120, "1.21": 121}
+_VERSION_NUM = {"1.21": 121, "1.21.11": 1211, "26.2": 262}
 
 # finders.c isViableFeatureBiome 下界/末地白名单（L1287-1299）
 _NETHER_FORTRESS_BIOMES = {NETHER_WASTES, SOUL_SAND_VALLEY, WARPED_FOREST,
@@ -562,72 +566,61 @@ def _stronghold_valid_sets() -> tuple[set[int], set[int]]:
     """
     excluded = (_OCEANIC
                 | {RIVER, FROZEN_RIVER, BEACH, SNOWY_BEACH,
-                   STONE_SHORE, MANGROVE_SWAMP, DEEP_DARK})
+                   STONE_SHORE, MANGROVE_SWAMP, DEEP_DARK, PALE_GARDEN,
+                   SULFUR_CAVES})
     return excluded, excluded        # (validB 集合, validM 集合)：同语义
 
 
 class _StrongholdWinSampler:
     """要塞 locateBiome 窗口批量采样器（性能层）。
 
-    native 优先：sample_map 一次出 (2r+1)x(2r+1) 群系矩阵（多线程）；
-    native 不可用时逐点 Python 采样。两者与 rng 流无关，顺序消耗
-    在 StrongholdIter 侧。
+    **必须走 Python 带链逐点采样**（MC-241546）：xp locateBiome 的
+    climateToBiome 共享 dat 链（上一格搜索终点作下一格起点），候选
+    分歧时窗口边缘个别格的群系 id 与无链采样不同——要塞窗口位于
+    海洋边缘、候选格极少，水库采样会放大这种差异，导致枚举锚点
+    与真实游戏漂移（对拍 probe_sh 已复现）。native sample_map 无
+    链语义，此处禁用；与 rng 流无关的顺序消耗仍在 StrongholdIter。
     """
 
     def __init__(self, seed: int, version_key: str):
-        self._seed = seed & _MASK64
-        self._ext = None
-        try:
-            from Utils.MapPreviewer._native import _map_sampler as ext
-            from Utils.MapPreviewer.map_sampler import (
-                _NATIVE_BTREES, _ensure_native_btree)
-            self._ext = ext
-            self._ensure_btree = _ensure_native_btree
-            self._native_ready = _NATIVE_BTREES
-        except Exception:
-            self._ext = None
         self._py = BiomeSampler(seed, version_key)
-        self._version_key = version_key
+        self._btree = self._py._btree
+        self._dat = 0
 
     def window_ids(self, cx: int, cz: int, radius: int) -> np.ndarray:
         """返回 (2r+1, 2r+1) int32 群系矩阵，覆盖噪声格
-        [cx-r, cx+r] x [cz-r, cz+r]（噪声格 y=0）。"""
+        [cx-r, cx+r] x [cz-r, cz+r]（噪声格 y=0）。
+
+        扫描顺序 = xp locateBiome（j=z 外层、i=x 内层）；每个窗口
+        开始重置链（xp 每次调用 locateBiome 都是新窗口）。"""
         r = radius
         n = 2 * r + 1
-        if self._ext is not None:
-            try:
-                from Utils.MapPreviewer.biome_noise import VERSION_TO_BTREE
-            except Exception:
-                pass
-            try:
-                from Utils.SeedReverser.biome_noise import VERSION_TO_BTREE
-                self._ensure_btree(VERSION_TO_BTREE[self._version_key])
-                res = self._ext.sample_map(
-                    self._seed, VERSION_TO_BTREE[self._version_key],
-                    cx - r, cz - r, n, n, 0)
-                if not res.get("cancelled", False):
-                    return np.asarray(res["biomes"], dtype=np.int32)
-            except Exception:
-                self._ext = None        # 降级后不再重试
         ids = np.empty((n, n), dtype=np.int32)
-        at = self._py.biome_at
+        cp = self._py.climate_point_xz
+        bt = self._btree
+        c2b = climate_to_biome_dat
+        self._dat = 0
         for j in range(n):
             row = ids[j]
+            zz = cz - r + j
             for i in range(n):
-                row[i] = at(cx - r + i, 0, cz - r + j)
+                idx, self._dat = c2b(cp(cx - r + i, zz), bt, self._dat)
+                row[i] = (int(bt.nodes[idx]) >> 48) & 0xFF
         return ids
 
 
 class StrongholdIter:
     """cubiomes StrongholdIter 的 1.18~1.21 移植（finders.c L834-936）。
 
-    版本分界：mc > MC_1_19_2（即 1.19.3+，对应 MCHelper "1.19.3"+，
-    项目版本线 1.20/1.21）locateBiome 用独立 lbr 流（rnds 只消耗
-    nextLong 一次）；btree19 = 1.19~1.19.2 线与 1.18 → 共享 rnds。
+    版本分支：1.19.3+ 环位**不做群系采样**，pos = approx 对齐 16 格
+    （finders.c nextStronghold 的 NULL 快路径；Java 1.19.3 起群系
+    校验移至 piece 生成期）；≤1.19.2 线 locateBiome 全窗口扫描、
+    共享 rnds 流。版本线收敛（26.2/1.21.11/1.21）后恒走 1.19.3+
+    快路径（_shared_rng_stream 恒 False，保留判断供旧键兼容）。
     """
 
     def __init__(self, world_seed: int, version_key: str,
-                 win_sampler: _StrongholdWinSampler):
+                 win_sampler: "_StrongholdWinSampler | None" = None):
         s48 = world_seed & _MASK48
         self._win = win_sampler
         self._excluded, _ = _stronghold_valid_sets()
@@ -649,19 +642,16 @@ class StrongholdIter:
         self._rnds = rnds
 
     def _locate_biome(self, ax: int, az: int) -> tuple[int, int]:
-        """locateBiome 1.18+（finders.c L650-675）+ rng 流消耗语义。
+        """locateBiome 1.18+（finders.c L650-675，共享 rnds 流语义）。
 
-        共享流（1.18/1.19.2 线）：nextInt 消耗 rnds 并回写；独立流
-        （1.19.3+）：lbr = setSeed(nextLong(rnds))，nextInt 消耗 lbr。
+        仅 1.18/1.19（≤1.19.2 共享流线）使用；1.19.3+ 环位不采样
+        （见 next()）。窗口内 climateToBiome 走 dat 共享链
+        （MC-241546，与 xp sampleBiomeNoise(&dat) 一致）。
         """
-        if self._shared_rng_stream:
-            rng = self._rnds
-        else:
-            nl, self._rnds = _java_next_long(self._rnds)
-            rng = mc_random.set_seed(nl)
         out_x, out_z = ax, az
         x, z, r = ax >> 2, az >> 2, 112 >> 2
         ids = self._win.window_ids(x, z, r)
+        rng = self._rnds
         found = 0
         excluded = self._excluded
         for j in range(2 * r + 1):
@@ -678,16 +668,27 @@ class StrongholdIter:
                 if val == 0:
                     out_x, out_z = (x + i - r) * 4, bj * 4
                 found += 1
-        if self._shared_rng_stream:
-            self._rnds = rng
+        self._rnds = rng
         return out_x, out_z
 
     def next(self) -> bool:
         """nextStronghold 主流程（finders.c L868-936）：定位 → 修正 →
-        推进近似坐标。返回 False 表示 128 个已全部产生。"""
+        推进近似坐标。返回 False 表示 128 个已全部产生。
+
+        版本分支（与 xp 对齐）：
+        - 1.19.3+（>1.19.2 线）：环位**不做群系采样**——消耗一次
+          nextLong（等价原 lbr 播种）后 pos = approx 对齐 ((x&~15)+4,
+          (z&~15)+4)（Java 1.19.3 起要塞定位改纯 RNG 环 + 群系校验
+          移到 piece 生成期，cubiomes 走 NULL 快路径）；
+        - 1.18/1.19（≤1.19.2）：locateBiome 全窗口扫描（共享 rnds 流）。
+        """
         if self.index >= 128:
             return False
-        px, pz = self._locate_biome(*self.nextapprox)
+        if self._shared_rng_stream:
+            px, pz = self._locate_biome(*self.nextapprox)
+        else:
+            _nl, self._rnds = _java_next_long(self._rnds)
+            px, pz = self.nextapprox
         self.pos = ((px & ~15) + 4, (pz & ~15) + 4)
         self.ringidx += 1
         self.angle += 2.0 * math.pi / self.ringmax
@@ -935,14 +936,15 @@ def _enum_strongholds(
 ) -> None:
     """要塞：StrongholdIter 全序扫 128 窗（共享流版本不可跳窗）。
 
-    共享流版本（1.18/1.19.2 线）的 locateBiome 水库采样消耗依赖
-    于窗口内容，跳窗会改变后续流状态，必须全序。性能上用
-    _StrongholdWinSampler（native 批量窗采样）+ dist 单调递增
-    提前终止；1.19.3+ 独立流理论上可跳，但保持同一实现简单可靠。
+    1.19.3+ 环位纯 RNG（每步仅一次 nextLong），pos=approx 对齐；
+    共享流版本（1.18/1.19）的 locateBiome 水库采样消耗依赖于窗口
+    内容，跳窗会改变后续流状态，必须全序。dist 单调递增做提前终止。
     """
     min_bx, min_bz, max_bx, max_bz = viewport
     margin = 96
-    win = _StrongholdWinSampler(ws, version_key)
+    # 窗口采样器仅共享流版本（1.18/1.19）需要；1.19.3+ 环位不采样
+    shared = version_key in ("1.18", "1.19")
+    win = _StrongholdWinSampler(ws, version_key) if shared else None
     it = StrongholdIter(ws, version_key, win)
     # 终止条件：当前近似点超过视野外扩范围（dist 单调递增，
     # 近似点距原点随环号递增，一超过即可停）

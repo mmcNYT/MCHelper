@@ -441,7 +441,7 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self._anchor_preview_key = None
         self._anchor_preview_size = None
 
-        # 版本下拉（1.21 默认）
+        # 版本下拉（VERSION_KEYS = 26.2/1.21.11/1.21 新到旧；会话恢复可覆盖）
         self.versionCombo.addItems(structure_params.VERSION_KEYS)
         self.versionCombo.setCurrentIndex(0)
 
@@ -2275,7 +2275,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
 
         # 全局选项（版本切换会刷新结构下拉，须在恢复观测前执行）
         version = data.get("version")
-        if version in structure_params.VERSION_KEYS:
+        if isinstance(version, str) and \
+                self.versionCombo.findText(version) >= 0:
             self.versionCombo.setCurrentText(version)
 
         # 结构观测：逐条独立校验，坏条目跳过不阻止其余恢复。
@@ -2300,7 +2301,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
                 if isinstance(s, int) and 0 <= s < (1 << 48)
             ]
         rv = data.get("result_version")
-        if rv in structure_params.VERSION_KEYS:
+        if isinstance(rv, str) and \
+                self.versionCombo.findText(rv) >= 0:
             self._result_version = rv
 
         # 群系观测（biome_id 只存数字，显示时由 biome_label 反查）

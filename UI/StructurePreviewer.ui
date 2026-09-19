@@ -22,7 +22,7 @@
      <height>801</height>
     </rect>
    </property>
-   <layout class="QGridLayout" name="gridLayout" columnstretch="1,2,2,2,2,2,2,2,7,8">
+   <layout class="QGridLayout" name="gridLayout" rowstretch="0,1,1,1,2,0" columnstretch="1,2,2,2,2,2,2,2,7,8">
     <item row="0" column="0">
      <widget class="QLabel" name="visionLabel">
       <property name="text">
@@ -134,24 +134,10 @@
       </widget>
      </widget>
     </item>
-    <item row="5" column="0" colspan="2">
-     <widget class="QLabel" name="hintLabel">
-      <property name="text">
-       <string/>
-      </property>
-     </widget>
-    </item>
     <item row="5" column="9">
      <widget class="QLabel" name="snapshotLabel">
       <property name="text">
        <string/>
-      </property>
-     </widget>
-    </item>
-    <item row="5" column="2" colspan="6">
-     <widget class="QProgressBar" name="progressBar">
-      <property name="value">
-       <number>24</number>
       </property>
      </widget>
     </item>
@@ -191,6 +177,44 @@
       </property>
       <property name="text">
        <string>预览</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="5">
+     <widget class="QPushButton" name="pasteBtn">
+      <property name="text">
+       <string>粘贴F3+C</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="3" colspan="6">
+     <widget class="QProgressBar" name="progressBar">
+      <property name="value">
+       <number>24</number>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="0" colspan="3">
+     <widget class="QLabel" name="hintLabel">
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="9">
+     <widget class="QSlider" name="lensSensitivitySlider">
+      <property name="orientation">
+       <enum>Qt::Orientation::Horizontal</enum>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="8">
+     <widget class="QLabel" name="lensSensitivityLabel">
+      <property name="text">
+       <string>镜头灵敏度</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
       </property>
      </widget>
     </item>

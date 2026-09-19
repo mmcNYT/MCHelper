@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 
 import numpy as np
@@ -82,7 +83,7 @@ def sample_region(
 
     Args:
         seed: 世界种子（有符号 int64，内部按无符号 64 位处理）。
-        version_key: 版本键 "1.18"~"1.21"。
+        version_key: 版本键 "26.2"/"1.21.11"/"1.21"。
         cx_blocks/cz_blocks: 区域中心（方块坐标）。
         width_blocks/height_blocks: 区域宽高（方块，内部对齐 4 的倍数）。
         ny: 采样层（噪声格 y）。
@@ -163,9 +164,11 @@ def sample_region(
                 out["temp"] = np.asarray(res["temp"], dtype=np.int32)
                 out["humid"] = np.asarray(res["humid"], dtype=np.int32)
             return out
-        except Exception:
-            # native 失败（btree 未初始化、内存不足等）→ 降级纯 Python
-            pass
+        except Exception as e:
+            # native 失败（btree 未初始化、内存不足等）→ 降级纯 Python；
+            # 留一行诊断，避免静默变慢无从排查
+            print(f"[map_sampler] native 路径失败，降级纯 Python：{e!r}",
+                  file=sys.stderr)
 
     # ---- 纯 Python 路径（位级一致的兜底）----
     sampler = BiomeSampler(seed, version_key)

@@ -32,26 +32,22 @@ SeedReverser 逆推 UI 已下架该结构（锚点定位误差过大，无计算
 _VERSION_STRUCTS 各版本均不再收录。
 """
 
-# 版本键（与 UI versionCombo 对应）
-VERSION_KEYS = ("1.21", "1.20", "1.19", "1.18")
+# 版本键（与 UI versionCombo 对应；按新到旧排序）
+VERSION_KEYS = ("26.2", "1.21.11", "1.21")
 
 # 版本键 → 主版本号（用于结构可用性过滤）
-_VERSION_NUM = {"1.18": 118, "1.19": 119, "1.20": 120, "1.21": 121}
+_VERSION_NUM = {"1.21": 121, "1.21.11": 1211, "26.2": 262}
 
 # 每个版本可用的结构键（按 UI 易找程度排序）
+# 26.2：结构与 1.21 完全一致（数据包 101.2 仅新增硫磺洞穴群系）；
+# 1.21.11：1.21.x 线修正版，结构集与 1.21 一致
+_STRUCTS_121 = ("shipwreck", "desert_pyramid", "igloo", "swamp_hut",
+                "jungle_temple", "village", "ocean_ruin", "monument",
+                "trial_chambers", "ruined_portal")
 _VERSION_STRUCTS = {
-    "1.21": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "trial_chambers",
-             "ruined_portal"),
-    "1.20": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "trail_ruins",
-             "ruined_portal"),
-    "1.19": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument", "ancient_city",
-             "ruined_portal"),
-    "1.18": ("shipwreck", "desert_pyramid", "igloo", "swamp_hut", "jungle_temple",
-             "village", "ocean_ruin", "monument",
-             "ruined_portal"),
+    "26.2": _STRUCTS_121,
+    "1.21.11": _STRUCTS_121,
+    "1.21": _STRUCTS_121,
 }
 
 # 结构显示名（UI 用）
@@ -188,7 +184,7 @@ def get_params(struct_key: str, version_key: str) -> dict:
 
     Args:
         struct_key: 结构键（STRUCT_PARAMS 的键）。
-        version_key: 版本键（"1.18"/"1.19"/"1.20"/"1.21"）。
+        version_key: 版本键（"26.2"/"1.21.11"/"1.21"）。
 
     Returns:
         dict：key / name / salt / region_size / chunk_range / scatter /

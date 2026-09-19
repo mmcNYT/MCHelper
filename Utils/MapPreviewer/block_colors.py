@@ -88,6 +88,7 @@ _CAVE_LUSH_RGB = np.array([136, 118, 82], dtype=np.float32)
 _CAVE_MOSS = np.array([100, 138, 70], dtype=np.float32)
 _CAVE_DRIPSTONE = np.array([150, 132, 106], dtype=np.float32)
 _CAVE_DEEPDARK = np.array([42, 46, 58], dtype=np.float32)
+_CAVE_SULFUR = np.array([168, 138, 60], dtype=np.float32)   # 26.2 硫磺洞穴，红黄暖色（与 biome_colors 同源）
 _SCULK_SPECK = np.array([96, 150, 170], dtype=np.float32)
 
 # 水色锚点：参考风格的低饱和柔和灰蓝（非原版亮蓝，避免与暖色
@@ -207,7 +208,7 @@ def _build_luts():
                   + _BADLAND_IDS + _SWAMP_IDS + _MUSHROOM_IDS):
         dirt[group] = 0.0
     dirt[6] = dirt[134] = dirt[184] = 0.0   # 沼泽自绘水洼
-    dirt[174] = dirt[175] = dirt[183] = 0.0  # 洞穴群系自绘
+    dirt[174] = dirt[175] = dirt[183] = dirt[187] = 0.0  # 洞穴群系自绘
 
     # 石面草 patch 概率（风袭丘陵/疏林山地：灰绿混杂）
     grass_patch = np.zeros(256, dtype=np.float32)
@@ -380,6 +381,7 @@ def _cell_base(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     base[bid == 174] = _CAVE_LUSH_RGB
     base[bid == 175] = _CAVE_DRIPSTONE
     base[bid == 183] = _CAVE_DEEPDARK
+    base[bid == 187] = _CAVE_SULFUR
 
     is_grass = cat == _CAT_GRASS
     uncovered = ~(is_water | is_grass | is_snow | is_sand | is_stone

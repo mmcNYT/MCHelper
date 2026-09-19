@@ -585,7 +585,7 @@ struct BTreeStore {
     std::vector<u64> nodes;
 };
 
-static BTreeStore g_btrees[5];   // 0=btree18 1=btree192 2=btree19 3=btree20 4=btree21wd
+static BTreeStore g_btrees[6];   // 0=btree18 1=btree192 2=btree19 3=btree20 4=btree21wd 5=btree262
 
 struct BTreeC {
     int order;
@@ -654,6 +654,7 @@ static int btree_slot(const std::string& name) {
     if (name == "btree19") return 2;
     if (name == "btree20") return 3;
     if (name == "btree21wd") return 4;
+    if (name == "btree262") return 5;
     return -1;
 }
 

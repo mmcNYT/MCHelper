@@ -35,12 +35,12 @@ import numpy as np
 # ======================================================================
 
 # MCHelper 版本键 -> cubiomes btree（climateToBiome 的版本分界：
-# >=1.21_WD -> 21wd；>=1.20_6 -> 20；>=1.19_4 -> 19；>=1.19_2 -> 192；else 18）
+# >=1.21_WD -> 21wd；版本线收敛为 26.2 / 1.21.11 / 1.21 三档；
+# npz 内 btree18/19/20 数据保留供 native 槽表加载，Python 层不再引用）
 VERSION_TO_BTREE = {
-    "1.18": "btree18",
-    "1.19": "btree19",   # MCHelper 参数线不区分 1.19.2 / 1.19.4
-    "1.20": "btree20",
     "1.21": "btree21wd",
+    "1.21.11": "btree21wd",  # 1.21.x 线共用 21wd 群系树（MapPreviewer 坐标地图版本键）
+    "26.2": "btree262",  # 26.2 混沌更新：仅新增硫磺洞穴群系，其余继承 21wd
 }
 
 _BTREE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -79,7 +79,8 @@ def get_btree(version_key: str) -> BTree:
     try:
         return _load_btree(VERSION_TO_BTREE[version_key])
     except KeyError:
-        raise ValueError(f"版本 {version_key} 不支持群系精化（仅 1.18~1.21+）")
+        raise ValueError(f"版本 {version_key} 不支持群系精化"
+                         f"（仅 {' / '.join(VERSION_TO_BTREE)}）")
 
 
 # ======================================================================
@@ -809,6 +810,25 @@ def climate_to_biome(np6, bt: BTree) -> int:
     return (int(bt.nodes[idx]) >> 48) & 0xFF
 
 
+def climate_to_biome_dat(np6, bt: BTree, dat: int) -> tuple[int, int]:
+    """biomenoise.c climateToBiome 的 dat 共享路径（MC-241546）。
+
+    alt = 上一次搜索的终点节点（跨格传递）；ds 以 alt 节点距离
+    初始化（剪枝下界），搜索结果与新 ds 回写给调用方链式传递。
+
+    Args:
+        np6: 6 参数量化值。
+        bt: 版本 btree。
+        dat: 上一次 climateToBiome 的返回节点 idx（首个调用传 0）。
+
+    Returns:
+        (idx, dat)：idx 为节点（>>48 为群系 id），dat 为新链状态。
+    """
+    ds = _get_np_dist(np6, bt, dat)
+    idx = _resulting_node(np6, bt, 0, dat, ds, 0)
+    return idx, idx
+
+
 # ======================================================================
 # 群系 id / 名称表（biomes.h BiomeID；1.18+ 主世界 1:4 可出现集合）
 # ======================================================================
@@ -836,6 +856,8 @@ BIOME_ID = {
     "jagged_peaks": 180, "frozen_peaks": 181, "stony_peaks": 182,
     "deep_dark": 183, "mangrove_swamp": 184, "cherry_grove": 185,
     "pale_garden": 186,
+    # 26.2 硫磺洞穴：官方 187 被其他 id 占用，MCHelper 封闭系统自定（btree262 叶编码↔此表自洽）
+    "sulfur_caves": 187,
 }
 
 BIOME_NAME_ZH = {
@@ -864,6 +886,7 @@ BIOME_NAME_ZH = {
     "frozen_peaks": "冰封山峰", "stony_peaks": "裸岩山峰",
     "deep_dark": "深暗之域", "mangrove_swamp": "红树林沼泽",
     "cherry_grove": "樱花树林", "pale_garden": "苍白花园",
+    "sulfur_caves": "硫磺洞穴",
 }
 
 # F3 调试屏显示名 -> 内部键（别名归一）

@@ -17,8 +17,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QComboBox, QGridLayout, QGroupBox,
     QHeaderView, QLabel, QLineEdit, QProgressBar,
-    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
-    QWidget)
+    QPushButton, QSizePolicy, QSlider, QTreeWidget,
+    QTreeWidgetItem, QWidget)
 
 class Ui_structurePreviewer(object):
     def setupUi(self, structurePreviewer):
@@ -102,21 +102,10 @@ class Ui_structurePreviewer(object):
 
         self.gridLayout.addWidget(self.chestsGroupBox, 4, 9, 1, 1)
 
-        self.hintLabel = QLabel(self.layoutWidget)
-        self.hintLabel.setObjectName(u"hintLabel")
-
-        self.gridLayout.addWidget(self.hintLabel, 5, 0, 1, 2)
-
         self.snapshotLabel = QLabel(self.layoutWidget)
         self.snapshotLabel.setObjectName(u"snapshotLabel")
 
         self.gridLayout.addWidget(self.snapshotLabel, 5, 9, 1, 1)
-
-        self.progressBar = QProgressBar(self.layoutWidget)
-        self.progressBar.setObjectName(u"progressBar")
-        self.progressBar.setValue(24)
-
-        self.gridLayout.addWidget(self.progressBar, 5, 2, 1, 6)
 
         self.viewportPlaceholder = QLabel(self.layoutWidget)
         self.viewportPlaceholder.setObjectName(u"viewportPlaceholder")
@@ -144,6 +133,38 @@ class Ui_structurePreviewer(object):
 
         self.gridLayout.addWidget(self.btnPreview, 1, 7, 1, 1)
 
+        self.pasteBtn = QPushButton(self.layoutWidget)
+        self.pasteBtn.setObjectName(u"pasteBtn")
+
+        self.gridLayout.addWidget(self.pasteBtn, 1, 5, 1, 1)
+
+        self.progressBar = QProgressBar(self.layoutWidget)
+        self.progressBar.setObjectName(u"progressBar")
+        self.progressBar.setValue(24)
+
+        self.gridLayout.addWidget(self.progressBar, 5, 3, 1, 6)
+
+        self.hintLabel = QLabel(self.layoutWidget)
+        self.hintLabel.setObjectName(u"hintLabel")
+
+        self.gridLayout.addWidget(self.hintLabel, 5, 0, 1, 3)
+
+        self.lensSensitivitySlider = QSlider(self.layoutWidget)
+        self.lensSensitivitySlider.setObjectName(u"lensSensitivitySlider")
+        self.lensSensitivitySlider.setOrientation(Qt.Orientation.Horizontal)
+
+        self.gridLayout.addWidget(self.lensSensitivitySlider, 1, 9, 1, 1)
+
+        self.lensSensitivityLabel = QLabel(self.layoutWidget)
+        self.lensSensitivityLabel.setObjectName(u"lensSensitivityLabel")
+        self.lensSensitivityLabel.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout.addWidget(self.lensSensitivityLabel, 1, 8, 1, 1)
+
+        self.gridLayout.setRowStretch(1, 1)
+        self.gridLayout.setRowStretch(2, 1)
+        self.gridLayout.setRowStretch(3, 1)
+        self.gridLayout.setRowStretch(4, 2)
         self.gridLayout.setColumnStretch(0, 1)
         self.gridLayout.setColumnStretch(1, 2)
         self.gridLayout.setColumnStretch(2, 2)
@@ -170,10 +191,12 @@ class Ui_structurePreviewer(object):
         self.infoLabel.setText("")
         self.locateGroupBox.setTitle(QCoreApplication.translate("structurePreviewer", u"\u9644\u8fd1\u7684\u5b9e\u4f8b", None))
         self.chestsGroupBox.setTitle(QCoreApplication.translate("structurePreviewer", u"\u7bb1\u5b50\u4e0e\u6218\u5229\u54c1", None))
-        self.hintLabel.setText("")
         self.snapshotLabel.setText("")
         self.viewportPlaceholder.setText("")
         self.coordXEdit.setPlaceholderText(QCoreApplication.translate("structurePreviewer", u"X", None))
         self.btnPreview.setText(QCoreApplication.translate("structurePreviewer", u"\u9884\u89c8", None))
+        self.pasteBtn.setText(QCoreApplication.translate("structurePreviewer", u"\u7c98\u8d34F3+C", None))
+        self.hintLabel.setText("")
+        self.lensSensitivityLabel.setText(QCoreApplication.translate("structurePreviewer", u"\u955c\u5934\u7075\u654f\u5ea6", None))
     # retranslateUi
 

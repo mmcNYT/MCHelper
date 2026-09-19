@@ -33,32 +33,26 @@ _M64 = (1 << 64) - 1
 # 版本时代（对应 C 的 MCVersion 相对比较，只需序不需具体值）
 # ---------------------------------------------------------------------------
 
+# 版本时代（对应 C 的 MCVersion 相对比较，只需序不需具体值）。
+# 版本线收敛为 26.2 / 1.21.11 / 1.21；其余 era 常量/区间保留供
+# 快照档位自包含解析（分档快照用档位自己的 era 烘焙）。
 E_1_13 = 0
 E_1_14 = 1      # 1.14 ~ 1.20（get_applicable 的 ORDER_V1_14 区间）
 E_1_21 = 2      # 1.21 ~ 1.21.8（ORDER_V1_21）
 E_1_21_9 = 3    # enchant_randomly 默认改走 tag 的分界
 E_1_21_11 = 4   # ORDER_V1_21_11（+lunge）
 E_26_2 = 5
-E_26_3 = 6
 
 _ERA_BY_VERSION: dict[str, int] = {
-    "1.13": E_1_13,
-    "1.21.9": E_1_21_9,
+    "1.21": E_1_21,
     "1.21.11": E_1_21_11,
     "26.2": E_26_2,
-    "26.3": E_26_3,
 }
-for _v in ("1.14", "1.15", "1.16", "1.16.1", "1.16.5", "1.17", "1.17.1",
-           "1.18", "1.18.2", "1.19", "1.19.2", "1.19.3", "1.19.4",
-           "1.20", "1.20.1", "1.20.2", "1.20.4", "1.20.6"):
-    _ERA_BY_VERSION[_v] = E_1_14
-for _v in ("1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4", "1.21.5",
-           "1.21.6", "1.21.7", "1.21.8"):
-    _ERA_BY_VERSION[_v] = E_1_21
 
 
 def era_for_version(version_key: str) -> int:
-    return _ERA_BY_VERSION.get(version_key, E_1_14)
+    """版本键 -> era（未知键回退 E_1_21，版本线收敛后最小合法档）。"""
+    return _ERA_BY_VERSION.get(version_key, E_1_21)
 
 
 # ---------------------------------------------------------------------------
@@ -684,7 +678,7 @@ def _build_level_vector(level: int, applicable: list[int]) -> tuple[int, int, li
     return len(triples), total_weight, triples
 
 
-def _choose_enchantment(rng: loot_rng.XoroshiroJava, triples: list[tuple[int, int, int]],
+def _choose_enchantment(rng: loot_rng.JavaRandom, triples: list[tuple[int, int, int]],
                         total_weight: int) -> int:
     """C: choose_enchantment —— 累计权重扫描，返回三元组下标。
     w < 0 判定与 C 一致（w 减到负即选中）。"""
@@ -715,6 +709,9 @@ class ItemStack:
     enchantments: list[tuple[str, int]] = field(default_factory=list)
     # set_effect / set_potion 写入的 (效果全名, 时长)；无则 None
     effect: tuple[str, int] | None = None
+    # set_potion 写入的药水类型全名（如 minecraft:strong_regeneration）；
+    # 供 UI 按类型显示药水名/染色图标（水瓶等无效果药水也保留）
+    potion: str | None = None
 
 
 class LootFunction:
@@ -727,7 +724,7 @@ class LootFunction:
         self.kind = kind
         self.params = params
 
-    def apply(self, rng: loot_rng.XoroshiroJava, is_: ItemStack) -> None:
+    def apply(self, rng: loot_rng.JavaRandom, is_: ItemStack) -> None:
         k = self.kind
         if k == "set_count_constant":
             is_.count = self.params["min"]
@@ -743,7 +740,9 @@ class LootFunction:
             is_.effect = (effect_name, duration)
         elif k == "set_potion":
             # 目前只有单效果药水生效（C 注释：buried treasure / abandoned camps）
-            potion = POTIONS[self.params["id"]]
+            pid = self.params["id"]
+            is_.potion = pid
+            potion = POTIONS[pid]
             if potion[0] == 1:
                 is_.effect = potion[1][0]
         elif k == "skip_n":
@@ -850,7 +849,7 @@ class LootTable:
     pools: list = field(default_factory=list)
     subtables: list = field(default_factory=list)
 
-    def generate(self, rng: loot_rng.XoroshiroJava, out: list) -> None:
+    def generate(self, rng: loot_rng.JavaRandom, out: list) -> None:
         for pool in self.pools:
             self._generate_pool(pool, rng, out)
 
@@ -1112,14 +1111,114 @@ def load_loot_table(data, era: int, resolve=None) -> LootTable:
     return table
 
 
-def load_loot_table_file(path: str, era: int) -> LootTable:
+def load_loot_table_file(path: str, era: int, resolve=None) -> LootTable:
     with open(path, "r", encoding="utf-8") as f:
-        return load_loot_table(f.read(), era)
+        return load_loot_table(f.read(), era, resolve=resolve)
+
+
+# ---------------------------------------------------------------------------
+# 快照选表：同一张表在不同版本间内容会变（C loot_tables.c 的分档边界）。
+# 命名规范 <table>.<1_20|1_21|1_21_11>.json；未分档的表用无后缀快照。
+# 分档边界（C loot_tables.c 双级分发，1.21 线三档）：
+#     shipwreck_supply/map/treasure: >=1.21.11 -> 1_21_11；>=1.21 -> 1_21；否则 1_20
+#     pillager_outpost:              >=1.21.9  -> 1_21_11；>=1.21 -> 1_21；否则 1_20
+#
+# 快照版本自包含（C 烘焙表语义）：init_xxx_1_21_11() 烧死 MC_1_21_11，
+# 运行时 mc=1.21.9 也按 1.21.11 语义展开 tag/全表（探针实证：outpost
+# book 在 1.21.9 下候选 n=40 含 lunge）。故分档快照的解析 era 取快照
+# 档位，运行时 era 只决定选哪一档。
+# ---------------------------------------------------------------------------
+_SNAPSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "data", "loot")
+
+_LOOT_TABLE_ERAS: dict[str, tuple[int, str, str]] = {
+    # 表名 -> (边界1: era>=边界1 用 1_21_11 档；否则 era>=边界2 用 1_21 档；
+    #           再否则旧档后缀)。对应 C loot_tables.c 双级分发：
+    #   < MC_1_21 -> 1_20 档；< MC_1_21_11 -> 1_21 档；否则 1_21_11 档。
+    # 1_21 档 = 官方 1.21.1 jar 原生表（supply/outpost 皮革装备与书本
+    # 带(options: #minecraft:on_random_loot)，走 tag HolderSet 路径，
+    # 已由真实种子数据实锤：冰霜行者I / 荆棘III+弹射物保护I 全命中）。
+    "shipwreck_supply": (E_1_21_11, E_1_21, "1_20"),
+    "shipwreck_map": (E_1_21_11, E_1_21, "1_20"),
+    "shipwreck_treasure": (E_1_21_11, E_1_21, "1_20"),
+    "pillager_outpost": (E_1_21_9, E_1_21, "1_20"),
+    # 林地府邸：resin_clump（1.21.4+ 树脂）仅存在于 1.21.11 档；
+    # 1_21/1_20 档从本地官方 jar 提取（1.21.1-NeoForge / 1.20.1）。
+    # 表结构 1.14~1.21.11 无其他变动（三档逐条 diff 实证）。
+    "woodland_mansion": (E_1_21_11, E_1_21, "1_20"),
+    # 海底废墟：1.21.11 相对 1.21.1 纯新增（big：stone_spear 权重 2 +
+    # 鹦鹉螺铠四色新 pool；small：stone_spear + 鹦鹉螺铠 pool；small
+    # 无 golden_apple），1.21.9 表与 1.21.1 相同 -> 边界 E_1_21_11。
+    # 1_20 档 = 官方 1.20.1 jar 原生表（small 有 stone_axe/rotten_flesh
+    # 无 golden_apple；enchant_randomly 无 options 字段）。
+    "underwater_ruin_big": (E_1_21_11, E_1_21, "1_20"),
+    "underwater_ruin_small": (E_1_21_11, E_1_21, "1_20"),
+    # 远古城市：1.21.11 主表 saddle→leather（同槽位换物品，
+    # 1.21.1/1.20.1 条目一致仅 enchant_randomly 格式差），三档
+    # 均取官方 jar 原生表。ice_box 三版本逐字节相同 → 未分档单文件。
+    "ancient_city": (E_1_21_11, E_1_21, "1_20"),
+}
+
+# 快照档后缀 -> 解析 era（对齐 C 烘焙表 version 烧死语义）
+_SNAPSHOT_ERAS = {
+    "1_20": E_1_14,       # C: MC_1_20 落在 ORDER_V1_14 语义区间（1.14~1.20）
+    "1_21": E_1_21,       # 1.21~1.21.8：1.21.1 jar 原生语义
+    "1_21_11": E_1_21_11,
+}
+
+
+def load_loot_snapshot(table_name: str, era: int,
+                       snapshot_dir: str | None = None) -> LootTable:
+    """按 (表名, era) 选取正确版本档的快照并求值加载。
+
+    table_name: "chests/xxx" 或 "xxx"；无分档的表直接取 xxx.json。
+    分档快照用快照档位自己的 era 解析（版本自包含）；未分档快照
+    保持运行时 era。
+    同目录快照存在时自动作一层子表 resolve（trial_chambers/reward
+    引用 reward_common/rare/unique；C 同样只支持一层）。
+    """
+    name = table_name.split("/")[-1]
+    seg = _LOOT_TABLE_ERAS.get(name)
+
+    def _resolve(snapshot_dir: str) -> object:
+        # 子表按同目录快照文件名（剥命名空间 + minecraft:）查找；
+        # 返回原始 JSON dict（ensure_subtable 内部再 load_loot_table）。
+        # 未分档子表即同目录 <短名>.json；缺失则报未解析（C 同语义）。
+        def resolve(sub_name: str):
+            sub_short = sub_name.split("/")[-1]
+            p = os.path.join(snapshot_dir, sub_short + ".json")
+            if not os.path.exists(p):
+                raise ValueError(f"unresolved loot subtable: {sub_name}")
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return resolve
+
+    if seg is None:
+        path = os.path.join(snapshot_dir or _SNAPSHOT_DIR, name + ".json")
+        return load_loot_table_file(path, era,
+                                    resolve=_resolve(snapshot_dir
+                                                     or _SNAPSHOT_DIR))
+    boundary, mid_boundary, old_suffix = seg
+    if era >= boundary:
+        suffix = "1_21_11"
+    elif era >= mid_boundary:
+        suffix = "1_21"
+    else:
+        suffix = old_suffix
+    _dir = snapshot_dir or _SNAPSHOT_DIR
+    path = os.path.join(_dir, "%s.%s.json" % (name, suffix))
+    return load_loot_table_file(path, _SNAPSHOT_ERAS[suffix],
+                                resolve=_resolve(_dir))
 
 
 def generate_loot(table: LootTable, seed: int) -> list:
-    """对整张表求值；seed 为该箱的 LootTableSeed（有符号 int64 亦可）。"""
-    rng = loot_rng.XoroshiroJava(seed)
+    """对整张表求值；seed 为该箱的 LootTableSeed（有符号 int64 亦可）。
+
+    求值用标准 Java LCG（C: RandomSource.create(lootSeed) =
+    LegacyRandomSource，默认 JAVA_RANDOM）；LootTableSeed 的推导才用
+    Xoroshiro（见 loot_rng.loot_seed_for_chest），两条线不可混用。
+    """
+    rng = loot_rng.JavaRandom(seed)
     out: list = []
     table.generate(rng, out)
     return out
@@ -1127,11 +1226,12 @@ def generate_loot(table: LootTable, seed: int) -> list:
 
 __all__ = [
     "ItemStack", "LootFunction", "LootTable",
-    "load_loot_table", "load_loot_table_file", "generate_loot",
+    "load_loot_table", "load_loot_table_file", "load_loot_snapshot",
+    "generate_loot",
     "era_for_version", "get_item_type", "get_enchantment_from_name",
     "get_max_level", "get_enchantability", "get_applicable_enchantments",
     "get_non_treasure", "get_on_random_loot",
     "is_applicable", "is_treasure_enchantment", "test_effective_level",
     "POTIONS", "ENCHANTMENT_ORDER",
-    "E_1_13", "E_1_14", "E_1_21", "E_1_21_9", "E_1_21_11", "E_26_2", "E_26_3",
+    "E_1_13", "E_1_14", "E_1_21", "E_1_21_9", "E_1_21_11", "E_26_2",
 ]

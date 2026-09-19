@@ -78,6 +78,7 @@ BIOME_CHOICES = [
     ("红树林沼泽 mangrove_swamp", "mangrove_swamp"),      # 184
     ("樱花树林 cherry_grove", "cherry_grove"),            # 185
     ("苍白之园 pale_garden", "pale_garden"),              # 186
+    ("硫磺洞穴 sulfur_caves", "sulfur_caves"),            # 187（26.2 新增，MCHelper 自定 id）
 ]
 
 # ---- 解析别名（下拉未收录项 + 1.18 改名前旧名 + F3 变体）----
@@ -150,6 +151,7 @@ _BIOME_IDS: dict[str, int] = {
     "jagged_peaks": 180, "frozen_peaks": 181, "stony_peaks": 182,
     "deep_dark": 183, "mangrove_swamp": 184, "cherry_grove": 185,
     "pale_garden": 186,
+    "sulfur_caves": 187,
 }
 
 # 中文官方名 → 内部键（54 项权威对照，由用户提供；与下拉标签一一对应。
@@ -181,6 +183,7 @@ CN_NAME_TO_KEY: dict[str, str] = {
     "冰封山峰": "frozen_peaks", "裸岩山峰": "stony_peaks",
     "深暗之域": "deep_dark", "红树林沼泽": "mangrove_swamp",
     "樱花树林": "cherry_grove", "苍白之园": "pale_garden",
+    "硫磺洞穴": "sulfur_caves",
 }
 
 # 旧版译名兜底（不进下拉，仅输入解析；不覆盖权威对照）
@@ -230,8 +233,29 @@ def resolve_biome(label: str) -> int | None:
     return _KEY_TO_ID.get(_norm(s))
 
 
+# ---- 下界/末地群系显示标签（不进 BIOME_CHOICES 下拉：观测群系
+# 只针对主世界种子精化；此表仅供 biome_label 展示 MapPreviewer /
+# StructurePreviewer 下界与末地标注、实例列表的群系列）----
+# id 以 cubiomes biomes.h 为准；译名与 MapPreviewer 群系悬停一致
+_EXTRA_DIM_BIOMES: dict[int, str] = {
+    8: "下界荒地 nether_wastes",
+    170: "灵魂沙峡谷 soul_sand_valley",
+    171: "绯红森林 crimson_forest",
+    172: "诡异森林 warped_forest",
+    173: "玄武岩三角洲 basalt_deltas",
+    9: "末地 the_end",
+    40: "末地小型岛屿 small_end_islands",
+    41: "末地中部高地 end_midlands",
+    42: "末地高地 end_highlands",
+    43: "末地荒地 end_barrens",
+}
+
+
 def biome_label(bid: int) -> str:
     """biome id → 显示标签（未收录返回英文枚举名或 "id=N"）。"""
+    extra = _EXTRA_DIM_BIOMES.get(bid)
+    if extra is not None:
+        return extra
     for lab, key in BIOME_CHOICES:
         if _KEY_TO_ID.get(_norm(key)) == bid:
             return lab

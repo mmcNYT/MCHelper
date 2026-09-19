@@ -98,6 +98,7 @@ BIOME_COLORS: dict[int, tuple[int, int, int]] = {
     186: (140, 150, 145),  # pale_garden 苍白之园
     174: (140, 120, 90),   # dripstone_caves
     175: (90, 140, 95),    # lush_caves
+    187: (168, 138, 60),   # sulfur_caves 硫磺洞穴（26.2，红黄暖色调）
 
     # --- 下界（1.16+，getNetherBiome 五群系）---
     8: (90, 45, 45),       # nether_wastes 下界荒地
