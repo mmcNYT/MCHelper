@@ -70,6 +70,7 @@ from Utils.SeedReverser.biome_names import (
     icon_path,
     resolve_biome,
 )
+from Utils.SeedReverser.biome_signature_colors import color_for_label
 from Utils.SeedReverser.structure_math import verify_candidate_seed
 from Utils.StrongHoldFinder.stronghold_math import (
     looks_like_f3c,
@@ -560,11 +561,11 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
                 QIcon(), QLineEdit.ActionPosition.TrailingPosition)
         self._biome_trailing_action.setToolTip("当前群系图标")
         self.biomeNameCombo.currentIndexChanged.connect(
-            self._update_biome_trailing_icon)
+            self._update_biome_accent)
         # textChanged 兜底：补全浮层确认文本不走 textEdited，
         # 手动改字时则立即清除不再匹配的图标
         self.biomeNameCombo.lineEdit().textChanged.connect(
-            self._update_biome_trailing_icon)
+            self._update_biome_accent)
 
         # Y 输入框：可选（ Designer 无占位提示，这里设置）
         self.biomeYEdit.setPlaceholderText("Y(可不填)")
@@ -2041,16 +2042,23 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.refineInfoLabel.setText(
             "已填入 X/Y/Z：请在下拉框选择或输入当前群系名，然后点「添加」")
 
-    def _update_biome_trailing_icon(self, *_args) -> None:
-        """选择/输入变化 → 联动行编辑器尾部的群系图标。
+    def _update_biome_accent(self, *_args) -> None:
+        """选择/输入变化 → 联动行编辑器尾部的群系图标与名称颜色。
 
-        以 currentText() 精确匹配标准标签为准：匹配到 54 项之一则显示
-        对应图标；手动输入任意其他文本或清空选择时移除图标。
-        （可编辑组合框的 currentText 即行编辑器文本，两种事件源统一处理）
+        以 currentText() 精确匹配标准标签为准：匹配到 54 项之一则
+        显示对应图标，并把行编辑器文字染为该群系标志色（中文
+        Wiki 信息框草地/水体颜色，见 biome_signature_colors）；
+        手动输入任意其他文本或清空选择时移除图标并恢复默认文字
+        色。（可编辑组合框的 currentText 即行编辑器文本，两种
+        事件源统一处理）
         """
-        icon = self._biome_icons.get(self.biomeNameCombo.currentText())
+        text = self.biomeNameCombo.currentText()
+        icon = self._biome_icons.get(text)
         self._biome_trailing_action.setIcon(icon if icon is not None
                                             else QIcon())
+        color = color_for_label(text)
+        self.biomeNameCombo.lineEdit().setStyleSheet(
+            "" if color is None else f"color: {color};")
 
     def _on_clear_biome_obs(self) -> None:
         self._biome_obs.clear()

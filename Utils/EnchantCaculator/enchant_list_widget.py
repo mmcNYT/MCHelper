@@ -94,8 +94,7 @@ class EnchantListWidget(QListWidget):
         - 淡灰色圆角背景 + 黑色居中文字（与 DropListWidget 拖出图标样式一致）
         - 按 devicePixelRatio 提升实际绘制分辨率，高分屏/系统缩放下清晰不模糊
         """
-        font = QFont()               # 继承应用字体（MC 像素字体），不写死族名
-        font.setPixelSize(16)
+        font = QFont("Arial", 10)
         width = max(120, len(text) * 10 + 30)
         height = 30
         # 提升分辨率：实际像素 = 逻辑尺寸 × 屏幕缩放比

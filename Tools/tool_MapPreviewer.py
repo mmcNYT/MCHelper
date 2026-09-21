@@ -68,6 +68,7 @@ from Utils.MapPreviewer.biome_colors import biome_cn_name
 from Utils.MapPreviewer.choose_structure import ChooseStructureWindow
 from Utils.MapPreviewer.structure_map import available_structures
 from Utils.SeedReverser import biome_names, structure_params
+from Utils.SeedReverser.biome_signature_colors import color_for_label
 from Utils.SeedReverser.structure_params import DIMENSION_NAMES, STRUCT_NAMES
 
 # 会话文件名（用户配置目录下）
@@ -368,6 +369,11 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             self._on_struct_choice_changed)
         self.biomeLocateList.currentIndexChanged.connect(
             self._on_biome_choice_changed)
+        # 手输未匹配标准标签时即时恢复默认色（选择联动的互补路径：
+        # 可编辑组合框手输不触发 currentIndexChanged；用 textChanged
+        # 与 SeedReverser 一致，程序化设文本同样联动）
+        self.biomeLocateList.lineEdit().textChanged.connect(
+            self._update_biome_name_color)
 
     # ---------- 结构选择窗口 ----------
     def _on_version_changed(self, _) -> None:
@@ -947,9 +953,22 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             return self.biomeLocateList.itemText(i).split(" ")[0]
         return biome_names.biome_label(int(bid))
 
+    def _update_biome_name_color(self, *_args) -> None:
+        """选中群系 → 行编辑器文字染群系标志色；未匹配恢复默认色。
+
+        标签精确匹配 biome_signature_colors（主世界 55 项 + 下界/
+        末地 10 项）；首项「选择群系」与手输未匹配文本恢复默认。
+        覆盖路径：下拉选择/手输（信号）与静默回设、会话恢复、
+        重建保留选择（各调用点显式刷新）。
+        """
+        color = color_for_label(self.biomeLocateList.currentText())
+        self.biomeLocateList.lineEdit().setStyleSheet(
+            "" if color is None else f"color: {color};")
+
     def _on_biome_choice_changed(self, _idx: int) -> None:
         """群系下拉选择：首项 = 撤销群系定位；选中群系 = 自动查找
         离坐标输入最近（默认 0,0）的出现位置（效果同结构定位）。"""
+        self._update_biome_name_color()
         bid = self.biomeLocateList.currentData()
         if bid is None:
             # 撤销：取消在途查找并作废迟到结果（epoch 单调递增）
@@ -1789,6 +1808,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             box.blockSignals(True)
             box.setCurrentIndex(idx)
             box.blockSignals(False)
+            self._update_biome_name_color()
 
     def _toggle_hillshade(self) -> None:
         """切换地形阴影：仅改状态并落盘，重新生成地图后生效。"""
@@ -2284,6 +2304,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                 self.biomeLocateList.blockSignals(True)
                 self.biomeLocateList.setCurrentIndex(i)
                 self.biomeLocateList.blockSignals(False)
+                self._update_biome_name_color()
 
     def save_config(self) -> None:
         """主窗口退出协议（save_all_tools_config）：保存会话。"""
