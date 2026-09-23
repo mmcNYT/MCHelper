@@ -2298,19 +2298,55 @@ def _face_mat(mat: str, shape: str | None, normal: tuple,
                 return (top, None)
             return (None, None)
         if kind == "bell":
-            # 官方 bell_floor/ceiling：柱=stone、横梁/吊杆=深色橡
-            # 木、钟体（entity 静态近似）：侧=基键 bell side、顶/
-            # 底=bell top/bottom。按 box 特征区分：满高窄柱 /
-            # y>=13/16 梁（几何见 block_shapes._bell）
+            # 官方全对齐（block_shapes._bell）：底座 = 官方 JSON
+            # 贴图精确 uv（柱 stone / 梁·吊杆 dark oak planks）；
+            # 钟体 = BellRenderer 实体两段盒，bell_body.png 32x32
+            # （ModelPart box UV，见 _BELL_BASE_R/_BELL_BODY_R；
+            # 静态直立无摆动）。按 box 特征：满高窄柱 / y>=13/16
+            # 梁·吊杆（y1 区分）/ 钟口座 y[4,6] / 钟身 y[6,13]
             if box is not None:
-                if box[1] <= 1e-9 and box[4] >= 1.0 - 1e-9:
-                    return ("stone", None)            # 双柱满高
-                if box[1] >= 13 / 16 - 1e-9:
-                    return ("dark oak planks", None)  # 横梁/吊杆
-                if normal == (0, 1, 0):
-                    return ("bell top", None)
-                if normal == (0, -1, 0):
-                    return ("bell bottom", None)
+                y0, y1 = box[1], box[4]
+                if y0 <= 1e-9 and y1 >= 1.0 - 1e-9:
+                    # 满高柱：侧窗 2px/4px 按面宽选，顶底按柱
+                    # 截面尺寸（floor:x _RU(0,0,2,4) / floor:z
+                    # 官方 y=90 旋转后 _RU(0,0,4,2)）
+                    xs = round((box[3] - box[0]) * 16)
+                    zs = round((box[5] - box[2]) * 16)
+                    if normal[1] > 0:
+                        return ("stone", _RU(0, 0, xs, zs))
+                    if normal[1] < 0:
+                        return ("stone", _RS(0, 0, xs, zs))
+                    span = xs if normal[2] != 0 else zs
+                    return ("stone", _RS(0, 1, 2 if span <= 2 else 4, 16))
+                if y0 >= 13 / 16 - 1e-9:
+                    if y1 >= 1.0 - 1e-9:
+                        # 吊杆：官方四侧独立窗 + up；down 被钟
+                        # 身遮（官方省略），取南窗兑底
+                        if normal[1] > 0:
+                            return ("dark oak planks", _RU(1, 3, 3, 5))
+                        r = {(0, 0, -1): _RS(7, 2, 9, 5),
+                             (1, 0, 0): _RS(1, 2, 3, 5),
+                             (0, 0, 1): _RS(6, 2, 8, 5),
+                             (-1, 0, 0): _RS(4, 2, 6, 5)}
+                        return ("dark oak planks",
+                                r.get(normal, _RS(6, 2, 8, 5)))
+                    # 横梁（floor/wall 全变体）：长面 n 窗
+                    # [2,2,14,4]（s 窗差 1 行木纹无感）、端面 2px
+                    # 官方 between_walls cullface 窗 [5,4,7,6]
+                    if normal[1] > 0:
+                        return ("dark oak planks", _RU(2, 3, 14, 5))
+                    if normal[1] < 0:
+                        return ("dark oak planks", _RS(2, 3, 14, 5))
+                    span = (round((box[3] - box[0]) * 16)
+                            if normal[2] != 0
+                            else round((box[5] - box[2]) * 16))
+                    if span < 8:
+                        return ("dark oak planks", _RS(5, 4, 7, 6))
+                    return ("dark oak planks", _RS(2, 2, 14, 4))
+                key = _BELL_BASE_R if y1 <= 6 / 16 + 1e-9 else _BELL_BODY_R
+                r = key.get(normal)
+                if r is not None:
+                    return ("bell body", r)
             return (None, None)
         if kind == "composter":
             # 官方 composter.json：底板全格 y[0,2]（down/内底 =
@@ -2407,6 +2443,42 @@ _BREW_R = {
 
 # 花盆壁侧横带（flower_pot.json 侧 uv v 10..16 行，u 全列）。
 _FPOT_S = _RS(0, 10, 16, 16)
+
+
+# 钟体 rect（BellRenderer 实体两段盒，键图 bell body.png =
+# 官方 entity/bell/bell_body.png 32x32 原图，图集入槽最近邻缩
+# 至 16，归一化窗不受影响）。实体盒 UV（ModelPart$Cube 反编译
+# 实证）与方块 JSON 语义差异：up/down 图 v 沿 -z 铺（_RS 式
+# v=(1-d,1-b)）、侧面图 v 沿 +y 铺（v=(1-b,1-d)）、N/W/E 面 u
+# 反向（S 面正向）。窗 = ModelPart box UV 布局 [d|w|w|d] 行。
+def _B32U(a, b, c, d):
+    """实体盒 up/down 面像素窗(32 图) -> 归一化窗。"""
+    return (a / 32, 1 - d / 32, c / 32, 1 - b / 32)
+
+
+def _B32S(a, b, c, d, rev_u=False):
+    """实体盒侧面像素窗(32 图) -> 归一化窗；N/W/E 面 u 反向。"""
+    return ((c / 32 if rev_u else a / 32), 1 - b / 32,
+            (a / 32 if rev_u else c / 32), 1 - d / 32)
+
+
+_BELL_BODY_R = {   # 钟身 6x7x6 uv(0,0)：up(6,0,12,6) down(12,0,18,6)
+    (0, 1, 0): _B32U(6, 0, 12, 6),
+    (0, -1, 0): _B32U(12, 0, 18, 6),
+    (-1, 0, 0): _B32S(0, 6, 6, 13, True),    # west
+    (0, 0, -1): _B32S(6, 6, 12, 13, True),   # north
+    (1, 0, 0): _B32S(12, 6, 18, 13, True),   # east
+    (0, 0, 1): _B32S(18, 6, 24, 13),         # south
+}
+
+_BELL_BASE_R = {   # 口座 8x2x8 uv(0,13)：up(8,13,16,21) down(16,13,24,21)
+    (0, 1, 0): _B32U(8, 13, 16, 21),
+    (0, -1, 0): _B32U(16, 13, 24, 21),
+    (-1, 0, 0): _B32S(0, 21, 8, 23, True),
+    (0, 0, -1): _B32S(8, 21, 16, 23, True),
+    (1, 0, 0): _B32S(16, 21, 24, 23, True),
+    (0, 0, 1): _B32S(24, 21, 32, 23),
+}
 
 # 床顶面 rect（键图 = 垫顶整块：上半枕带行 0..7、下半毯区）。
 # facing = 床头朝向（wiki：head 块在 facing 端、枕贴床头端）。

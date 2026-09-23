@@ -71,9 +71,18 @@ SHAPE_CAULDRON = "cauldron"
 # 旋转，up=floor 原始 / down=ceiling x180）
 SHAPE_BUTTON = "button:n"
 SHAPE_LEVER = "lever:up"
-# 钟（bell:<attachment>）：floor=双柱+横梁+钟体、ceiling=吊杆+钟体；
-# 柱对/吊杆 180° 对称，facing 无静态几何影响（钟摆属 entity 不模拟）
-SHAPE_BELL_FLOOR = "bell:floor"
+# 钟（bell:<att>）：几何与官方 1.21.11 全对齐。att =
+#   floor:x | floor:z   双柱+横梁（梁沿 x/z；官方 blockstate
+#                       floor n/s -> 梁沿 x、e/w -> 90°旋转沿 z；
+#                       旧码 "floor" 兼容读作 :x）
+#   ceiling             吊杆+钟体（吊杆对称无朝向）
+#   wall1:<f>           单墙梁（f=锚墙向 e/n/s/w，官方 4 向，
+#                       钟体并集与官方选择盒 m/n/o/F 逐坐标一致）
+#   wall2:<axis>        双墙贯通梁（梁沿 x/z，官方 k/l）
+# 钟体 = BellRenderer 实体模型两段盒（bell_base 8x2x8 y[4,6] +
+# bell_body 6x7x6 y[6,13]，与官方选择盒 j 精确一致），静态直立
+# （摆动动画属 BER 不模拟）
+SHAPE_BELL_FLOOR = "bell:floor:x"
 # 堆肥桶（镂空桶，无朝向）
 SHAPE_COMPOSTER = "composter"
 # 落地告示牌/旗帜（十字交叉板简化）
@@ -233,24 +242,38 @@ def _trapdoor(facing: str, open_: bool, half: str):
 
 
 def _bell(att: str):
-    """钟。官方 bell_floor/bell_ceiling.json 静态部分 + 钟体
-    entity（BellRenderer，无公开 json）三段阶梯近似：颈接梁/
-    吊杆、肩中宽、口最宽（钟口朝下），段间共面不重叠。
-    - floor：双柱 x[0,2]&[14,16] z[6,10] 满高（stone）、横梁
-      x[2,14] y[13,15] z[7,9]（深色橡木）；
-    - ceiling：吊杆 x[7,9] y[13,16] z[7,9]。
-    facing 仅驱动钟摆（entity），静态几何 180° 对称不携带
-    （柱对/吊杆均对称），形状码不带 facing。"""
+    """钟。官方 1.21.11 全对齐（静态）：底座 = bell_floor/
+    bell_ceiling/bell_wall/bell_between_walls.json 元素原样；
+    钟体 = BellRenderer 实体模型两段盒（口座 8x2x8 y[4,6] +
+    钟身 6x7x6 y[6,13]，与官方选择盒 j 精确一致），静态直立
+    （摆动动画属 BER 不模拟）。att 语义见 SHAPE_BELL_FLOOR
+    注释；旧码 "floor" 兼容读作 floor:x，未知值兜底。"""
     e = _E
-    bell = ((6 * e, 11 * e, 6 * e, 10 * e, 13 * e, 10 * e),   # 颈
-            (4 * e, 8 * e, 4 * e, 12 * e, 11 * e, 12 * e),    # 肩
-            (2 * e, 4 * e, 2 * e, 14 * e, 8 * e, 14 * e))     # 口
-    if att == "ceiling":
-        return ((7 * e, 13 * e, 7 * e, 9 * e, 1.0, 9 * e),) + bell
-    return ((0.0, 0.0, 6 * e, 2 * e, 1.0, 10 * e),            # 柱 L
-            (14 * e, 0.0, 6 * e, 1.0, 1.0, 10 * e),           # 柱 R
-            (2 * e, 13 * e, 7 * e, 14 * e, 15 * e, 9 * e),    # 横梁
-            ) + bell
+    body = ((4 * e, 4 * e, 4 * e, 12 * e, 6 * e, 12 * e),    # 钟口座
+            (5 * e, 6 * e, 5 * e, 11 * e, 13 * e, 11 * e))   # 钟身
+    kind, _, arg = att.partition(":")
+    if kind == "ceiling":
+        return ((7 * e, 13 * e, 7 * e, 9 * e, 1.0, 9 * e),) + body
+    if kind == "wall1":
+        # 官方 bell_wall 模型 + blockstate y 旋转（锚墙端 2px
+        # 悬空端 13px），与官方选择盒 m/n/o/F 一致
+        x0, z0, x1, z1 = {"e": (3, 7, 16, 9), "w": (0, 7, 13, 9),
+                          "n": (7, 0, 9, 13),
+                          "s": (7, 3, 9, 16)}.get(arg, (3, 7, 16, 9))
+        return ((x0 * e, 13 * e, z0 * e, x1 * e, 15 * e, z1 * e),) + body
+    if kind == "wall2":
+        if arg == "z":
+            return ((7 * e, 13 * e, 0.0, 9 * e, 15 * e, 1.0),) + body
+        return ((0.0, 13 * e, 7 * e, 1.0, 15 * e, 9 * e),) + body
+    if arg == "z":    # floor:z（官方 e/w：y=90/270 旋转）
+        return ((6 * e, 0.0, 0.0, 10 * e, 1.0, 2 * e),          # 柱 N
+                (6 * e, 0.0, 14 * e, 10 * e, 1.0, 16 * e),      # 柱 S
+                (7 * e, 13 * e, 2 * e, 9 * e, 15 * e, 14 * e),  # 横梁
+                ) + body
+    return ((0.0, 0.0, 6 * e, 2 * e, 1.0, 10 * e),              # 柱 W
+            (14 * e, 0.0, 6 * e, 16 * e, 1.0, 10 * e),          # 柱 E
+            (2 * e, 13 * e, 7 * e, 14 * e, 15 * e, 9 * e),      # 横梁
+            ) + body
 
 
 def _composter():
@@ -545,10 +568,20 @@ def shape_from_props(name: str, props: dict) -> str | None:
         return f"trapdoor:{f}:{'o' if op else 'c'}:{hp}"
 
     if name == "minecraft:bell":
-        # attachment=floor/ceiling（wall 变体全结构未出现，floor
-        # 兜底）；facing 无静态几何影响不携带
+        # 官方 blockstate 4 attachment × 4 facing 全携带：floor
+        # n/s -> 梁沿 x、e/w -> 90°旋转梁沿 z；double_wall 反之
+        # （e/w -> x、n/s -> z）；single_wall 携带锚墙向（官方
+        # 语义：facing=锚墙）
         att = props.get("attachment", "floor")
-        return SHAPE_BELL_FLOOR if att != "ceiling" else "bell:ceiling"
+        if att == "ceiling":
+            return "bell:ceiling"
+        if att == "double_wall":
+            return "bell:wall2:x" if facing in ("e", "w") \
+                else "bell:wall2:z"
+        if att == "single_wall":
+            return f"bell:wall1:{facing if facing in ('e', 'n', 's', 'w') else 'e'}"
+        return "bell:floor:x" if facing in ("n", "s", "") \
+            else "bell:floor:z"
 
     if name == "minecraft:composter":
         return SHAPE_COMPOSTER
@@ -979,7 +1012,7 @@ def shape_boxes(shape: str | None) -> tuple:
         f, op, hp = rest.split(":")
         return _trapdoor(f, op == "o", hp)
     if kind == "bell":
-        return _bell(rest if rest in ("floor", "ceiling") else "floor")
+        return _bell(rest if rest else "floor:x")
     if kind == "composter":
         return _composter()
     if kind == "post":

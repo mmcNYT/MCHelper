@@ -603,6 +603,9 @@ def _load_panel_pixmap(scale: int = 1) -> "QPixmap | None":
 # bd1 索引) 得每个可打印 ASCII 字符的 {x 内容起始列, w 内容宽,
 # rows 8 行位图}。字体规则：8px 高、ascent 7、advance = 内容宽+1
 # （1.13+ bitmap 字体）、空格 advance=4（include/space.json）。
+# 开箱 GUI 文字默认用普通系统字体（_PIXEL_FONT_UI=False，恢复旧
+# 版观感）；置 True 切回游戏像素字形（标题条 + 数量角标）。
+_PIXEL_FONT_UI = False
 _FONT_JSON = os.path.join(_GUI_DIR, "font_ascii.json")
 _glyph_cache: "dict | None" = None
 
@@ -857,11 +860,11 @@ class _SlotWidget(QLabel):
                         for dy in (0, step):
                             p.drawPixmap(ix - off + dx, ix - off + dy, tex)
                 p.restore()
-        # 4) 数量角标（>1 时右下角）：像素字体白字 + 1px 右下阴影
-        # #3F3F3F（游戏数量显示 darken 同款；字形缺失回退系统字体）
+        # 4) 数量角标（>1 时右下角）：默认普通系统字体粗体白字 +
+        # 多向描边阴影（_PIXEL_FONT_UI=True 切回游戏像素字形）
         if self._count > 1:
             text = str(self._count)
-            if _load_glyphs():
+            if _PIXEL_FONT_UI and _load_glyphs():
                 tw, _th = _pixel_text_size(text)
                 tx = 17 * s - tw * s           # 右对齐（含 s px 内边距）
                 ty = 10 * s                    # 字形底行对齐 17px 线
@@ -994,11 +997,10 @@ class ChestLootDialog(QDialog):
             p.drawPixmap(self.rect(), self._panel)
         else:                        # 贴图缺失回退：纯面板灰
             p.fillRect(self.rect(), QColor(0xC6, 0xC6, 0xC6))
-        # 标题条：像素字体（游戏 ascii.png 字形）居中，#404040 +
-        # 1px 阴影 #101010（游戏文字 darken 0.25 同款）；字形数据
-        # 缺失时回退系统字体（观感退化为旧版）
+        # 标题条：默认普通系统字体居中 #404040（_PIXEL_FONT_UI=True
+        # 切回游戏像素字形 + 1px 阴影 #101010，超宽降级/省略号）
         text = self.windowTitle()
-        if _load_glyphs():
+        if _PIXEL_FONT_UI and _load_glyphs():
             s = self.GUI_SCALE
             avail = (_PANEL_W - 16) * s      # 槽区内边距同款余量
             scale = s
