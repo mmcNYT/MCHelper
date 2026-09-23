@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '687f001a-c459-4650-8b76-dd8d97603c25'
-  PropagateID: '687f001a-c459-4650-8b76-dd8d97603c25'
-  ReservedCode1: 'ed4bb798-34d7-4637-b917-4a4e1bdc5286'
-  ReservedCode2: 'ed4bb798-34d7-4637-b917-4a4e1bdc5286'
+  ProduceID: 'ee589ac8-5e6a-4973-9852-41d0973a50cd'
+  PropagateID: 'ee589ac8-5e6a-4973-9852-41d0973a50cd'
+  ReservedCode1: '3bb1e293-9135-4bed-9949-503301a6cfab'
+  ReservedCode2: '3bb1e293-9135-4bed-9949-503301a6cfab'
 ---
 
 # MCHelper 代码库手册
@@ -4927,7 +4927,7 @@ RNG 与结构信息表：
 
 | 名称 | 值/含义 |
 |---|---|
-| `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。`REDSTONE_WIRE = "redstone dust"`——无独立 redstone wire 纹理（1.21 官方拆 dust_dot/line），复用 dust 点纹，与 ancient_city 的 `minecraft:redstone_wire -> redstone dust` 映射同口径。 |
+| `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。`REDSTONE_WIRE = "redstone wire"`——合成图（blockstate multipart 官方口径）：1.21.11 官方 line0/line1 灰度纹理按 `RedStoneWireBlock`（egb 反编译）`COLORS[power=0]` 染色（神庙陷阱未触发真实色），N/S 臂 line0 原样 + E/W 臂 line1 y270 旋转转置（与 rswire 平铺 UV 逐像素对应）；ancient_city 同键（`_MAT_MAP`）。 |
 | `STONE_PLATE` | `("stone", bs.SHAPE_PLATE)` 石质压力板（desert TNT 井口）。 |
 | `CHEST` | `("chest", bs.SHAPE_CHEST_N)`，朝向固定局部 north（真实游戏经 reorient）。 |
 | `_EDGE` / `_SEG_IDX` | 挂件贴边 = FACING 反侧表 / rswire/twire 段序 n:s:e:w 下标。 |

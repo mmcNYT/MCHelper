@@ -445,9 +445,11 @@ _MAT_MAP = {
     # 半高近似）
     "minecraft:skeleton_skull": "halfheight:bone block",
     # 城市中心红石导线（官方 multipart redstone_dust_* 几何经
-    # shape_from_props -> rswire 辐射臂；纹理为按蓝图色板 #A8170A
-    # 染色的自制十字图，世界平铺 UV 命中线带）
-    "minecraft:redstone_wire": "redstone dust",
+    # shape_from_props -> rswire 辐射臂；纹理 redstone wire.png =
+    # 官方 1.21.11 line0/line1 灰度纹理按 egb COLORS[power=0] 染色
+    # 合成，世界平铺 UV 命中线带；孤点态（全空）无 dot 斑，当前
+    # 消费方全为连接态）
+    "minecraft:redstone_wire": "redstone wire",
     # 三色羊毛/地毯（营地帐篷 + 路面装饰；wool/carpet 同色同键）
     "minecraft:blue_wool": "blue wool",
     "minecraft:blue_carpet": "blue wool",

@@ -104,8 +104,9 @@ LEVER = "lever"                   # lever:<贴边>
 STICKY_PISTON = "sticky piston"   # pist:<f>:s
 REPEATER = "repeater"             # repeater:<f>
 TRIPWIRE = "tripwire"             # twire:<n>:<s>:<e>:<w>
-REDSTONE_WIRE = "redstone dust"    # rswire:<n>:<s>:<e>:<w>（无独立
-# redstone wire 纹理——1.21 官方拆 dust_dot/line，复用 dust 点纹）
+REDSTONE_WIRE = "redstone wire"   # rswire:<n>:<s>:<e>:<w>（合成图：
+# 官方 1.21.11 line0/line1 灰度纹理按 egb COLORS[power=0] 染色，
+# N/S 臂 line0 原样 + E/W 臂 line1 官方 y270 旋转转置）
 CHISELED_STONE_BRICKS = "chiseled stone bricks"
 
 # 挂件贴边 = 局部 FACING 反侧（thook/lever 码 rest 语义，与

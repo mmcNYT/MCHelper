@@ -1121,7 +1121,10 @@ def _redstone_wire(rest: str) -> tuple:
     - up 连接：该侧贴边全高竖片（官方 redstone_dust_up 零厚面
       z=0.25px -> 1/64 厚 AABB 内缩）；
     - 四向无连接：中心 4x4 孤点板（官方 redstone_dust_dot 图案
-      中心区）。纹理 = 自制十字染色图，世界平铺 UV 命中线带。"""
+      中心区）。纹理 redstone wire.png = 官方 1.21.11 line0/line1
+      灰度纹理按 egb COLORS[power] 染色合成（N/S 臂 line0 原样 +
+      E/W 臂 line1 y270 旋转转置），世界平铺 UV 命中线带；全空
+      态显示中心线段交叉而非 dot 斑（当前消费方全为连接态）。"""
     n, s, e, w = rest.split(":")
     a, b = 6 * _E, 10 * _E
     m = 8 * _E                       # 半格臂长

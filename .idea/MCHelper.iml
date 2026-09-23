@@ -10,6 +10,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_classes3" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_fjm" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_procs" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_wire" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
