@@ -3,18 +3,99 @@
 > 版本：2026-09-23（Utils/Public 与 assets/Public 结构整理后）。覆盖全部 60 份 Python 源文件与全部资源：每份文件含功能（含计算流程）、类与函数、接口、关键变量四节；接口引用关系均经全项目 grep 实证。
 
 ## 目录
-- 0. 项目总览
-- 1. 入口层（main.py / main_window.py）
-- 2. 公共模块（Utils/Public）
-- 3. 工具控制层与后台线程（Tools / Threads）
-- 4. 附魔计算器（Utils/EnchantCaculator）
-- 5. 备份组件与主窗口部件（AutoBackUp / Settings / MainWindow）
-- 6. 地图预览器逻辑层（Utils/MapPreviewer）
-- 7. 种子逆推核心库（Utils/SeedReverser · 算法）
-- 8. 结构模型与渲染（Utils/SeedReverser · 引擎）
-- 9. 结构预览器逻辑层（Utils/StructurePreviewer）
-- 10. 界面骨架层（CodesUI）
-- 11. 资源与数据
+
+- [0. 项目总览](#0-项目总览)
+- [1. 入口层（main.py / main_window.py）](#1-入口层mainpy--main_windowpy)
+  - [`main.py`](#mainpy)
+  - [`main_window.py`](#main_windowpy)
+- [2. 公共模块（Utils/Public）](#2-公共模块utilspublic)
+  - [`Utils/Public/notification.py`](#utilspublicnotificationpy)
+  - [`Utils/Public/structure_icons.py`](#utilspublicstructure_iconspy)
+  - [`Utils/Public/biome_names.py`](#utilspublicbiome_namespy)
+  - [`Utils/Public/structure_params.py`](#utilspublicstructure_paramspy)
+  - [`Utils/Public/biome_signature_colors.py`](#utilspublicbiome_signature_colorspy)
+  - [`Utils/Public/stronghold_math.py`](#utilspublicstronghold_mathpy)
+  - [`Utils/Public/structure_map.py`](#utilspublicstructure_mappy)
+- [3. 工具控制层与后台线程（Tools / Threads）](#3-工具控制层与后台线程tools--threads)
+  - [`Tools/tool_base.py`](#toolstool_basepy)
+  - [`Tools/tool_AutoBackUp.py`](#toolstool_autobackuppy)
+  - [`Tools/tool_Settings.py`](#toolstool_settingspy)
+  - [`Tools/tool_StrongHoldFinder.py`](#toolstool_strongholdfinderpy)
+  - [`Tools/tool_EnchantCaculator.py`](#toolstool_enchantcaculatorpy)
+  - [`Threads/task_AutoBackUp.py`](#threadstask_autobackuppy)
+  - [`Threads/task_StrongHoldFinder.py`](#threadstask_strongholdfinderpy)
+  - [`Threads/task_WorldSeedRefine.py`](#threadstask_worldseedrefinepy)
+  - [`Tools/tool_MapPreviewer.py`](#toolstool_mappreviewerpy)
+  - [`Threads/task_MapPreviewer.py`](#threadstask_mappreviewerpy)
+  - [`Tools/tool_SeedReverser.py`](#toolstool_seedreverserpy)
+  - [`Threads/task_SeedReverser.py`](#threadstask_seedreverserpy)
+  - [`Tools/tool_StructurePreviewer.py`](#toolstool_structurepreviewerpy)
+- [4. 附魔计算器（Utils/EnchantCaculator）](#4-附魔计算器utilsenchantcaculator)
+  - [`Utils/EnchantCaculator/enchant_data_manager.py`](#utilsenchantcaculatorenchant_data_managerpy)
+  - [`Utils/EnchantCaculator/anvil_optimizer.py`](#utilsenchantcaculatoranvil_optimizerpy)
+  - [`Utils/EnchantCaculator/anvil_steps_tree.py`](#utilsenchantcaculatoranvil_steps_treepy)
+  - [`Utils/EnchantCaculator/card_list_widget.py`](#utilsenchantcaculatorcard_list_widgetpy)
+  - [`Utils/EnchantCaculator/enchanted_item_card.py`](#utilsenchantcaculatorenchanted_item_cardpy)
+  - [`Utils/EnchantCaculator/choose_items.py`](#utilsenchantcaculatorchoose_itemspy)
+  - [`Utils/EnchantCaculator/conflict_resolver.py`](#utilsenchantcaculatorconflict_resolverpy)
+  - [`Utils/EnchantCaculator/drop_list_widget.py`](#utilsenchantcaculatordrop_list_widgetpy)
+  - [`Utils/EnchantCaculator/enchant_list_widget.py`](#utilsenchantcaculatorenchant_list_widgetpy)
+- [5. 备份组件与主窗口部件（AutoBackUp / Settings / MainWindow）](#5-备份组件与主窗口部件autobackup--settings--mainwindow)
+  - [`Utils/AutoBackUp/signals_AutoBackUp.py`](#utilsautobackupsignals_autobackuppy)
+  - [`Utils/AutoBackUp/process_monitor.py`](#utilsautobackupprocess_monitorpy)
+  - [`Utils/AutoBackUp/right_icon_delegate.py`](#utilsautobackupright_icon_delegatepy)
+  - [`Utils/Settings/signals_Settings.py`](#utilssettingssignals_settingspy)
+  - [`Utils/MainWindow/draggable_tab_bar.py`](#utilsmainwindowdraggable_tab_barpy)
+- [6. 地图预览器逻辑层（Utils/MapPreviewer）](#6-地图预览器逻辑层utilsmappreviewer)
+  - [`Utils/MapPreviewer/biome_colors.py`](#utilsmappreviewerbiome_colorspy)
+  - [`Utils/MapPreviewer/block_colors.py`](#utilsmappreviewerblock_colorspy)
+  - [`Utils/MapPreviewer/choose_structure.py`](#utilsmappreviewerchoose_structurepy)
+  - [`Utils/MapPreviewer/map_sampler.py`](#utilsmappreviewermap_samplerpy)
+  - [`Utils/MapPreviewer/nether_end_sampler.py`](#utilsmappreviewernether_end_samplerpy)
+  - [`Utils/MapPreviewer/_native/build_map.py`](#utilsmappreviewer_nativebuild_mappy)
+- [7. 种子逆推核心库（Utils/SeedReverser · 算法）](#7-种子逆推核心库utilsseedreverser--算法)
+  - [`Utils/SeedReverser/mc_random.py`](#utilsseedreversermc_randompy)
+  - [`Utils/SeedReverser/mc_rng.py`](#utilsseedreversermc_rngpy)
+  - [`Utils/SeedReverser/seed_math.py`](#utilsseedreverserseed_mathpy)
+  - [`Utils/SeedReverser/structure_math.py`](#utilsseedreverserstructure_mathpy)
+  - [`Utils/SeedReverser/biome_noise.py`](#utilsseedreverserbiome_noisepy)
+  - [`Utils/SeedReverser/world_seed_refine.py`](#utilsseedreverserworld_seed_refinepy)
+  - [`Utils/SeedReverser/_native/build_biome.py`](#utilsseedreverser_nativebuild_biomepy)
+  - [`Utils/SeedReverser/_native/build_native.py`](#utilsseedreverser_nativebuild_nativepy)
+- [8. 结构模型与渲染（Utils/SeedReverser · 引擎）](#8-结构模型与渲染utilsseedreverser--引擎)
+  - [`Utils/SeedReverser/structure_models.py`](#utilsseedreverserstructure_modelspy)
+  - [`Utils/SeedReverser/jigsaw_assembly.py`](#utilsseedreverserjigsaw_assemblypy)
+  - [`Utils/SeedReverser/block_shapes.py`](#utilsseedreverserblock_shapespy)
+  - [`Utils/SeedReverser/structure_blueprints.py`](#utilsseedreverserstructure_blueprintspy)
+  - [`Utils/SeedReverser/structure_3dview.py`](#utilsseedreverserstructure_3dviewpy)
+  - [`Utils/SeedReverser/structure_preview.py`](#utilsseedreverserstructure_previewpy)
+- [9. 结构预览器逻辑层（Utils/StructurePreviewer）](#9-结构预览器逻辑层utilsstructurepreviewer)
+  - [`Utils/StructurePreviewer/composition.py`](#utilsstructurepreviewercompositionpy)
+  - [`Utils/StructurePreviewer/loot_rng.py`](#utilsstructurepreviewerloot_rngpy)
+  - [`Utils/StructurePreviewer/loot_engine.py`](#utilsstructurepreviewerloot_enginepy)
+  - [`Utils/StructurePreviewer/stronghold_pieces.py`](#utilsstructurepreviewerstronghold_piecespy)
+  - [`Utils/StructurePreviewer/mansion_pieces.py`](#utilsstructurepreviewermansion_piecespy)
+  - [`Utils/StructurePreviewer/end_city_pieces.py`](#utilsstructurepreviewerend_city_piecespy)
+  - [`Utils/StructurePreviewer/fortress_pieces.py`](#utilsstructurepreviewerfortress_piecespy)
+  - [`Utils/StructurePreviewer/village_assembly.py`](#utilsstructurepreviewervillage_assemblypy)
+  - [`Utils/StructurePreviewer/outpost_assembly.py`](#utilsstructureprevieweroutpost_assemblypy)
+  - [`Utils/StructurePreviewer/trial_assembly.py`](#utilsstructurepreviewertrial_assemblypy)
+  - [`Utils/StructurePreviewer/ancient_city_assembly.py`](#utilsstructurepreviewerancient_city_assemblypy)
+  - [`Utils/StructurePreviewer/locator.py`](#utilsstructurepreviewerlocatorpy)
+  - [`Utils/StructurePreviewer/__init__.py`](#utilsstructurepreviewer__init__py)
+- [10. 界面骨架层（CodesUI）](#10-界面骨架层codesui)
+  - [`CodesUI/__init__.py`](#codesui__init__py)
+  - [`CodesUI/AutoBackUp.py`](#codesuiautobackuppy)
+  - [`CodesUI/ChooseEnchantedItems.py`](#codesuichooseenchanteditemspy)
+  - [`CodesUI/ChooseStructureWin.py`](#codesuichoosestructurewinpy)
+  - [`CodesUI/EnchantCaculator.py`](#codesuienchantcaculatorpy)
+  - [`CodesUI/MapPreviewer.py`](#codesuimappreviewerpy)
+  - [`CodesUI/MCHelperMainWindow.py`](#codesuimchelpermainwindowpy)
+  - [`CodesUI/SeedReverser.py`](#codesuiseedreverserpy)
+  - [`CodesUI/Settings.py`](#codesuisettingspy)
+  - [`CodesUI/StrongHoldFinder.py`](#codesuistrongholdfinderpy)
+  - [`CodesUI/StructurePreviewer.py`](#codesuistructurepreviewerpy)
+- [11. 资源与数据](#11-资源与数据)
 
 # 0. 项目总览
 
@@ -117,8 +198,6 @@ MCHelper/
 - 各文件节统一格式：**功能**（含计算流程）→ **类与函数**（表格）→ **接口**（引用关系，均经全项目 grep 实证）→ **关键变量/常量**。
 
 # 1. 入口层（main.py / main_window.py）
-
-# 根目录模块文档（main.py / main_window.py）
 
 > 项目：MCHelper（PySide6 MC Java 版工具合集，tab 切换多工具单窗口）
 > 本文基于源码精读编写，覆盖项目根目录下两个核心文件。
@@ -252,8 +331,6 @@ MCHelper/
 | Run 键路径 `Software\Microsoft\Windows\CurrentVersion\Run`（常量） | `str` | `set_start_on_boot` 操作的 HKCU 注册表路径，值名 `"MCHelper"`，值为启动命令行字符串（`REG_SZ`）。 |
 
 # 2. 公共模块（Utils/Public）
-
-# Utils/Public 公共模块文档
 
 > 本文覆盖 `Utils/Public/` 下被 2~4 个工具共用的 7 个公共模块。所有信息均来自源码精读与 grep 引用核对，不含臆测。
 > 引用位置标注为 `文件:行号`。
@@ -669,8 +746,6 @@ MCHelper/
 | `structure_map.py` | task_MapPreviewer、tool_MapPreviewer、tool_StructurePreviewer、Utils/StructurePreviewer/{locator, composition, stronghold_pieces, village_assembly, mansion_pieces, end_city_pieces} |
 
 # 3. 工具控制层与后台线程（Tools / Threads）
-
-# MCHelper 小型工具层与线程任务文档（03a）
 
 > 覆盖文件：`Tools/tool_base.py`、`Tools/tool_AutoBackUp.py`、`Tools/tool_Settings.py`、`Tools/tool_StrongHoldFinder.py`、`Tools/tool_EnchantCaculator.py`、`Threads/task_AutoBackUp.py`、`Threads/task_StrongHoldFinder.py`、`Threads/task_WorldSeedRefine.py`
 > 所有内容均来自源码精读，代码标识符保留英文。
@@ -1109,11 +1184,9 @@ MCHelper/
 
 ---
 
-# MapPreviewer 文档：工具控制层与渲染线程
-
 > 覆盖文件：
 > - `Tools\tool_MapPreviewer.py`（地图预览器控制层）
-> - `Threads\task_MapPreviewer.py`（地图渲染线程）
+> - `Threads/task_MapPreviewer.py`（地图渲染线程）
 >
 > 本文档仅描述源码现状，所有信息均来自代码阅读，代码标识符保留英文。
 
@@ -1400,7 +1473,7 @@ MCHelper/
 
 ---
 
-## `Threads\task_MapPreviewer.py`
+## `Threads/task_MapPreviewer.py`
 
 **功能**：MapPreviewer 的全部后台计算线程，把地形采样、地图渲染、结构枚举、瓦片增量渲染与结构/群系定位放进工作线程；线程内不做任何 UI 操作，只通过 Qt 信号把进度/结果/错误回主线程。
 
@@ -1552,11 +1625,9 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 ---
 
-# SeedReverser（种子逆推工具）文档
-
 > 覆盖文件：
 > - `Tools\tool_SeedReverser.py`（实际 2404 行，控制层/UI 层）
-> - `Threads\task_SeedReverser.py`（246 行，后台计算线程）
+> - `Threads/task_SeedReverser.py`（246 行，后台计算线程）
 
 ---
 
@@ -1570,7 +1641,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 2. **信息熵提示**：`_update_info_bar` 只统计「可逆推」观测（`structure_params.is_reversible`，即 linear 且 lift_mod≥2；仅验证观测不约束低位预筛，计入会虚高），调用 `seed_math.calc_info_bits(obs_list)` 计算累计比特（容差把每维位置约束从 1 值放宽为 `min(2*tol+1, chunk_range)` 候选值并按窗口折减），钳到 [0,48] 后写入 `infoProgressBar`（颜色分段：`<18` 红 / `<27` 橙 / `<40` 黄 / `≥40` 绿），`seed_math.info_hint` 生成文字提示，并联动 `_update_buttons` 的按钮可用矩阵。实测发现 QProgressBar 对超上限的 setValue 会静默忽略且 value 停在 -1，因此必须先钳制。
 3. **结构种逆推**：`_on_calc_clicked` 把 `_observations` 压缩为 `entries`（struct_key/reg_x/reg_z/off_x/off_z/tol）交给 `SeedReverserCalcThread` 后台执行三层漏斗求解（`Utils\SeedReverser\structure_math.solve_structure_seeds`，约 10 秒级）。进度经 `progress(qlonglong,qlonglong,str)` 信号回 `_on_calc_progress`（按钮文本同时承担「取消」入口与百分比，阶段名放 tooltip）；完成经 `calc_finished(list,str)` 回 `_on_calc_finished`：与 `CANCELLED_SUMMARY` 比对识别取消，保存 `_last_candidates`/`_result_version`，群系模式开启时自动把候选全量回填精化面板（`_auto_fill_candidates`），按 hex+十进制双格式列出候选并触发 `_start_auto_verification`；无候选时给出三大可能原因与建议（版本不匹配/多条坐标抄错/站位跨区域）。`error` 信号回 `_on_calc_error`（观测不足等 ValueError 场景 + 结构选择建议）。
 4. **候选验证**：两层——① 计算完成后自动启动 `SeedReverserVerifyThread` 批量正向复算全部候选（`_on_verify_finished` 追加汇总与首个候选的 `verify_candidate_seed` 逐条比对明细）；② 「验证候选种子」按钮 `_on_verify_clicked` 弹 `QInputDialog` 供选择/手输任意 48 位种子，`_run_verification` 在主线程同步验证并把逐条明细追加到信息框（与层 3 同语义，逐观测用自己的行内容差）。
-5. **群系模式（世界种子精化）**：勾选 `biomeModeCheckBox` 后 `_on_biome_mode_toggled` 显示 `refineGroupBox` 并隐藏右侧 3D 结构视口（二者互斥，信息框为 Expanding 自动补位）。群系观测录入 `_on_add_biome_obs`：X 框可粘整段 F3+C（`parse_f3c_command_full` 自动填 X/Y/Z）、X/Z 整数校验、Y 可选（填则按该高度群系判定，缺省按深层）、`resolve_biome` 解析中英文/F3 别名群系名、按 `(x>>2, z>>2, y>>2)` 噪声格去重（同格信息冗余直接拒绝）。精化候选来源：计算完成自动回填 / `_on_import_candidates` 手动导入 / 候选框手敲（hex/十进制混合，`_parse_candidate_text` 解析，0≤v<2^48 去重）。`_on_refine_clicked` 校验（候选非空 + 观测 ≥`_MIN_BIOME_OBS=7`）后启动 `WorldSeedRefineThread`（`Threads\task_WorldSeedRefine`）：对每个候选结构种枚举高 16 位（每候选验证 65536 个种子，native 引擎约 0.2 秒/候选），输出满足全部群系观测的 64 位世界种子。`_on_refine_finished` 分唯一解（自动复制剪贴板）/ 多解（需人工核对）/ 未命中（三大原因）三态渲染到 `worldSeedDetailBrowser` 并发通知。
+5. **群系模式（世界种子精化）**：勾选 `biomeModeCheckBox` 后 `_on_biome_mode_toggled` 显示 `refineGroupBox` 并隐藏右侧 3D 结构视口（二者互斥，信息框为 Expanding 自动补位）。群系观测录入 `_on_add_biome_obs`：X 框可粘整段 F3+C（`parse_f3c_command_full` 自动填 X/Y/Z）、X/Z 整数校验、Y 可选（填则按该高度群系判定，缺省按深层）、`resolve_biome` 解析中英文/F3 别名群系名、按 `(x>>2, z>>2, y>>2)` 噪声格去重（同格信息冗余直接拒绝）。精化候选来源：计算完成自动回填 / `_on_import_candidates` 手动导入 / 候选框手敲（hex/十进制混合，`_parse_candidate_text` 解析，0≤v<2^48 去重）。`_on_refine_clicked` 校验（候选非空 + 观测 ≥`_MIN_BIOME_OBS=7`）后启动 `WorldSeedRefineThread`（`Threads/task_WorldSeedRefine`）：对每个候选结构种枚举高 16 位（每候选验证 65536 个种子，native 引擎约 0.2 秒/候选），输出满足全部群系观测的 64 位世界种子。`_on_refine_finished` 分唯一解（自动复制剪贴板）/ 多解（需人工核对）/ 未命中（三大原因）三态渲染到 `worldSeedDetailBrowser` 并发通知。
 6. **结果展示与辅助交互**：候选种子 hex+十进制双格式列出；`eventFilter` 拦截信息框双击，`_SEED_HEX_RE` 命中种子 hex 即复制到剪贴板并在 `infoHintLabel` 提示 4 秒；快捷键 Ctrl+Enter 计算、Esc 取消/清空输入、Enter 添加、Delete（列表焦点时）删行；两个列表各有右键菜单（删除/复制坐标/复制可粘回游戏聊天栏的传送命令）。
 
 **群系/结构下拉的图标 delegate**（自研 QStyledItemDelegate 族）：
@@ -1826,7 +1897,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 ---
 
-## `Threads\task_SeedReverser.py`
+## `Threads/task_SeedReverser.py`
 
 **功能**：SeedReverser 的后台计算线程模块，把两类耗时任放入 QThread 执行，工作线程不做任何 UI 操作，只通过信号回传进度/结果/错误：
 
@@ -1880,8 +1951,6 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 | `_last_emit` | 上次 progress 发出时刻（`time.monotonic`，仅工作线程内访问，无锁）。 |
 
 ---
-
-# 03d — StructurePreviewer 工具控制层文档
 
 ## `Tools/tool_StructurePreviewer.py`
 
@@ -2116,8 +2185,6 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 | `_comp` / `_era` | `Composition` / `int` | 预览成功后缓存的 compose 结果与 era，供 3D 开箱（准星右键/E）按模型坐标匹配预测箱并按序求值战利品。 |
 
 # 4. 附魔计算器（Utils/EnchantCaculator）
-
-# 附魔计算器模块文档（Utils/EnchantCaculator/）
 
 > 本文档覆盖附魔计算器工具的全部 9 个源文件，依据源码逐行整理。模块整体数据流：
 > `enchant_data_manager`（enchants.json 单例数据源）→ `choose_items`（物品+附魔选择对话框）→
@@ -2512,8 +2579,6 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 # 5. 备份组件与主窗口部件（AutoBackUp / Settings / MainWindow）
 
-# MCHelper 模块文档：备份/设置信号、进程监测、图标委托与可拖拽 Tab 栏
-
 > 本文档基于源码精读整理，覆盖以下 5 个文件：
 > `Utils/AutoBackUp/signals_AutoBackUp.py`、`Utils/AutoBackUp/process_monitor.py`、`Utils/AutoBackUp/right_icon_delegate.py`、`Utils/Settings/signals_Settings.py`、`Utils/MainWindow/draggable_tab_bar.py`
 
@@ -2727,8 +2792,6 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 | `self._live_fades` | `set[(QWidget, QTimer)]` | 淡出/飞回中的残影及其计时器集合，退出时统一清理。 |
 
 # 6. 地图预览器逻辑层（Utils/MapPreviewer）
-
-# MapPreviewer 支撑模块文档（Utils/MapPreviewer）
 
 本文档覆盖 MapPreviewer 的配色表、渲染器、采样器与原生扩展构建脚本共 6 个文件。
 所有信息来自源码精读，行号以当前源码为准。群系 id 全部与 cubiomes `biomes.h` 的
@@ -3150,8 +3213,6 @@ fortress = NOT bastion 等规则在 `structure_map.py` 侧实现（复用本模�
 
 # 7. 种子逆推核心库（Utils/SeedReverser · 算法）
 
-# 07 · SeedReverser 种子逆推核心模块文档
-
 > 覆盖范围：`Utils/SeedReverser` 包内 6 个算法/数据模块，以及 `_native/` 下 2 个 pybind11 构建脚本。
 > 依据：全部内容逐行取自源码精读，不含臆测；代码标识符保留英文。
 > 实际行数（撰写时）：mc_random.py 304 / mc_rng.py 189 / seed_math.py 172 / structure_math.py 714 / biome_noise.py 973 / world_seed_refine.py 270 / build_biome.py 68 / build_native.py 69。
@@ -3570,8 +3631,6 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 # 8. 结构模型与渲染（Utils/SeedReverser · 引擎）
 
-# 结构引擎模块文档（08a）：structure_models + jigsaw_assembly
-
 > 依据源码精读整理，覆盖 MCHelper 中结构体素建模与 jigsaw 拼装两大引擎。
 > 生成日期：2026-09-23。所有信息均来自源码，未做臆测；行号以当前文件为准。
 
@@ -3793,8 +3852,6 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 > 备注：`start_variant` 字段当前为 1.21.11 起始池 WeightedList 语义占位（None = 旧式展开抽取）；`_pool_from_json` 与 `parse_pool_dict` 的元素解析段为同一段逻辑的两份实现（后者支持内嵌 dict 数据源）。
 
 ---
-
-# 08b 结构视图层：形状几何 / 蓝图数据 / 3D 视口 / 2D 预览
 
 > 覆盖文件：`Utils/SeedReverser/block_shapes.py`、`structure_blueprints.py`、`structure_3dview.py`、`structure_preview.py`
 > 信息全部来自源码精读与 grep 交叉核实；代码标识符保留英文。
@@ -4084,8 +4141,6 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 # 9. 结构预览器逻辑层（Utils/StructurePreviewer）
 
-# StructurePreviewer 组装层文档 09a：composition.py
-
 ## `Utils/StructurePreviewer/composition.py`
 
 **功能**：结构预览器的组装中枢（结构构造组合层）。输入「世界种子 + 结构锚点方块坐标（+ 锚点群系 id + 版本键）」，输出两样东西：
@@ -4363,8 +4418,6 @@ RNG 与结构信息表：
 模块级已知妥协（源码 docstring 声明）：igloo 显示模型不随 rotation/mirror 旋转（cubiomes 公式含隐藏的 piece 内偏移，反解不唯一；RNG/世界坐标不受影响）；bastion 已从足迹示意体升级为逐 seed 真实 jigsaw 拼装；fortress 箱子标注近邻兜底（xp 与 Java 坐标已知偏差）；ocean_ruin 冷水三件套显示为三层并集示意（风化流依赖运行时海床沉降，不可平坦复现）。
 
 ---
-
-# 09b 战利品 RNG 与结构件模块文档
 
 本文档覆盖 `Utils/StructurePreviewer` 下战利品随机数原语、战利品表求值引擎与四套结构件生成模块。所有信息均来自源码逐行精读，行号引用为源文件内行号。
 
@@ -4832,8 +4885,6 @@ RNG 与结构信息表：
 
 ---
 
-# 09c — StructurePreviewer 拼装层与定位层（village / outpost / trial / ancient_city / locator / 包说明）
-
 > 依据源码精读整理（源码版本对应 MC Java 1.21 / 1.21.11 jar 资产口径）。
 > 四个 `*_assembly` 模块均为「薄适配层」：结构专属常量 + 资产根绑定（`load_template` / `load_pool`）+ 拼装入口（委托 `Utils/SeedReverser/jigsaw_assembly.py` 通用引擎，下称 **JA**）+ 渲染期单方块处理器（降解 / RuleProcessor）。
 > `jigsaw_assembly.assemble_jigsaw` 的通用主流为：重建布局 RNG（`make_layout_rng(level_seed, chunk_x, chunk_z)`）→（可选 `skip_y_bound` 补位）→ `rotation = nextInt(4)` → 起点池 pick `nextInt(总权重)` →（`start_jigsaw_name` 时起点标记洗牌 + anchor 重定位）→ `dy = k - (box.minY + groundLevelDelta)` → 外层大盒（xz = 中心±maxDist 含端 +1）→ `_Placer` 逐 jigsaw 标记扩展（连接判定 / 域扣除 / 候选 shuffle）。四个模块通过关键字参数把结构 JSON 定案注入该引擎。
@@ -5064,8 +5115,6 @@ RNG 与结构信息表：
 | （无） | — | 空文件，无任何变量或常量。 |
 
 # 10. 界面骨架层（CodesUI）
-
-# CodesUI 模块文档
 
 `CodesUI/` 是 Qt Designer 的 `.ui` 文件经 PySide6 uic（Qt User Interface Compiler 6.11.1）编译生成的界面代码目录。每个文件提供一个 `Ui_xxx` 类，包含 `setupUi`（构建控件树与布局）与 `retranslateUi`（设置文本）两个方法。业务层不采用组合模式（`self.ui.xxx`），而是多继承 mixin 模式：`class XxxWidget(BaseToolWidget, Ui_xxx)` 后调用 `self.setupUi(self)`，所有控件对象名直接成为业务类的属性（如 `self.comboVersion`）。本目录所有文件均为生成产物，头部注释声明"重新编译 UI 文件后改动将丢失"。
 
@@ -5407,7 +5456,7 @@ RNG 与结构信息表：
 
 > 所有路径相对项目根。标注"零引用"的资源已在 2026-09-23 整理中清理。
 
-## 10.1 公共资源 `assets/Public/`（多工具共用）
+## 11.1 公共资源 `assets/Public/`（多工具共用）
 
 | 内容 | 数量 | 加载方 |
 |---|---|---|
@@ -5415,7 +5464,7 @@ RNG 与结构信息表：
 | 结构图标 `EnvSprite_<name>.png`（16x16，英文 Wiki EnvSprite 转存） | 26 | `Utils/Public/structure_icons.py` 的 `icon_path()`（MapPreviewer 结构标记、SeedReverser/StructurePreviewer 结构下拉） |
 | `enchanted_glint.png`（128x128 附魔流光纹理，游戏原版） | 1 | EnchantCaculator（enchanted_item_card / anvil_steps_tree）、StructurePreviewer（tool_StructurePreviewer._GLINT_PATH） |
 
-## 10.2 私有资源（各工具自用）
+## 11.2 私有资源（各工具自用）
 
 ### `assets/SeedReverser/`（种子逆推 + 结构渲染）
 | 子目录 | 数量 | 用途 | 加载方 |
@@ -5440,7 +5489,7 @@ RNG 与结构信息表：
 ### `assets/EnchantCaculator/`
 18 个物品图标 PNG（diamond_sword、enchanted_book、turtle_helmet 等），由 `enchanted_item_card.get_item_icon_path()` 按中文物品名映射加载。
 
-## 10.3 数据文件
+## 11.3 数据文件
 
 | 路径 | 用途 | 读写方 |
 |---|---|---|
@@ -5449,7 +5498,7 @@ RNG 与结构信息表：
 | `Utils/StructurePreviewer/data/loot/` | 65 个战利品表快照 JSON，命名 `<表>.<档>.json`（档：1_20/1_21/1_21_11，不分档无后缀） | loot_engine（快照加载）+ tool_StructurePreviewer._LOOT_DIR |
 | `Utils/SeedReverser/_native/`、`Utils/MapPreviewer/_native/` | pybind11 原生扩展源码与构建脚本（build_*.py 调 MSVC cl.exe） | map_sampler / biome_noise / world_seed_refine 优先加载编译产物，失败回退纯 Python |
 
-## 10.4 用户配置（不随项目走）
+## 11.4 用户配置（不随项目走）
 
 运行时配置写入 `QStandardPaths.AppConfigLocation`（失败回退模块所在目录）：`tab_order.json`（Tab 顺序）、`settings_config.json`（设置页）、`backup_config.json`（备份页）、`enchant_session.json`、`seed_reverser_session.json`、`structure_previewer_session.json` 等（会话持久化）。Windows 开机自启写注册表 Run 键。
 
