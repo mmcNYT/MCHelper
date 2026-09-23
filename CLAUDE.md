@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '9e0ce77a-4270-4e4e-80f4-94dbb50e372b'
+  PropagateID: '9e0ce77a-4270-4e4e-80f4-94dbb50e372b'
+  ReservedCode1: '256bf0ce-c7b5-44c0-bd9e-34906a0c7199'
+  ReservedCode2: '256bf0ce-c7b5-44c0-bd9e-34906a0c7199'
+---
+
 项目阐释：
 1.使用pyside6编写
 2.程序本身为一个工具合集，使用tab栏进行工具的切换
