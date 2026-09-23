@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '687f001a-c459-4650-8b76-dd8d97603c25'
+  PropagateID: '687f001a-c459-4650-8b76-dd8d97603c25'
+  ReservedCode1: 'ed4bb798-34d7-4637-b917-4a4e1bdc5286'
+  ReservedCode2: 'ed4bb798-34d7-4637-b917-4a4e1bdc5286'
+---
+
 # MCHelper 代码库手册
 
 > 版本：2026-09-23（Utils/Public 与 assets/Public 结构整理后）。覆盖全部 60 份 Python 源文件与全部资源：每份文件含功能（含计算流程）、类与函数、接口、关键变量四节；接口引用关系均经全项目 grep 实证。
@@ -77,6 +88,8 @@
   - [`Utils/StructurePreviewer/mansion_pieces.py`](#utilsstructurepreviewermansion_piecespy)
   - [`Utils/StructurePreviewer/end_city_pieces.py`](#utilsstructurepreviewerend_city_piecespy)
   - [`Utils/StructurePreviewer/fortress_pieces.py`](#utilsstructurepreviewerfortress_piecespy)
+  - [`Utils/StructurePreviewer/pyramid_pieces.py`](#utilsstructurepreviewerpyramid_piecespy)
+  - [`Utils/StructurePreviewer/ruined_portal_pieces.py`](#utilsstructurepreviewerruined_portal_piecespy)
   - [`Utils/StructurePreviewer/village_assembly.py`](#utilsstructurepreviewervillage_assemblypy)
   - [`Utils/StructurePreviewer/outpost_assembly.py`](#utilsstructureprevieweroutpost_assemblypy)
   - [`Utils/StructurePreviewer/trial_assembly.py`](#utilsstructurepreviewertrial_assemblypy)
@@ -1954,11 +1967,11 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 ## `Tools/tool_StructurePreviewer.py`
 
-**功能**：StructurePreviewer（结构预览器）工具页的控制层，按世界种子预览结构 3D 构造并预测箱子战利品。类 `StructurePreviewerWidget` 同时继承 `BaseToolWidget`（工具页基类，提供 Tab 标题 `tool_name()="StructurePreviewer"` 与首选窗口尺寸 `preferred_size=(1170, 826)`）和 Qt Designer 编译产物 `CodesUI.StructurePreviewer.Ui_structurePreviewer`，是 MCHelper 工具集合中的一页。当前源码共 1884 行。
+**功能**：StructurePreviewer（结构预览器）工具页的控制层，按世界种子预览结构 3D 构造并预测箱子战利品。类 `StructurePreviewerWidget` 同时继承 `BaseToolWidget`（工具页基类，提供 Tab 标题 `tool_name()="StructurePreviewer"` 与首选窗口尺寸 `preferred_size=(1170, 826)`）和 Qt Designer 编译产物 `CodesUI.StructurePreviewer.Ui_structurePreviewer`，是 MCHelper 工具集合中的一页。当前源码共 1919 行。
 
 整体数据流为一条「输入 → 枚举 → compose → 渲染 → 战利品 → 图标合成」的流水线：
 
-1. **输入层**：世界种子（支持十进制、负数、`0x` 十六进制，校验 64 位有符号范围，`_parse_seed`）、版本键（`26.2`/`1.21.11`/`1.21`，来自 `structure_params.VERSION_KEYS`）、结构类型（14 种 `_STRUCT_KEYS`：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion/desert_pyramid/jungle_temple）、锚点坐标 X/Z（手动输入或「粘贴F3+C」解析剪贴板）。「woodland_mansion」是 UI/展示/compose 用键，枚举与群系校验链路用 cubiomes 键 `mansion`，由 `_UI_TO_ENUM` 别名映射桥接。
+1. **输入层**：世界种子（支持十进制、负数、`0x` 十六进制，校验 64 位有符号范围，`_parse_seed`）、版本键（`26.2`/`1.21.11`/`1.21`，来自 `structure_params.VERSION_KEYS`）、结构类型（16 种 `_STRUCT_KEYS`：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion/desert_pyramid/jungle_temple/ruined_portal/buried_treasure）、锚点坐标 X/Z（手动输入或「粘贴F3+C」解析剪贴板）。「woodland_mansion」是 UI/展示/compose 用键，枚举与群系校验链路用 cubiomes 键 `mansion`，由 `_UI_TO_ENUM` 别名映射桥接。
 
 2. **实例枚举（后台线程）**：单按钮两态的「附近的实例」态触发 `_on_locate_clicked`，创建 `_LocateThread`（QThread）在后台调用 `Utils/Public/structure_map.enumerate_structures`，以输入坐标（留空为原点）为中心 ±`_LOCATE_RADIUS`(2048) 方块视口，按结构所属维度（`structure_params.STRUCT_DIMENSION`，下界结构自动走 NetherSampler）逐区块枚举真实生成的结构实例（含群系校验，结果与游戏 `/locate` 一致），以 `progress`/`finished_ok`/`error` 信号回传主线程；结果按距中心距离平方排序填入左侧 `treeWidget`（结构/X/Z/群系四列），行 UserRole 存 `(x, z, 结构键)`，双击行加载实例，右键复制 F3+C 格式传送指令（`_tp_command` 生成 `/execute in <维度> run tp @s X 100 Z 0 0`）。
 
@@ -2080,7 +2093,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 | `_on_instance_context_menu` | `(pos) -> None` | 右键实例行：从行 UserRole 结构键查 `STRUCT_DIMENSION`/`DIMENSION_NAMES` 得维度中文名，弹单项菜单「复制TP指令（<维度>，F3+C 格式）」→ `_copy_instance_tp`。 |
 | `_copy_instance_tp` | `(item) -> None` | 行传送指令写入剪贴板（`_tp_command`，菜单动作与离屏测试共用实现），infoLabel 提示 Y=100 上空自行调高。 |
 | `_on_preview_clicked` | `() -> None` | 预览主流程（两态统一入口）：非「已加载当前坐标」态 → 转 `_on_locate_clicked`；否则解析种子/X/Z，依次：① 别名映射取枚举键；② 群系校验——主世界结构新建 `BiomeSampler`（下界/末地传 None 走 check_structure_at 内部惰性采样器），`check_structure_at` 得 (viable, biome)；③ `composition.compose(UI 键, seed, bx, bz, biome_id, version)` 得 comp（biome<0 传 -1）；④ `composition.compose_display_model(comp)` 得 model 注入视口（`set_model`），清箱子选中与高亮（`set_chest_highlights(None)`），`set_interact_chests(model["chest_blocks"])` 注册可交互箱；⑤ `loot_engine.era_for_version` 得 era，缓存 `_comp`/`_era` 供 3D 开箱按序取用，`_fill_chests` + `_fill_info`；异常统一显示「预览失败：…」。compose 与 loot 均在主线程同步执行。 |
-| `_fill_info` | `(comp, viable: bool, biome: int, seed: int, version: str) -> None` | 结构信息区多行文本：结构名（查 cubiomes 键）+ 变种名（与键同名不重复展示）、锚点/旋转/镜像、群系（viable=False 加「未通过生成校验」警告）；按结构追加专属行——igloo 地下室（有则竖井段数）、shipwreck 搁浅、nether_fortress/end_city/trial_chambers/pillager_outpost 部件数（end_city 加含末地船、trial 加密室层 y）、bastion 起点类型（`_BASTION_START_CN`）、ancient_city 中心类型（`_ANCIENT_CITY_START_CN`）+ 底面 y、village 变体/僵尸标记/中心序号/地基 y、stronghold 部件数 + 传送门已填眼数（bin 计 1）/12、woodland_mansion 拼装旋转/房间件数/覆盖区块、ocean_ruin 水温/大型/簇件/部件数；末行箱子数。 |
+| `_fill_info` | `(comp, viable: bool, biome: int, seed: int, version: str) -> None` | 结构信息区多行文本：结构名（查 cubiomes 键）+ 变种名（与键同名不重复展示）、锚点/旋转/镜像、群系（viable=False 加「未通过生成校验」警告）；按结构追加专属行——igloo 地下室（有则竖井段数）、shipwreck 搁浅、nether_fortress/end_city/trial_chambers/pillager_outpost 部件数（end_city 加含末地船、trial 加密室层 y）、bastion 起点类型（`_BASTION_START_CN`）、ancient_city 中心类型（`_ANCIENT_CITY_START_CN`）+ 底面 y、village 变体/僵尸标记/中心序号/地基 y、stronghold 部件数 + 传送门已填眼数（bin 计 1）/12、woodland_mansion 拼装旋转/房间件数/覆盖区块、ocean_ruin 水温/大型/簇件/部件数、ruined_portal 变体/放置/模板/朝向/镜像（前后）/埋放 y/气室/藤蔓/葱郁、buried_treasure 锚点区块内 (9, 9)；末行箱子数。 |
 | `_fill_chests` | `(comp, era: int, viable: bool, biome: int) -> None` | 箱子列表填充：无箱子改表头「（无箱子）」；逐箱顶层行 =「箱N（表名）@ (x, z)｜LootTableSeed: 有符号值」（`loot_rng.signed_seed`）；`_loot_table` + `generate_loot` 求值（异常时子行显示「战利品求值失败」）；`_merge_stacks` 合并后每堆一个子行（`_item_label` 文本 + `_item_tooltip_html` 富文本 tooltip + UserRole 图标键 + 有附魔置 `_ENCHANTED_ROLE`）；空箱显示「（空）」；最后 expandAll。 |
 | `_on_chest_open_requested` | `(idx: int) -> None` | 视口准星态右键/E 开箱：idx 是交互箱全集（model["chest_blocks"]）下标，按模型坐标匹配 `_comp.chests` 中 `pos_model` 相等的预测 Chest（无预测数据 → `note_chest_gui_closed` 恢复鼠标 + 提示，不编造战利品）；用缓存 `_era` 重新 `generate_loot`（**不合并**，槽位摆放=游戏实际入箱序）；标题用剥 `chests/` 前缀的表短名 + 坐标（防像素字体 2x 面板 352px 装不下全路径被切）；非模态单实例：先换 `_chest_dlg` 引用再连 finished（防旧窗 finished 误撤新锁），关旧（close+deleteLater）、`show` 新窗、`set_spectator_input_locked(True)` 锁视口 FP 输入。 |
 | `_on_spectator_close_request` | `() -> None` | 锁定态视口 Esc/E 转发：若开箱窗可见则 close。双保险兜底——正常路径靠弹窗失焦自关，焦点停在视口的平台边缘态由此兜底。 |
@@ -4150,7 +4163,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 1. `Composition`（`compose()`）——一次结构的完整构造组合：模板变种（variant）、放置旋转（rotation/mirror）、部件（Piece）布局、每个箱子的世界坐标 + 战利品表 + 无符号 64 位 `LootTableSeed`；
 2. 3D 视口显示模型（`compose_display_model()`）——`structure_3dview.set_model` 格式的体素模型 dict（`voxels/size/mesh/tex_keys/chests/chest_blocks/anchor/anchor_y/...`）。
 
-覆盖 12 个结构键：`igloo`（雪屋）、`shipwreck`（沉船）、`nether_fortress`（下界要塞）、`bastion_remnant`（堡垒遗迹）、`end_city`（末地城）、`trial_chambers`（试炼密室，1.21+）、`pillager_outpost`（掠夺者前哨站）、`stronghold`（要塞）、`woodland_mansion`（林地府邸）、`ocean_ruin`（海底废墟/水下遗迹）、`ancient_city`（远古城市）、`village`（村庄）。
+覆盖 16 个结构键：`igloo`（雪屋）、`shipwreck`（沉船）、`nether_fortress`（下界要塞）、`bastion_remnant`（堡垒遗迹）、`end_city`（末地城）、`trial_chambers`（试炼密室，1.21+）、`pillager_outpost`（掠夺者前哨站）、`stronghold`（要塞）、`woodland_mansion`（林地府邸）、`ocean_ruin`（海底废墟/水下遗迹）、`ancient_city`（远古城市）、`village`（村庄）、`desert_pyramid`（沙漠神殿）、`jungle_temple`（丛林神庙）、`ruined_portal`（废弃传送门）、`buried_treasure`（埋藏的宝藏）。
 
 实现原理——按结构类型分三种范式：
 
@@ -4164,8 +4177,8 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 **主流程**：
 
-- `compose()`（L2415）：`struct_key` 字符串分派到 12 个 `compose_*` 函数（if 链），未支持键抛 `ValueError`。`biome_id` 仅 shipwreck（搁浅判定）与 village（变体判定）/ocean_ruin（冷暖水判定）需要，缺省 -1。
-- `compose_display_model()`（L2805）：按 `comp.struct_key` 分派体素生成（igloo 拼模板 + shipwreck 模板旋转 / fortress·bastion·trial·outpost·stronghold·mansion·ocean_ruin·ancient_city·village 的 `_*_voxels` 转写 / end_city 的 `end_city_pieces.end_city_voxels`）→ min_x/min_z 归一化到非负象限并补偿 `start_off` → 计算 `size/min_y` → 箱子标注匹配（分结构三路）→ 确定 `anchor_y`（igloo/ocean_ruin=90，shipwreck 及 nether 类=64，trial/ancient_city/village=`extra["start_y"]`）→ `chest_blocks`（渲染体素中全部容器方块，3D 开箱准星交互全集）→ `tex_keys` → `structure_models.build_mesh` → 返回模型 dict（含 `anchor_local=-start_off` 与 `chunk_origin=anchor_local % 16`，供注入模式的区块黄框相位对齐）。
+- `compose()`（L2560）：`struct_key` 字符串分派到 14 个 `compose_*` 函数（if 链；desert_pyramid/jungle_temple 共用 `_compose_pyramid`），未支持键抛 `ValueError`。`biome_id` 仅 shipwreck（搁浅判定）、village（变体判定）/ocean_ruin（冷暖水判定）/ruined_portal（变体判定）需要，缺省 -1。
+- `compose_display_model()`（L2984）：按 `comp.struct_key` 分派体素生成（igloo 拼模板 + shipwreck 模板旋转 / fortress·bastion·trial·outpost·stronghold·mansion·ocean_ruin·ancient_city·village 的 `_*_voxels` 转写 / end_city 的 `end_city_pieces.end_city_voxels`）→ min_x/min_z 归一化到非负象限并补偿 `start_off` → 计算 `size/min_y` → 箱子标注匹配（分结构三路）→ 确定 `anchor_y`（igloo/ocean_ruin=90，shipwreck 及 nether 类=64，trial/ancient_city/village=`extra["start_y"]`）→ `chest_blocks`（渲染体素中全部容器方块，3D 开箱准星交互全集）→ `tex_keys` → `structure_models.build_mesh` → 返回模型 dict（含 `anchor_local=-start_off` 与 `chunk_origin=anchor_local % 16`，供注入模式的区块黄框相位对齐）。
 
 ---
 
@@ -4240,9 +4253,9 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose_pillager_outpost`（L1135） | `compose_pillager_outpost(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 前哨站全量组合（1.21.11 语义）。流程见下 |
-| `_outpost_piece_containers_world`（L1205） | `_outpost_piece_containers_world(piece) -> list[tuple[tuple[int,int,int], str, int]]` | piece 箱子（DATA 标记语义）→ (世界 (x,y,z), 表, 子模板序)：单模板 piece 走防御式 chest 扫描；list piece（towers）按 watchtower + overgrown 子模板依序展开（DATA 标记 Chest* 在 watchtower @(9,14,10)），overgrown 箱子先过 `outpost_assembly.apply_outpost_rot`（95% 蚀掉→不写不消耗，保留则记录）；排序键 = (子模板序, Y, X, Z)（Java 依序两次 placeInWorld） |
-| `_outpost_template_containers`（L1239） | `_outpost_template_containers(key: str) -> tuple` | 前哨站模板 NBT：watchtower 系无真实 chest 方块，由 DATA 标记 jigsaw（name 以 `Chest` 开头且 `final_state == "minecraft:chest"`）按标记位产出箱子记录（表取 nbt.LootTable，缺省 `minecraft:chests/pillager_outpost`）；普通模板防御式扫 nbt.LootTable 的 chest |
+| `compose_pillager_outpost`（L1272） | `compose_pillager_outpost(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 前哨站全量组合（1.21.11 语义）。流程见下 |
+| `_outpost_piece_containers_world`（L1342） | `_outpost_piece_containers_world(piece) -> list[tuple[tuple[int,int,int], str, int]]` | piece 箱子（DATA 标记语义）→ (世界 (x,y,z), 表, 子模板序)：单模板 piece 走防御式 chest 扫描；list piece（towers）按 watchtower + overgrown 子模板依序展开（DATA 标记 Chest* 在 watchtower @(9,14,10)），overgrown 箱子先过 `outpost_assembly.apply_outpost_rot`（95% 蚀掉→不写不消耗，保留则记录）；排序键 = (子模板序, Y, X, Z)（Java 依序两次 placeInWorld） |
+| `_outpost_template_containers`（L1376） | `_outpost_template_containers(key: str) -> tuple` | 前哨站模板 NBT：watchtower 系无真实 chest 方块，由 DATA 标记 jigsaw（name 以 `Chest` 开头且 `final_state == "minecraft:chest"`）按标记位产出箱子记录（表取 nbt.LootTable，缺省 `minecraft:chests/pillager_outpost`）；普通模板防御式扫 nbt.LootTable 的 chest |
 
 `compose_pillager_outpost` 流程（RNG 消耗顺序）：① `chunk_generate_rnd` 建流；② `rotation = nextInt(4)`（start pool 单元素 base_plate 的 `nextInt(1)` 在拼装引擎内消耗；start_height absolute(0) 零消耗；起点底面 = 地表平坦基准 63）；③ `assemble_outpost` 拼装；④ 容器收集按 (子模板序 × 块内 (Y,X,Z)) 分区块；⑤ 每区块装饰流 salt `pillager_outpost=(4,9)` 连抽 nextLong；⑥ 同 `pos3` 后写覆盖（overgrown 箱保留时替换 watchtower 箱方块，**两条记录都真实消耗装饰流**，去重仅作用于呈现层，不影响消耗序与后续种子偏移），以 `chests_by_pos` dict 实现。`extra = {start: 0, world_seed, n_pieces, n_chests}`。
 
@@ -4250,34 +4263,34 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `_is_chest_value`（L1315） | `_is_chest_value(v) -> bool` | 体素值是否容器方块（`chest/trapped_chest/barrel`，`_CHEST_MATS`）；兼容纯字符串与 `(纹理, 形状)` 元组 |
-| `_igloo_model_parts`（L1325） | `_igloo_model_parts(comp: Composition) -> list[tuple[str, int, int, int]]` | 雪屋显示部件清单 [(模板文件名, dx, dy, dz)]：锚点偏移照抄 finders.c（top (0,0,0) / middle i (+2,−3i,+4) / bottom (0,−3−3size,−2)），无地下室仅 top；模板名取 `structure_models.TEMPLATE_FILES["igloo"]` |
-| `_rotate_voxels`（L1343） | `_rotate_voxels(voxels: dict, rotation: int, nominal: tuple[int, int] \| None = None) -> tuple[dict, tuple[int, int]]` | 体素按 cubiomes 放置旋转精确变换：R_raw（rot0 (x,z) / rot1 (−z,x) / rot2 (−x,−z) / rot3 (z,−x)，与箱子世界坐标公式同向）；非完整方块元组同步 `block_shapes.shape_rotation` 旋转形状码朝向；返回 (旋转后体素, (平移x, 平移z))，平移 = min 使体素回非负象限，调用方用 startPos + shift 得模型锚点偏移。`nominal=(sx,sz)` 名义包围盒：shift 按完整格点解析式算（rot1 (−(sz−1),0) / rot2 (−(sx−1),−(sz−1)) / rot3 (0,−(sx−1))），用于 degraded 沉船（边缘方块被风化缺失，按实际体素算会把模型错位、区块网格相位偏移） |
+| `_is_chest_value`（L1452） | `_is_chest_value(v) -> bool` | 体素值是否容器方块（`chest/trapped_chest/barrel`，`_CHEST_MATS`）；兼容纯字符串与 `(纹理, 形状)` 元组 |
+| `_igloo_model_parts`（L1470） | `_igloo_model_parts(comp: Composition) -> list[tuple[str, int, int, int]]` | 雪屋显示部件清单 [(模板文件名, dx, dy, dz)]：锚点偏移照抄 finders.c（top (0,0,0) / middle i (+2,−3i,+4) / bottom (0,−3−3size,−2)），无地下室仅 top；模板名取 `structure_models.TEMPLATE_FILES["igloo"]` |
+| `_rotate_voxels`（L1488） | `_rotate_voxels(voxels: dict, rotation: int, nominal: tuple[int, int] \| None = None) -> tuple[dict, tuple[int, int]]` | 体素按 cubiomes 放置旋转精确变换：R_raw（rot0 (x,z) / rot1 (−z,x) / rot2 (−x,−z) / rot3 (z,−x)，与箱子世界坐标公式同向）；非完整方块元组同步 `block_shapes.shape_rotation` 旋转形状码朝向；返回 (旋转后体素, (平移x, 平移z))，平移 = min 使体素回非负象限，调用方用 startPos + shift 得模型锚点偏移。`nominal=(sx,sz)` 名义包围盒：shift 按完整格点解析式算（rot1 (−(sz−1),0) / rot2 (−(sx−1),−(sz−1)) / rot3 (0,−(sx−1))），用于 degraded 沉船（边缘方块被风化缺失，按实际体素算会把模型错位、区块网格相位偏移） |
 
 ### stronghold（要塞）
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose_stronghold`（L1393） | `compose_stronghold(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 要塞全量组合：拼装/loot 流照抄 xp fork features/stronghold.c（`stronghold_pieces.compose_stronghold_pieces`，对拍 probe_sh 8 案例 checks=4206 FAILS=0）；本层逐 piece 转 Piece/Chest，表名按 C loot_tables.c 分档经 `sp.loot_table_for_version`（crossing 恒 1_13、library/corridor 按版本）；anchor = 全 piece bb 的 min(x,z)；箱子 seed `& loot_rng._M64` 归无符号；`extra = {world_seed, chunk, n_pieces, n_chests, portal_eyes}`（portal_eyes 取 SH_PORTAL_ROOM 件的末影之眼数） |
-| `_stronghold_voxels`（L1438） | `_stronghold_voxels(comp: Composition) -> tuple[dict, set]` | 要塞显示：重跑 `sp.assemble_stronghold(..., sink_y=True)`（确定性 RNG，结果一致）→ `sp.build_stronghold_voxels(raw, comp.anchor)` 逐 piece postProcess 转写；模型 (x,z)=世界−anchor、y=世界−64（沉降后可为负，display 统一平移）；返回 RNG 箱子 (x,z) 集合供 exact 匹配（RNG 箱子与几何同源：同 piece 序 + 同 rot_pos 变换） |
+| `compose_stronghold`（L1538） | `compose_stronghold(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 要塞全量组合：拼装/loot 流照抄 xp fork features/stronghold.c（`stronghold_pieces.compose_stronghold_pieces`，对拍 probe_sh 8 案例 checks=4206 FAILS=0）；本层逐 piece 转 Piece/Chest，表名按 C loot_tables.c 分档经 `sp.loot_table_for_version`（crossing 恒 1_13、library/corridor 按版本）；anchor = 全 piece bb 的 min(x,z)；箱子 seed `& loot_rng._M64` 归无符号；`extra = {world_seed, chunk, n_pieces, n_chests, portal_eyes}`（portal_eyes 取 SH_PORTAL_ROOM 件的末影之眼数） |
+| `_stronghold_voxels`（L1583） | `_stronghold_voxels(comp: Composition) -> tuple[dict, set]` | 要塞显示：重跑 `sp.assemble_stronghold(..., sink_y=True)`（确定性 RNG，结果一致）→ `sp.build_stronghold_voxels(raw, comp.anchor)` 逐 piece postProcess 转写；模型 (x,z)=世界−anchor、y=世界−64（沉降后可为负，display 统一平移）；返回 RNG 箱子 (x,z) 集合供 exact 匹配（RNG 箱子与几何同源：同 piece 序 + 同 rot_pos 变换） |
 
 ### woodland_mansion（林地府邸）
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose_mansion`（L1463） | `compose_mansion(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 府邸全量组合：拼装/装饰线全在 `mansion_pieces.assemble_mansion`（MansionGrid + createMansion 转写，对拍 6 案例 ALL PASS）；anchor = 全 piece pos 的 min(x,z)；单一 Piece("woodland_mansion") 承载全部箱子（pos3 填充，seed `& _M64`）；rotation = `mp._ROT_NAMES.index(rot_name)`；loot salt 用 (4,5) 档；`extra = {world_seed, chunk, rot_name, n_pieces, n_chests}` |
-| `_mansion_voxels`（L1498） | `_mansion_voxels(comp: Composition) -> tuple[dict, set]` | 府邸显示：重跑 assemble_mansion，逐 piece `mp._load_template` 加载体素（air/structure_void/structure_block 不入），`mp.transform_pos(mirror, rot)` 变换（**镜像先、旋转后**）+ `shape_mirror` + `shape_rotation` 同步形状码；halfheight: 前缀剥除、无形状时补 `_bs.SHAPE_SLAB_BOT`；随机箱（DATA 标记不产出 NBT 方块）按容器记录补写 `"chest"` 体素；y 基准 64；箱子标注走 pos3 exact（chest_offs 仅为接口形状） |
+| `compose_mansion`（L1608） | `compose_mansion(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 府邸全量组合：拼装/装饰线全在 `mansion_pieces.assemble_mansion`（MansionGrid + createMansion 转写，对拍 6 案例 ALL PASS）；anchor = 全 piece pos 的 min(x,z)；单一 Piece("woodland_mansion") 承载全部箱子（pos3 填充，seed `& _M64`）；rotation = `mp._ROT_NAMES.index(rot_name)`；loot salt 用 (4,5) 档；`extra = {world_seed, chunk, rot_name, n_pieces, n_chests}` |
+| `_mansion_voxels`（L1643） | `_mansion_voxels(comp: Composition) -> tuple[dict, set]` | 府邸显示：重跑 assemble_mansion，逐 piece `mp._load_template` 加载体素（air/structure_void/structure_block 不入），`mp.transform_pos(mirror, rot)` 变换（**镜像先、旋转后**）+ `shape_mirror` + `shape_rotation` 同步形状码；halfheight: 前缀剥除、无形状时补 `_bs.SHAPE_SLAB_BOT`；随机箱（DATA 标记不产出 NBT 方块）按容器记录补写 `"chest"` 体素；y 基准 64；箱子标注走 pos3 exact（chest_offs 仅为接口形状） |
 
 ### ocean_ruin（海底废墟）
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `_ocean_rot_xz`（L1607） | `_ocean_rot_xz(x: int, z: int, rot: int) -> tuple[int, int]` | Java `StructureTemplate.transform`（mirror=NONE、pivot=0）x/z 分量：((x,z), (−z,x), (−x,−z), (z,−x))[rot&3]，与 `_rotate_voxels` 的 R_raw 同向 |
-| `_mth_next_int`（L1613） | `_mth_next_int(state: int, lo: int, hi: int) -> tuple[int, int]` | Java `Mth.nextInt(random, min, max)`：min≥max 返回 min 不消耗；否则 `next_int(state, hi−lo+1) + lo` |
-| `_ocean_piece_bbox`（L1621） | `_ocean_piece_bbox(p: dict) -> tuple[int, int, int, int]` | piece 世界平面 bbox（getBoundingBox 语义）：对角 = transform(size−1, rot)（big 模板 16×16、small 6×7），fromCorners 取 min/max，x/z 闭区间 |
-| `_ocean_piece_in_chunk`（L1632） | `_ocean_piece_in_chunk(p: dict, pcx: int, pcz: int) -> bool` | piece bbox 与区块 [16cx, 16cx+15]² 相交判定（BoundingBox.intersects 同义；postProcess 触发条件） |
-| `compose_ocean_ruin`（L1640） | `compose_ocean_ruin(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 海底废墟全量组合。流程见下 |
-| `_ocean_ruin_voxels`（L1811） | `_ocean_ruin_voxels(comp: Composition) -> tuple[dict, set]` | 显示：逐 piece `_load_template_voxels(f"underwater_ruin__{短名}.nbt")`，`_ocean_rot_xz` 旋转（形状码同步 shape_rotation）+ pos 平移，遍历顺序 = pieces 序（后写覆盖先写，cold 三件套同位叠放：mossy 完整覆盖上层、brick/cracked 露出空位）；**未转写 BlockRotProcessor 风化**（integrity 判定流依赖运行时海床沉降 y，平坦预览不可精确复现，cold big 显示为三层并集示意）；DATA 标记箱子补写 chest 体素；y 基准 90 |
+| `_ocean_rot_xz`（L1752） | `_ocean_rot_xz(x: int, z: int, rot: int) -> tuple[int, int]` | Java `StructureTemplate.transform`（mirror=NONE、pivot=0）x/z 分量：((x,z), (−z,x), (−x,−z), (z,−x))[rot&3]，与 `_rotate_voxels` 的 R_raw 同向 |
+| `_mth_next_int`（L1758） | `_mth_next_int(state: int, lo: int, hi: int) -> tuple[int, int]` | Java `Mth.nextInt(random, min, max)`：min≥max 返回 min 不消耗；否则 `next_int(state, hi−lo+1) + lo` |
+| `_ocean_piece_bbox`（L1766） | `_ocean_piece_bbox(p: dict) -> tuple[int, int, int, int]` | piece 世界平面 bbox（getBoundingBox 语义）：对角 = transform(size−1, rot)（big 模板 16×16、small 6×7），fromCorners 取 min/max，x/z 闭区间 |
+| `_ocean_piece_in_chunk`（L1777） | `_ocean_piece_in_chunk(p: dict, pcx: int, pcz: int) -> bool` | piece bbox 与区块 [16cx, 16cx+15]² 相交判定（BoundingBox.intersects 同义；postProcess 触发条件） |
+| `compose_ocean_ruin`（L1785） | `compose_ocean_ruin(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 海底废墟全量组合。流程见下 |
+| `_ocean_ruin_voxels`（L1956） | `_ocean_ruin_voxels(comp: Composition) -> tuple[dict, set]` | 显示：逐 piece `_load_template_voxels(f"underwater_ruin__{短名}.nbt")`，`_ocean_rot_xz` 旋转（形状码同步 shape_rotation）+ pos 平移，遍历顺序 = pieces 序（后写覆盖先写，cold 三件套同位叠放：mossy 完整覆盖上层、brick/cracked 露出空位）；**未转写 BlockRotProcessor 风化**（integrity 判定流依赖运行时海床沉降 y，平坦预览不可精确复现，cold big 显示为三层并集示意）；DATA 标记箱子补写 chest 体素；y 基准 90 |
 
 `compose_ocean_ruin` 流程（RNG 消耗顺序，OceanRuinPieces.java 逐行照抄）：① `temp = "warm" if biome_id in _OCEAN_WARM_BIOMES else "cold"`（未知 -1 按 cold），salt 键 `ocean_ruin_warm/cold`；② `chunk_generate_rnd` 建流，`rotation = nextInt(4)`；③ `nextFloat()` ≤0.3 → large（主件模板选择在 `_add_piece` 内：warm 大型 `nextInt(4)` 取 big_warm_{4+idx}、小型 `nextInt(8)` 取 warm_{1+idx}；cold 大型 `nextInt(4)` 从 `_OCEAN_BIG_COLD_IDX=(1,2,3,8)` 取 n、小型 `nextInt(8)` 取 1..8，然后 brick/cracked/mossy 三件套连放——**不再消耗 RNG**）；④ large 时 `nextFloat()` ≤0.9 → cluster（&&短路，small 不消耗）；⑤ cluster 时 addClusterRuins：主盒 = anchor 到 transform((15,0,15),rot) 对角盒；8 个候选位各消耗 2 次 `Mth.nextInt`（`_OCEAN_ALLPOS_RULES`），`Mth.nextInt(4,8)` 定数量，每轮 `nextInt(len(cands))` 取点 + `nextInt(4)` 朝向，候选盒（cpos+transform((5,0,6),crot)）与主盒**相交也照常消耗**、只是不放 piece（不相交才 `_add_piece` 小型件）；⑥ 箱子记录：模板无真实容器方块，全部由 "chest" DATA 标记运行时放置，坐标查 `_OCEAN_CHEST_MARKERS`（48 模板扫描实证，每模板 0/1 个，mossy_1 无）经 `_ocean_rot_xz` 变换；⑦ LootTableSeed：按箱子所在区块分组，组内按 `pieces_raw` 序（piece 相交本区块才 postProcess 消耗）抽 `population + decorator + 10000*step` 流的 nextLong；⑧ 生效箱过滤：cold 三件套同位叠放 → 同 pos3 多条记录全消耗（幽灵消耗）但方块后写覆盖，只保留 pi 最大者。`extra = {temp, large, cluster, world_seed, n_pieces, n_cluster, n_chests}`。
 
@@ -4285,11 +4298,11 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose_ancient_city`（L1856） | `compose_ancient_city(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 远古城市全量组合。流程见下 |
-| `_piece_ac_containers_world`（L1924） | `_piece_ac_containers_world(piece) -> list` | AC piece 内带 LootTable 的 chest（全结构无 barrel，ice_box 也是 chest）→ 世界坐标：list piece（ice_box_1 单子件 / camp 三子件）逐子模板展开，排序键 = (子序, Y, X, Z)；list 子模板无处理器降解（chest 不在 #ancient_city_replaceable，永不蚀空） |
-| `_ac_template_containers`（L1957） | `_ac_template_containers(key: str) -> tuple` | AC 模板 NBT：`minecraft:chest`/`trapped_chest` 且 nbt.LootTable 有值才入列（15 chest 中 14 个有字段：13 chests/ancient_city + 1 ancient_city_ice_box；city_center_2 的 1 个无字段=游戏内空箱不消耗流）；key 保留 `ancient_city/` 前缀，路径经 `ancient_city_assembly.ASSET_DIR` |
-| `_ancient_city_raw_blocks`（L2008） | `_ancient_city_raw_blocks(key: str) -> dict` | AC 模板 NBT → `{(x,y,z): (方块名, 形状码)}` 原始体素（`_AC_RAW_CACHE` 缓存）；Properties 经 `block_shapes.shape_from_palette` 转形状码供旋转同步 |
-| `_ancient_city_jigsaw_voxels`（L2054） | `_ancient_city_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | AC 显示：重跑 `assemble_ancient_city`（与游戏同 RNG 流，含起点模板 jigsaw 标记洗牌 4 次 + city_anchor 重定位），逐 piece 逐子模板渲染：跳过 `minecraft:jigsaw` 占位，`rot_piece_pos` 旋转 + piece_pos 平移，逐方块 `aca.apply_ancient_city_degradation(nm, wx, wy, wz, variant)`（block_rot 0.95 + rule 链，每方块独立 Mth.getSeed 随机源，variant 按模板 key 定案，None=蚀空跳过），材质 `_map_block`；模型 y 基准 = `extra["start_y"]`（起点件底面） |
+| `compose_ancient_city`（L2001） | `compose_ancient_city(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 远古城市全量组合。流程见下 |
+| `_piece_ac_containers_world`（L2069） | `_piece_ac_containers_world(piece) -> list` | AC piece 内带 LootTable 的 chest（全结构无 barrel，ice_box 也是 chest）→ 世界坐标：list piece（ice_box_1 单子件 / camp 三子件）逐子模板展开，排序键 = (子序, Y, X, Z)；list 子模板无处理器降解（chest 不在 #ancient_city_replaceable，永不蚀空） |
+| `_ac_template_containers`（L2102） | `_ac_template_containers(key: str) -> tuple` | AC 模板 NBT：`minecraft:chest`/`trapped_chest` 且 nbt.LootTable 有值才入列（15 chest 中 14 个有字段：13 chests/ancient_city + 1 ancient_city_ice_box；city_center_2 的 1 个无字段=游戏内空箱不消耗流）；key 保留 `ancient_city/` 前缀，路径经 `ancient_city_assembly.ASSET_DIR` |
+| `_ancient_city_raw_blocks`（L2153） | `_ancient_city_raw_blocks(key: str) -> dict` | AC 模板 NBT → `{(x,y,z): (方块名, 形状码)}` 原始体素（`_AC_RAW_CACHE` 缓存）；Properties 经 `block_shapes.shape_from_palette` 转形状码供旋转同步 |
+| `_ancient_city_jigsaw_voxels`（L2199） | `_ancient_city_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | AC 显示：重跑 `assemble_ancient_city`（与游戏同 RNG 流，含起点模板 jigsaw 标记洗牌 4 次 + city_anchor 重定位），逐 piece 逐子模板渲染：跳过 `minecraft:jigsaw` 占位，`rot_piece_pos` 旋转 + piece_pos 平移，逐方块 `aca.apply_ancient_city_degradation(nm, wx, wy, wz, variant)`（block_rot 0.95 + rule 链，每方块独立 Mth.getSeed 随机源，variant 按模板 key 定案，None=蚀空跳过），材质 `_map_block`；模型 y 基准 = `extra["start_y"]`（起点件底面） |
 
 `compose_ancient_city` 流程（RNG 消耗顺序）：① `chunk_generate_rnd` 建流；② y = −27（start_height absolute **零消耗**）；③ `rotation = nextInt(4)`（`structure_map._jigsaw_variant` 同序；其内部 nextInt(3) 为包围盒推算消耗不影响 rotation 值）；④ start `nextInt(3)` 在 `assemble_ancient_city` 引擎内消耗（city_center 池三件等权）；⑤ 容器收集按 piece 序分区块；⑥ 每区块装饰流 salt `ancient_city=(7,0)`（decorator 0、step 7）连抽 nextLong。`extra = {start, world_seed, start_y（起点件底面 world y）, n_pieces, n_chests}`。
 
@@ -4297,12 +4310,12 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `_rotate_props`（L2131） | `_rotate_props(name: str, props: dict, rot_idx: int) -> dict` | 模板 palette props 按放置旋转世界化（处理器在世界坐标作用，blockstate_match 匹配的是旋转后 props）：facing 循环 n→e→s→w（`_FACE_CYCLE`）、axis 奇数 rot 互换 x↔z、水平连接布尔（north/east/south/west，pane/fence/stairs 边）环转 rot_idx 位、rotation 0..15 环值 +4/格；其余属性透传 |
-| `_village_raw_blocks`（L2163） | `_village_raw_blocks(key: str) -> dict` | 村庄模板 NBT → `{(x,y,z): (name, props_dict)}` 原始体素（`_VILLAGE_RAW_CACHE` 缓存）；跳过 `minecraft:jigsaw` 占位；props 原样保留（zombie 处理器需完整连接态比较） |
-| `_village_template_containers`（L2207） | `_village_template_containers(key: str) -> tuple` | 村庄模板 NBT 内带 LootTable 字段的容器：chest/trapped_chest/barrel 同扫（RandomizableContainer 同路）；无字段（村庄空桶等装饰容器）不入列不消耗流（483 模板实证：62 chest 全带字段、18 barrel 全无字段） |
-| `compose_village`（L2259） | `compose_village(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 村庄全量组合。流程见下 |
-| `_village_piece_containers_world`（L2326） | `_village_piece_containers_world(piece) -> list` | 村庄 piece 容器 → 世界坐标：全部池元素为 single/legacy（无 list）、无处理器蚀箱（chest 不在村庄处理器规则输入集），`rot_piece_pos` 变换后按 (Y,X,Z) 排序 |
-| `_village_jigsaw_voxels`（L2346） | `_village_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | 村庄显示：重跑 `assemble_village`（与游戏同 RNG 流），逐 piece 加载 `_village_raw_blocks`，props 先 `_rotate_props` 世界化，逐方块 `va.apply_processor(pid, nm, wprops, wx, wy, wz)`（mossify/farm/street/zombie RuleProcessor，每方块独立 Mth.getSeed 流；None=蚀空跳过）；处理器换方块时按新名重求形状，作物优先 `crop_stage_mat` 动态 age 贴图，非作物回退 `_map_block`；y 基准 = `extra["start_y"]` |
+| `_rotate_props`（L2276） | `_rotate_props(name: str, props: dict, rot_idx: int) -> dict` | 模板 palette props 按放置旋转世界化（处理器在世界坐标作用，blockstate_match 匹配的是旋转后 props）：facing 循环 n→e→s→w（`_FACE_CYCLE`）、axis 奇数 rot 互换 x↔z、水平连接布尔（north/east/south/west，pane/fence/stairs 边）环转 rot_idx 位、rotation 0..15 环值 +4/格；其余属性透传 |
+| `_village_raw_blocks`（L2308） | `_village_raw_blocks(key: str) -> dict` | 村庄模板 NBT → `{(x,y,z): (name, props_dict)}` 原始体素（`_VILLAGE_RAW_CACHE` 缓存）；跳过 `minecraft:jigsaw` 占位；props 原样保留（zombie 处理器需完整连接态比较） |
+| `_village_template_containers`（L2352） | `_village_template_containers(key: str) -> tuple` | 村庄模板 NBT 内带 LootTable 字段的容器：chest/trapped_chest/barrel 同扫（RandomizableContainer 同路）；无字段（村庄空桶等装饰容器）不入列不消耗流（483 模板实证：62 chest 全带字段、18 barrel 全无字段） |
+| `compose_village`（L2404） | `compose_village(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 村庄全量组合。流程见下 |
+| `_village_piece_containers_world`（L2471） | `_village_piece_containers_world(piece) -> list` | 村庄 piece 容器 → 世界坐标：全部池元素为 single/legacy（无 list）、无处理器蚀箱（chest 不在村庄处理器规则输入集），`rot_piece_pos` 变换后按 (Y,X,Z) 排序 |
+| `_village_jigsaw_voxels`（L2491） | `_village_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | 村庄显示：重跑 `assemble_village`（与游戏同 RNG 流），逐 piece 加载 `_village_raw_blocks`，props 先 `_rotate_props` 世界化，逐方块 `va.apply_processor(pid, nm, wprops, wx, wy, wz)`（mossify/farm/street/zombie RuleProcessor，每方块独立 Mth.getSeed 流；None=蚀空跳过）；处理器换方块时按新名重求形状，作物优先 `crop_stage_mat` 动态 age 贴图，非作物回退 `_map_block`；y 基准 = `extra["start_y"]` |
 
 `compose_village` 流程（RNG 消耗顺序）：① `variant = village_assembly.variant_from_biome(biome_id)`（变体由锚点群系决定，meadow 按 plains）；② `chunk_generate_rnd` 建流；③ `rotation = nextInt(4)`；④ start pick（`nextInt(总权重)`，plains 204：4 普通×50 + 4 僵尸×1；僵尸起点 street 标记指向 `<variant>/zombie/streets` 池→完整僵尸链）在 `assemble_village` 引擎内消耗（size=6 / max_dist=80 / start_y=地表平坦基准 63 / expansion_hack=true）；⑤ 容器收集分区块；⑥ 每区块装饰流 salt `village_{variant}`（step 4、decorator 22..26 按变体）连抽 nextLong。`extra = {variant, zombie, start, world_seed, start_y, n_pieces, n_chests}`；variant_name = `"village/{variant}"` + 僵尸起点加 `"/zombie"`。
 
@@ -4310,27 +4323,39 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `_compose_pyramid`（L1135） | `_compose_pyramid(struct_key: str, salt_key: str, world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 两结构共用组合入口：`chunk_generate_rnd` → `nextInt(4)`（Plane.HORIZONTAL faces 序 {N,E,S,W}）得 facing；调 `pyramid_pieces._sim_desert/_sim_jungle` 模拟流（postProcess 转写层，容器 LootTableSeed 在模拟流中直接取——createChest 路径无 skip，箱子前置消耗含 nextInt(3)/nextFloat 序列，skips 模型不可表达）；Piece.rot = facing；`extra = {world_seed, facing, n_containers}`；variant_name 与键同名 |
-| `compose_desert_pyramid`（L1181） | `compose_desert_pyramid(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 沙漠神殿：salt desert_pyramid=(4,1)，4 臂箱 chests/desert_pyramid |
-| `compose_jungle_temple`（L1188） | `compose_jungle_temple(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 丛林神庙：salt jungle_pyramid=(4,4)，2 箱 chests/jungle_temple + 2 发射器 chests/jungle_temple_dispenser |
+| `_compose_pyramid`（L1139） | `_compose_pyramid(struct_key: str, salt_key: str, world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 两结构共用组合入口：`chunk_generate_rnd` → `nextInt(4)`（Plane.HORIZONTAL faces 序 {N,E,S,W}）得 facing；调 `pyramid_pieces._sim_desert/_sim_jungle` 模拟流（postProcess 转写层，容器 LootTableSeed 在模拟流中直接取——createChest 路径无 skip，箱子前置消耗含 nextInt(3)/nextFloat 序列，skips 模型不可表达）；Piece.rot = facing；`extra = {world_seed, facing, n_containers}`；variant_name 与键同名 |
+| `compose_desert_pyramid`（L1173） | `compose_desert_pyramid(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 沙漠神殿：salt desert_pyramid=(4,1)，4 臂箱 chests/desert_pyramid |
+| `compose_jungle_temple`（L1180） | `compose_jungle_temple(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 丛林神庙：salt jungle_pyramid=(4,4)，2 箱 chests/jungle_temple + 2 发射器 chests/jungle_temple_dispenser |
+
+### ruined_portal / buried_treasure（废弃传送门/埋藏的宝藏）
+
+| 名称 | 签名 | 说明 |
+|---|---|---|
+| `_RP_VARIANT_CN`（L1192）/`_RP_PLACEMENT_CN`（L1200） | dict | 变体/放置类型显示名（普通·沙漠·丛林·沼泽·山地·海洋；地表·半埋·海床·山体·地下），tool 信息行用 |
+| `compose_ruined_portal`（L1209） | `compose_ruined_portal(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 废弃传送门全量组合（6 主世界变体）。流程见下 |
+| `compose_buried_treasure`（L1253） | `compose_buried_treasure(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 埋藏的宝藏全量组合：`ruined_portal_pieces._BTSim`（锚点 = 区块 (9, 9)，fhi L19 `minBlock+9` 同口径）；单箱 chests/buried_treasure，seed = postProcess 流首 nextLong（找地表无 RNG，与 `loot_seed_for_chest` skips=0 等价）；`extra = {world_seed, n_containers}`；variant_name/rotation/mirror 固定 |
+
+`compose_ruined_portal` 流程（RNG 消耗顺序，fid.a L41-94 照抄）：① `variant = variant_for_biome(biome_id)`（1.21.11 biome tag 数组序首个命中，全不命中 fallback standard；tag 展开 .temp/rp_tags_out.txt）；② `_RPSim`：setup 流 = `chunk_generate_rnd` → setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5）→ air_pocket（p=0/1 短路，否则 1 nextFloat）→ giant 门 nextFloat<0.05 → 模板 nextInt(3)/nextInt(10) → rotation nextInt(4) → mirror nextFloat<0.5→FRONT_BACK → findSuitableY 平坦口径（in_mountain 恒 0 消耗、underground 恒 1 nextInt、partly_buried nextInt(7)+2、on_land_surface/on_ocean_floor 0 消耗）；③ postProcess 流（Xoroshiro128++，salt 变体各档）：块处理器链走位置哈希独立流（fjm.getRandom 铁证）→ 流首个 nextLong = 模板单箱 LootTableSeed；Piece.pos y = sim.y0。`extra = {world_seed, variant, variant_cn, placement, placement_cn, template, giant, air_pocket, mossiness, overgrown, vines, cold, mirror_fb, y0, n_containers}`。
 
 ### 公共入口与显示模型
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose`（L2415） | `compose(struct_key: str, world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 总分派入口：14 个结构键 if 链转发对应 `compose_*`（biome_id 仅 shipwreck/village/ocean_ruin 消费），未支持键抛 `ValueError("composition 未支持的结构键：…")` |
-| `_load_template_voxels`（L2457） | `@lru_cache(maxsize=32) _load_template_voxels(fname: str) -> dict` | `structure_models._voxels_from_template_file(TEMPLATE_DIR/fname)` 的 lru 缓存（igloo/shipwreck 显示模板 NBT → 体素 dict）；大视野批量 compose_display_model 时同一模板只解析一次，返回值只读遍历/复制不改内部态 |
-| `_fortress_solid_voxels`（L2466） | `_fortress_solid_voxels(comp: Composition) -> tuple[dict, set]` | fortress 显示：`fortress_pieces.build_fortress_voxels(comp)`（按 NetherFortressPieces.java postProcess 逐段转写，坐标映射/朝向变换/箱刷怪笼岩浆等特殊块字节码级核对，遍历顺序 = accepted 序 = postProcess 序）；chest_offs = 有箱拐角件的 (x,z) 集合，供 display 抬高/近邻兜底（xp 箱子坐标与 Java 布局有已知偏差达 7 格） |
-| `_trial_raw_blocks`（L2498） | `_trial_raw_blocks(key: str) -> dict` | trial 模板 NBT → 原始体素 dict（`_TRIAL_RAW_CACHE` 缓存；key 剥 `trial_chambers/` 前缀映射 assets/SeedReverser/trial_chambers/templates/） |
-| `_bastion_raw_blocks`（L2545） | `_bastion_raw_blocks(key: str) -> dict` | bastion 模板 NBT → 原始体素 dict（`_BASTION_RAW_CACHE` 缓存；降解须在材质映射前按世界坐标判定，故绕过 `_MAT_MAP` 直取 NBT Name） |
-| `_bastion_jigsaw_voxels`（L2592） | `_bastion_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | bastion 显示：重跑 `assemble_bastion`（已对拍 6/6），逐 piece `_bastion_raw_blocks` + `rot_piece_pos` 旋转平移 + `jigsaw_assembly.apply_degradation`（bastion_generic_degradation，每方块独立 Mth.getSeed 随机源）；材质 `_map_block`（黑石系→stone 系风格化）；y 基准 64；箱子标注 (x,z) 并入集合由 display 抬到所在柱顶层 |
-| `_trial_jigsaw_voxels`（L2647） | `_trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | trial 显示：重跑 `assemble_trial_chambers`（含 pool_aliases 解析与铜灯降解），逐方块 `ta.apply_trial_degradation`（仅 waxed_copper_bulb 消耗方块随机流，其它零消耗）；材质 `_map_block`（凝灰岩系/铜灯系/vault→stone 已核）；y 基准 = `extra["start_y"]` |
-| `_outpost_raw_blocks`（L2703） | `_outpost_raw_blocks(key: str) -> dict` | 前哨站模板 NBT → 原始体素 dict（`_OUTPOST_RAW_CACHE` 缓存） |
-| `_outpost_jigsaw_voxels`（L2747） | `_outpost_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | 前哨站显示：重跑 `assemble_outpost`，逐 piece 展开子模板（list piece = watchtower + overgrown 依序放置，后写覆盖先写）；`minecraft:jigsaw` DATA 标记不渲染占位方块；overgrown 子元素逐方块 `apply_outpost_rot`（95% 蚀空）；箱子体素由容器记录补写（DATA 标记不产出 NBT 方块），旗帜按游戏语义渲染为白色旗帜；y 基准 64（起点底面 63 → 模型 y 从 1 起） |
-| `_pyramid_voxels`（L2540） | `_pyramid_voxels(comp: Composition) -> tuple[dict, set]` | 沙漠神殿/丛林神庙显示：`pyramid_pieces.build_pyramid_voxels(comp)`（postProcess 逐行转写，体素与 RNG 容器同源严格重合） |
-| `compose_display_model`（L2805） | `compose_display_model(comp: Composition) -> dict` | Composition → 3D 视口显示模型。流程见下 |
+| `compose`（L2560） | `compose(struct_key: str, world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 总分派入口：16 个结构键 if 链转发对应 `compose_*`（biome_id 仅 shipwreck/village/ocean_ruin/ruined_portal 消费），未支持键抛 `ValueError("composition 未支持的结构键：…")` |
+| `_load_template_voxels`（L2614） | `@lru_cache(maxsize=32) _load_template_voxels(fname: str) -> dict` | `structure_models._voxels_from_template_file(TEMPLATE_DIR/fname)` 的 lru 缓存（igloo/shipwreck 显示模板 NBT → 体素 dict）；大视野批量 compose_display_model 时同一模板只解析一次，返回值只读遍历/复制不改内部态 |
+| `_fortress_solid_voxels`（L2623） | `_fortress_solid_voxels(comp: Composition) -> tuple[dict, set]` | fortress 显示：`fortress_pieces.build_fortress_voxels(comp)`（按 NetherFortressPieces.java postProcess 逐段转写，坐标映射/朝向变换/箱刷怪笼岩浆等特殊块字节码级核对，遍历顺序 = accepted 序 = postProcess 序）；chest_offs = 有箱拐角件的 (x,z) 集合，供 display 抬高/近邻兜底（xp 箱子坐标与 Java 布局有已知偏差达 7 格） |
+| `_trial_raw_blocks`（L2677） | `_trial_raw_blocks(key: str) -> dict` | trial 模板 NBT → 原始体素 dict（`_TRIAL_RAW_CACHE` 缓存；key 剥 `trial_chambers/` 前缀映射 assets/SeedReverser/trial_chambers/templates/） |
+| `_bastion_raw_blocks`（L2724） | `_bastion_raw_blocks(key: str) -> dict` | bastion 模板 NBT → 原始体素 dict（`_BASTION_RAW_CACHE` 缓存；降解须在材质映射前按世界坐标判定，故绕过 `_MAT_MAP` 直取 NBT Name） |
+| `_bastion_jigsaw_voxels`（L2771） | `_bastion_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | bastion 显示：重跑 `assemble_bastion`（已对拍 6/6），逐 piece `_bastion_raw_blocks` + `rot_piece_pos` 旋转平移 + `jigsaw_assembly.apply_degradation`（bastion_generic_degradation，每方块独立 Mth.getSeed 随机源）；材质 `_map_block`（黑石系→stone 系风格化）；y 基准 64；箱子标注 (x,z) 并入集合由 display 抬到所在柱顶层 |
+| `_trial_jigsaw_voxels`（L2826） | `_trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | trial 显示：重跑 `assemble_trial_chambers`（含 pool_aliases 解析与铜灯降解），逐方块 `ta.apply_trial_degradation`（仅 waxed_copper_bulb 消耗方块随机流，其它零消耗）；材质 `_map_block`（凝灰岩系/铜灯系/vault→stone 已核）；y 基准 = `extra["start_y"]` |
+| `_outpost_raw_blocks`（L2882） | `_outpost_raw_blocks(key: str) -> dict` | 前哨站模板 NBT → 原始体素 dict（`_OUTPOST_RAW_CACHE` 缓存） |
+| `_outpost_jigsaw_voxels`（L2926） | `_outpost_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | 前哨站显示：重跑 `assemble_outpost`，逐 piece 展开子模板（list piece = watchtower + overgrown 依序放置，后写覆盖先写）；`minecraft:jigsaw` DATA 标记不渲染占位方块；overgrown 子元素逐方块 `apply_outpost_rot`（95% 蚀空）；箱子体素由容器记录补写（DATA 标记不产出 NBT 方块），旗帜按游戏语义渲染为白色旗帜；y 基准 64（起点底面 63 → 模型 y 从 1 起） |
+| `_pyramid_voxels`（L2650） | `_pyramid_voxels(comp: Composition) -> tuple[dict, set]` | 沙漠神殿/丛林神庙显示：`pyramid_pieces.build_pyramid_voxels(comp)`（postProcess 逐行转写，体素与 RNG 容器同源严格重合） |
+| `_ruined_portal_voxels`（L2660） | `_ruined_portal_voxels(comp: Composition) -> tuple[dict, set]` | 废弃传送门显示：`ruined_portal_pieces.build_ruined_portal_voxels(comp)`（重跑 `_RPSim`：模板 NBT + 处理器降解 + 土堆/支撑柱/藤叶修饰，体素与 RNG 箱子同源） |
+| `_buried_treasure_voxels`（L2666） | `_buried_treasure_voxels(comp: Composition) -> tuple[dict, set]` | 埋藏的宝藏显示：`ruined_portal_pieces.build_buried_treasure_voxels(comp)`（沙 + 箱 + 砂岩示意覆盖） |
+| `compose_display_model`（L2984） | `compose_display_model(comp: Composition) -> dict` | Composition → 3D 视口显示模型。流程见下 |
 
-`compose_display_model` 流程：① 按 struct_key 生成体素 + start_off（igloo 拼 `_igloo_model_parts` 模板；shipwreck 按 `extra["sw_typ"]` 加载 `shipwreck__<名>.nbt` 后 `_rotate_voxels`（nominal 名义尺寸）+ `_SW_START_POS`；其余各走 `_*_voxels`；end_city 走 `end_city_pieces.end_city_voxels`）；② 体素 min_x/min_z < 0 时整体平移回非负并把平移量补偿进 start_off，算 `size=(宽, y 跨度, 深)` 与 `min_y`；③ 箱子标注匹配并回填 `Chest.pos_model`：nether_fortress 用全局 1:1 贪心分配（全部 (箱子, chest 体素) 对按切比雪夫距离排序、≤8、近距离优先互斥认领）；bastion(基准 64)/trial(基准 start_y)/ancient_city(start_y)/village(start_y)/stronghold(64)/desert_pyramid/jungle_temple(64，容器含 dispenser)/pillager_outpost(64)/woodland_mansion(64)/ocean_ruin(90) 走 `pos3` 三维 exact 匹配；其余（igloo/shipwreck/end_city）走通用路径：mx/mz = pos − anchor − start_off，my 查 `chest_voxel_y[(mx,mz)]`，igloo 单箱无歧义直接用模板内 chest 块（模型未旋转的已知妥协），匹配不到落基准面（igloo 为 −3−3×size，其余 0），nether 键且 (x,z) 在 chest_offs 内时抬到所在柱顶层（bastion 示意体恒走此路的旧口径已由 jigsaw 拼装取代）；④ `anchor_y`：igloo/ocean_ruin=90、shipwreck=64、trial/ancient_city/village=`extra["start_y"]`、其余=64；⑤ `chest_blocks` = 渲染体素中全部容器方块（3D 开箱准星交互全集，bastion 渲染箱可能多于预测箱、未预测的开箱走提示）；⑥ `tex_keys` = 材质基名集合；`mesh = structure_models.build_mesh(voxels)`；⑦ 返回 dict：`{key, variant, voxels, size, min_y, mesh, tex_keys, chests, chest_blocks, anchor, anchor_off(start_off), anchor_y, anchor_local(=−start_off), chunk_origin(=anchor_local % 16), comp}`。
+`compose_display_model` 流程：① 按 struct_key 生成体素 + start_off（igloo 拼 `_igloo_model_parts` 模板；shipwreck 按 `extra["sw_typ"]` 加载 `shipwreck__<名>.nbt` 后 `_rotate_voxels`（nominal 名义尺寸）+ `_SW_START_POS`；其余各走 `_*_voxels`；end_city 走 `end_city_pieces.end_city_voxels`）；② 体素 min_x/min_z < 0 时整体平移回非负并把平移量补偿进 start_off，算 `size=(宽, y 跨度, 深)` 与 `min_y`；③ 箱子标注匹配并回填 `Chest.pos_model`：nether_fortress 用全局 1:1 贪心分配（全部 (箱子, chest 体素) 对按切比雪夫距离排序、≤8、近距离优先互斥认领）；bastion(基准 64)/trial(基准 start_y)/ancient_city(start_y)/village(start_y)/stronghold(64)/desert_pyramid/jungle_temple(64，容器含 dispenser)/ruined_portal(64)/buried_treasure(64)/pillager_outpost(64)/woodland_mansion(64)/ocean_ruin(90) 走 `pos3` 三维 exact 匹配；其余（igloo/shipwreck/end_city）走通用路径：mx/mz = pos − anchor − start_off，my 查 `chest_voxel_y[(mx,mz)]`，igloo 单箱无歧义直接用模板内 chest 块（模型未旋转的已知妥协），匹配不到落基准面（igloo 为 −3−3×size，其余 0），nether 键且 (x,z) 在 chest_offs 内时抬到所在柱顶层（bastion 示意体恒走此路的旧口径已由 jigsaw 拼装取代）；④ `anchor_y`：igloo/ocean_ruin=90、shipwreck=64、trial/ancient_city/village=`extra["start_y"]`、其余=64；⑤ `chest_blocks` = 渲染体素中全部容器方块（3D 开箱准星交互全集，bastion 渲染箱可能多于预测箱、未预测的开箱走提示）；⑥ `tex_keys` = 材质基名集合；`mesh = structure_models.build_mesh(voxels)`；⑦ 返回 dict：`{key, variant, voxels, size, min_y, mesh, tex_keys, chests, chest_blocks, anchor, anchor_off(start_off), anchor_y, anchor_local(=−start_off), chunk_origin(=anchor_local % 16), comp}`。
 
 ---
 
@@ -4338,7 +4363,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 被以下模块 import：
 
-- `Tools/tool_StructurePreviewer.py`（L58 `from Utils.StructurePreviewer import composition, loot_engine, loot_rng`）：GUI 预览按钮链路 L1632 `composition.compose(...)` → L1636 `composition.compose_display_model(comp)` → `self._view.set_model(model)`，消费 `model["chest_blocks"]` 作开箱准星交互全集、`comp.chests` 弹战利品 GUI、`comp.variant_name/anchor/rotation/mirror` 填信息面板；另在注释/映射中引用 `composition._BASTION_STARTS` 顺序。
+- `Tools/tool_StructurePreviewer.py`（L58 `from Utils.StructurePreviewer import composition, loot_engine, loot_rng`）：GUI 预览按钮链路 L1646 `composition.compose(...)` → L1650 `composition.compose_display_model(comp)` → `self._view.set_model(model)`，消费 `model["chest_blocks"]` 作开箱准星交互全集、`comp.chests` 弹战利品 GUI、`comp.variant_name/anchor/rotation/mirror` 填信息面板；另在注释/映射中引用 `composition._BASTION_STARTS` 顺序。
 - `Utils/StructurePreviewer/locator.py`（L16 `from . import composition, loot_rng`）：`detail()` 调 `composition.compose(struct_key, seed & ((1<<64)-1), ...)`、`locate_with_details()` 调 `composition.compose_display_model(comp)`；类型注解用 `composition.Composition`。
 - 其余文件（`stronghold_pieces.py` / `mansion_pieces.py` / `end_city_pieces.py` / `fortress_pieces.py` / `outpost_assembly.py` / `loot_rng.py` / `structure_models.py` / `jigsaw_assembly.py`）仅在模块注释中描述与 composition 的口径约定（如 fortress 的 bb 闭区间语义、bastion 显示基准面），无 import 依赖。
 
@@ -4599,7 +4624,7 @@ RNG 与结构信息表：
 | `_NON_TREASURE_PRE_1_21_11` / `_NON_TREASURE_1_21_11` | 1.21+ non_treasure tag 成员（后者 +lunge）。 |
 | `_ON_RANDOM_LOOT_TAIL` | on_random_loot tag 尾部四附魔 (binding, vanishing, frost_walker, mending)。 |
 | `_SNAPSHOT_DIR` | 快照目录 `<本文件目录>/data/loot`。 |
-| `_LOOT_TABLE_ERAS` | 分档表 → (边界1, 边界2, 旧档后缀)：shipwreck_supply/map/treasure 与 woodland_mansion、underwater_ruin_big/small、ancient_city、desert_pyramid、jungle_temple 均为 `(E_1_21_11, E_1_21, "1_20")`；pillager_outpost 为 `(E_1_21_9, E_1_21, "1_20")`。附注每个分档的考证依据（1.21 档取 1.21.1 官方 jar 原生表等）。 |
+| `_LOOT_TABLE_ERAS` | 分档表 → (边界1, 边界2, 旧档后缀)：shipwreck_supply/map/treasure 与 woodland_mansion、underwater_ruin_big/small、ancient_city、desert_pyramid、jungle_temple、ruined_portal、buried_treasure 均为 `(E_1_21_11, E_1_21, "1_20")`；pillager_outpost 为 `(E_1_21_9, E_1_21, "1_20")`。附注每个分档的考证依据（1.21 档取 1.21.1 官方 jar 原生表等；ruined_portal 三档各异、buried_treasure 1_20==1_21 仅为占位复制）。 |
 | `_SNAPSHOT_ERAS` | 档后缀 → 解析 era：`1_20`→E_1_14、`1_21`→E_1_21、`1_21_11`→E_1_21_11。 |
 | `__all__` | 导出 ItemStack/LootFunction/LootTable、三个 load_*、generate_loot、era_for_version、附魔查询函数族与 era 常量。 |
 
@@ -4902,7 +4927,7 @@ RNG 与结构信息表：
 
 | 名称 | 值/含义 |
 |---|---|
-| `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。 |
+| `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。`REDSTONE_WIRE = "redstone dust"`——无独立 redstone wire 纹理（1.21 官方拆 dust_dot/line），复用 dust 点纹，与 ancient_city 的 `minecraft:redstone_wire -> redstone dust` 映射同口径。 |
 | `STONE_PLATE` | `("stone", bs.SHAPE_PLATE)` 石质压力板（desert TNT 井口）。 |
 | `CHEST` | `("chest", bs.SHAPE_CHEST_N)`，朝向固定局部 north（真实游戏经 reorient）。 |
 | `_EDGE` / `_SEG_IDX` | 挂件贴边 = FACING 反侧表 / rswire/twire 段序 n:s:e:w 下标。 |
@@ -4910,6 +4935,53 @@ RNG 与结构信息表：
 | `_STAIRS_MAP` | 楼梯局部→世界朝向表（0 恒等、1 CW90、2 n↔s、3 n→w/s→e/e→s/w→n）。**注意与 fortress `_WX_STAIRS` 的 2/3 两行不一致**（fortress 表疑把 LEFT_RIGHT/FRONT_BACK 效果互换；1.21.11 字节码 eev.a=NONE/b=LEFT_RIGHT/c=FRONT_BACK + 26.2 StairBlock.mirror 双证指向本表）。 |
 
 **已知妥协**：无地形（desert 底座 fillColumnDown 画单层）；挖掘室沙/砂岩分布固定 nextBoolean=true 分支；afterPlace 可疑的沙子（forkPositional 独立流，不影响箱子 seed）统一画普通 sand；箱子朝向固定 north；y 基准恒 64（不模拟 updateAverageGroundHeight 的地表修正）。机关方块已全官方几何码（绊线钩/绊线/红石线/拉杆/活塞/中继器/藤蔓/发射器，方向属性净变换），无近似形状。
+
+---
+
+## `Utils/StructurePreviewer/ruined_portal_pieces.py`
+
+**功能**：废弃传送门（ruined_portal）/ 埋藏的宝藏（buried_treasure）**postProcess 逐方块转写层**——把 `composition.compose_ruined_portal/compose_buried_treasure` 的变体/朝向与锚点展开为模型体素 dict `{(x,y,z): 值}`，并在模拟流中同步产出箱子 LootTableSeed。考证基准：1.21.11 jar 反编译（Vineflower + client_mappings.txt 符号还原，`.temp/decomp/readable2/`、`.temp/rp_procs/`、`.temp/rp_fjm/`）：`fid`（RuinedPortalStructure setup 流）/ `fic`（RuinedPortalPiece 处理器链 + 土堆/支撑柱/vines/叶修饰 + VerticalPlacement 枚举 a:on_land_surface/b:partly_buried/c:on_ocean_floor/d:in_mountain/e:underground/f:in_nether）/ `fhh`（BuriedTreasurePiece 找地表无 RNG + createChest）/ `fhi`（BuriedTreasureStructure 锚点 minBlock+9）/ `ffs`（StructurePiece createChest 1 nextLong + 自动朝向 fallback 链）/ `fjm`（StructurePlaceSettings.getRandom：settings 未 setRandom 时 = `RandomSource.create(Mth.getSeed(worldPos))` 每方块独立流——处理器随机源与 postProcess 流完全无关的铁证）。13 个模板 NBT 已就位 `assets/SeedReverser/templates/ruined_portal__*.nbt`（尺寸/箱子局部坐标/朝向码经 NBT 统计核对）。
+
+**RNG 双流**（与 igloo/pyramid 口径一致）：
+- setup 流 = `chunk_generate_rnd`（Legacy LCG；ffo.java GenerationContext `setLargeFeatureSeed` 铁证）。消耗序（fid.a L41-94）：setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5，逐项减 weight/sum，<0 选定；单 setup 变体无此消耗）→ air_pocket 概率（p=0.0/1.0 直接短路，仅 0<p<1 消耗 1 nextFloat）→ giant 门 `nextFloat<0.05` → 模板 `nextInt(3)`（giant）否则 `nextInt(10)` → rotation `nextInt(4)`（Plane.HORIZONTAL faces {N,E,S,W}）→ mirror `nextFloat<0.5 → FRONT_BACK`（eev 枚举 a=NONE/b=LEFT_RIGHT/c=FRONT_BACK；FRONT_BACK 镜像为 x' = 2*px − x，fjq transform）→ findSuitableY 平坦口径（in_mountain lo=70 恒 0 消耗；underground lo=−49 恒 1 nextInt；partly_buried nextInt(7)+2；on_land_surface/on_ocean_floor 0 消耗、y=64；四角向下扫描平坦恒首格命中）。
+- postProcess 流（Xoroshiro128++）= population_seed(anchor 区块) + decorator + 10000*step（salt：ruined_portal 各变体 step=4，decorator standard=10/desert=11/jungle=12/mountain=13/ocean=15/swamp=16；buried_treasure step=3、decorator 0）。模板 placeInWorld 的 RandomizableContainer 分支每容器 1 nextLong（ruined 每模板恰 1 箱），**块处理器链（fjj/fiq）的随机源全部走位置哈希独立流、不消耗 postProcess 流**（fjm L110-116）→ 流首个 nextLong = 模板单箱 LootTableSeed（与块序无关）；buried_treasure 找地表/清液体全程无 RNG（fhh L18-48）→ 流首 nextLong 即箱子 seed（与 `loot_seed_for_chest` skips=0 等价）。
+
+**块处理器链**（块序 = NBT blocks 序；fjj 与 fiq 各自独立位置哈希流，`LegacyRandomSource(Mth.getSeed(worldPos))`）：
+- fjj RuleProcessor（fic L46-55 硬编码 3 规则，命中即止）：gold 0.3→AIR；lava（ocean 变体恒→magma / cold 恒→netherrack / 其余 0.2→magma）；netherrack（非 cold）0.07→magma；其余块输入谓词短路 0 消耗。
+- fiq BlockAgeProcessor（mossiness 降解，全语义）：stone_bricks/stone/chiseled_stone_bricks 先 nextFloat≥0.5 不变，否则构造 cracked 组 `[cracked_stone_bricks, stone_brick_stairs(随机 facing+half)]` 与 mossy 组 `[mossy_stone_bricks, mossy_stone_brick_stairs(随机 facing+half)]`（L44-45 顺序 cracked 先、mossy 后，随机 stairs 各消耗 nextInt(4)+nextInt(2)），再 nextFloat<mossiness 选组、nextInt(2) 选元素；stairs nextFloat≥0.5 不变，否则 nextFloat<mossiness ? `[mossy_stone_brick_stairs(原属性), mossy_stone_brick_slab]` : `[stone_slab, stone_brick_slab]` 后 nextInt(2) 选；slab nextFloat<mossiness → mossy_stone_brick_slab（保留原 half）；wall → mossy_stone_brick_wall（模板无）；obsidian nextFloat<0.15 → crying obsidian；其余块 0 消耗。
+- fjg（ProtectedBlockProcessor）/fiy（LavaSubmergedBlockProcessor）/fip（BlackstoneReplaceProcessor）：模板无成员块/平坦无流体/nether 限定，恒不触发 0 消耗。
+
+**postProcess 修饰**（箱子 seed 之后，同一流，平坦口径）：菱形土堆（fic b L139-173：off = nextInt(max(1, 8−(spanX+spanZ)//4))，x 外层 z 内层遍历中心 ±14，dist = |dx|+|dz|+off < 14 时 nextDouble < 14 项权重表命中→目标 y（surface 类恒 64，其余 min(bb.minY, 64)），现位非空→填 netherrack（cold 恒无 magma 判定，否则 0.07 nextFloat→magma）；overgrown 命中格上方 nextFloat<0.5 → persistent jungle leaves + 下方悬空延伸（起点填 + while nextFloat<0.5 ≤8 格））；支撑柱（fic a L116-125：bb 底层内部现 netherrack 者向下延伸，同上 while）；vines/overgrown 全格遍历（fic L78-88：bb betweenClosed 序 x 最快 y 中 z 最慢；vines 变体非空非藤格 nextInt(4) 选水平向、邻位空气→放 vine:对侧；overgrown 变体每格恒 1 nextFloat<0.5 且现 netherrack 且上方空→上方放叶）。
+
+**类与函数**：
+
+| 名称 | 签名 | 说明 |
+|---|---|---|
+| `_RP_TPL` | dict | 13 模板统计表：模板名后缀 → (sx, sy, sz, 箱局部 x, y, z, 局部朝向)（`.temp/rp_tpl_out.txt` NBT 逐项核对）。 |
+| `_SETUPS` | dict | 6 主世界变体 setup 表（1.21.11 `structure/ruined_portal*.json` 原文）：变体 → ((placement, air_pocket_prob, mossiness, overgrown, vines, can_be_cold, replace_with_blackstone, weight), ...)；nether 变体在主世界 UI 不收录。 |
+| `_VARIANT_ORDER`/`_VARIANT_BIOMES` | 元组/dict | 变体判定序（standard, desert, jungle, swamp, mountain, ocean——structures JSON 数组序）与各变体群系 id 集（1.21.11 biome tag 展开，cubiomes id）。 |
+| `variant_for_biome` | `(biome_id: int) -> str` | 锚点群系 id → 变体结构键（数组序首个命中；全不命中 fallback standard，与 cubiomes 地图恒 viable 口径对齐）。 |
+| `_PILE_WEIGHTS` | tuple | 土堆 14 项权重表（fic L144 原文 1.0×7 + 0.9/0.9/0.8/0.7/0.6/0.4/0.2）。 |
+| `_load_template` | `@lru_cache(16) (fname: str) -> dict` | 模板 NBT → 体素 dict（局部坐标，NBT blocks 序；只读共享，`structure_models._voxels_from_template_file`）。 |
+| `_rand_stairs` | `(rng) -> (quad, half)` | fiq L71 随机 stairs：FACING = Plane.HORIZONTAL[nextInt(4)]、HALF = Half.values()[nextInt(2)]。 |
+| `_RPSim` | 类 | 废弃传送门单 piece 模拟器。`__init__`（setup 流全序 + postProcess 建流 + 箱 seed = 首个 nextLong + 立即逐块 `_place_template`）；`_t`（局部→世界：先 mirror FRONT_BACK（x' = 2*px − x）后 rot 绕 pivot (sx//2, 0, sz//2) 的 CW90=(−z,x)/CW180=(−x,−z)/CCW90=(z,−x)，与 `_rotate_voxels` R_raw 同向）；`_put/_get`（世界体素写入/查询，None=AIR 挖空）；`_process_fjj`（RuleProcessor 3 规则，位置哈希流）；`_process_fiq`（BlockAgeProcessor 全语义，见上）；`_place_template`（NBT blocks 序逐块 mirror/rot 变换 + 形状码 `shape_mirror(FRONT_BACK)`/`shape_rotation` 同步 + 处理器链 + 箱子 createChest 路径）；`_fill`（土堆块：cold 0 消耗否则 nextFloat<0.07→magma）；`_extend_down`（起点填 + while nextFloat<0.5 向下 ≤8 格）；`_leaves`（1 nextFloat<0.5）；`_mound`（菱形土堆主循环）；`_support`（支撑柱）；`_decor`（vines/overgrown 全格遍历）。属性：`chests = [(世界 x, z, y, 表, seed)]`、`rot/mirror_fb/placement/mossiness/overgrown/vines/cold/y0/...`。 |
+| `_BTSim` | 类 | 埋藏的宝藏模拟（无 setup 流）：箱在 (minBlockX+9, 63, minBlockZ+9)（fhi L19 锚点 +9、fhh 地表下 1 格平坦口径）；postProcess 流首 nextLong = 箱 seed；体素 = 箱（`chest:e:single`，按"四周全埋" createChest fallback 链取 EAST）+ 顶盖沙 + 3x3 砂岩示意。 |
+| `sim_ruined_portal` | `(world_seed, ax, az, variant) -> _RPSim` | 变体选择 + 双流模拟（compose 与 display 共用，保证同源）。 |
+| `build_ruined_portal_voxels` | `(comp) -> (dict, set)` | 入口（display 调用）：重跑 `_RPSim`，返回（体素 dict（模型系 = 世界−anchor、y−64）, 箱 (x,z) 相对偏移集合）。 |
+| `build_buried_treasure_voxels` | `(comp) -> (dict, set)` | 同上（埋藏的宝藏：沙+箱+砂岩示意覆盖）。 |
+
+**接口**：被 `composition.py` 导入（`compose_ruined_portal`/`compose_buried_treasure` 用 `_RPSim`/`_BTSim`/`variant_for_biome`；`_ruined_portal_voxels`/`_buried_treasure_voxels` 用 `build_ruined_portal_voxels`/`build_buried_treasure_voxels`）。本模块自身导入：`block_shapes`（SHAPE_STAIRS 等）、`mc_rng`（LegacyRandomSource/mth_get_seed）、`loot_rng`（XoroshiroJava/get_population_seed/_M64）、`structure_models`（TEMPLATE_DIR/_voxels_from_template_file），函数内导入 `Utils.Public.structure_map`（chunk_generate_rnd）与 `Utils.SeedReverser.mc_random`（next_float/next_int）。
+
+**关键变量/常量**：
+
+| 名称 | 值/含义 |
+|---|---|
+| `NETHERRACK`/`MAGMA`/`LAVA`/`OBSIDIAN`/`CRYING_OBSIDIAN`/`GOLD_BLOCK`/`IRON_BARS`/`STONE`/`STONE_BRICKS`/`CRACKED_STONE_BRICKS`/`MOSSY_STONE_BRICKS`/`CHISELED_STONE_BRICKS`/`STONE_BRICK_STAIRS`/`MOSSY_STONE_BRICK_STAIRS`/`STONE_BRICK_SLAB`/`MOSSY_STONE_BRICK_SLAB`/`STONE_SLAB`/`MOSSY_STONE_BRICK_WALL`/`JUNGLE_LEAVES`/`SAND`/`SANDSTONE`/`VINE` | 材质键（纹理文件名；形状码逐方块生成）。 |
+| `CHEST` | `chest:<f>:single` 形状元组（局部朝向 n，世界经变换/fallback）。 |
+| `_HORIZONTAL`/`_DIR_VEC`/`_OPPOSITE` | faces {N,E,S,W} 序 / 方向向量 / 反向表。 |
+| `_FIQ_STONE`/`_FIQ_SLABS`/`_FIQ_WALLS`/`_HALVES` | fiq 输入块集（stairs/slabs/walls tag 判定按模板内唯一成员：stairs 仅 stone brick stairs、slab 仅 stone brick slab/stone slab、无 wall——NBT 材质统计实证）/ Half 枚举序 (t, b)。 |
+
+**已知妥协**（模块 docstring 声明）：土堆/支撑柱的地表采样平坦口径恒 64（RNG 消耗序列自洽，箱子 seed 不受影响——箱在模板 placeInWorld 内先行抽取）；vines 支撑面简化为"邻位空气即可挂"；buried_treasure 真实 y/沙层厚度不可从种子预测（平坦画地表下一格 + 3x3 砂岩示意，LootTableSeed 与真实游戏严格一致）；buried_treasure 箱子朝向取"四周全埋" fallback 链的 EAST（随地形开口变化，无 RNG 不可判）；fiq 随机 stairs 的 HALF 按枚举序 (TOP, BOTTOM)（1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
 
 ---
 
@@ -5531,7 +5603,7 @@ RNG 与结构信息表：
 | 子目录 | 数量 | 用途 | 加载方 |
 |---|---|---|---|
 | `gui/` | 3（slot.png、generic_54.png、font_ascii.json） | 容器槽位/面板纹理与 ASCII 像素字体 | tool_StructurePreviewer._GUI_DIR |
-| `items/` | 253 个 .png | 物品图标（战利品列表渲染） | tool_StructurePreviewer._ICON_DIR |
+| `items/` | 346 个 .png | 物品图标（战利品列表渲染；2026-09 全量对账，loot 210 种全覆盖） | tool_StructurePreviewer._ICON_DIR |
 
 ### `assets/EnchantCaculator/`
 18 个物品图标 PNG（diamond_sword、enchanted_book、turtle_helmet 等），由 `enchanted_item_card.get_item_icon_path()` 按中文物品名映射加载。

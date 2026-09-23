@@ -2,14 +2,15 @@
 """StructurePreviewer：废弃传送门 / 埋藏的宝藏（ruined_portal / buried_treasure）。
 
 考证基准：1.21.11-Fabric jar 反编译（Vineflower 1.12.0 + 官方
-client_mappings.txt 符号还原，反编译件 .temp/decomp/readable2/）：
+client_mappings.txt 符号还原，反编译件 .temp/decomp/readable2/ 与
+.temp/rp_procs/、.temp/rp_fjm/）：
 - fid = RuinedPortalStructure：setups 权重选择 / air_pocket 概率 /
   giant 门 / 模板抽取 / rotation / mirror / findSuitableY；
-- fic = RuinedPortalPiece：placeInWorld + 菱形土堆（b L139-173）+
-  底层支撑柱（a L116-125）+ vines（a L95-108）+ overgrown 叶
-  （b L110-114）；VerticalPlacement 枚举（fic.b L236-242）=
-  a:on_land_surface / b:partly_buried / c:on_ocean_floor /
-  d:in_mountain / e:underground / f:in_nether；
+- fic = RuinedPortalPiece：makeSettings 处理器链（L46-58）+
+  placeInWorld + 菱形土堆（b L139-173）+ 底层支撑柱（a L116-125）+
+  vines（a L95-108）+ overgrown 叶（b L110-114）；VerticalPlacement
+  枚举（fic.b L236-242）= a:on_land_surface / b:partly_buried /
+  c:on_ocean_floor / d:in_mountain / e:underground / f:in_nether；
 - fhh = BuriedTreasurePiece：OCEAN_FLOOR 地表向下扫描（下方为
   sandstone/stone/andesite/granite/diorite 即放箱，L18-48）+
   周围液体清填（全程无 RNG）+ createChest（ffs 6 参版，1 nextLong）；
@@ -18,7 +19,10 @@ client_mappings.txt 符号还原，反编译件 .temp/decomp/readable2/）：
   cx*16+9 同口径）；
 - ffs = StructurePiece：getRandomDirection = Plane.HORIZONTAL
   faces[N,E,S,W][nextInt(4)]（L51-53）；createChest = 1 nextLong +
-  state=null 自动朝向（L297-339 无 RNG）。
+  state=null 自动朝向（L297-339 无 RNG）；
+- fjm = StructurePlaceSettings：getRandom(pos)（L110-116）在
+  settings.random == null 时 = RandomSource.create(Mth.getSeed(pos))
+  ——**处理器随机源与 postProcess 流完全无关**（每方块独立流）。
 
 RNG 双流（与 igloo/pyramid 口径一致）：
 - setup 流 = chunk_generate_rnd（Legacy LCG 重建）。铁证：ffo.java
@@ -31,8 +35,7 @@ RNG 双流（与 igloo/pyramid 口径一致）：
     2. air_pocket 概率判定：仅 0<p<1 时 1 nextFloat（p=0.0 直接
        false、p=1.0 直接 true，fid L104-110）；
     3. giant 门 nextFloat<0.05 -> 模板 nextInt(3)，
-       否则 nextInt(10)（fid L76-80，两次判定共 1 nextFloat +
-       1 nextInt）；
+       否则 nextInt(10)（fid L76-80，共 1 nextFloat + 1 nextInt）；
     4. rotation = Util.getRandom(values, rand) = nextInt(4)
        （fid L83；egm 枚举序 NONE/CW90/CW180/CCW90）；
     5. mirror：nextFloat<0.5 -> FRONT_BACK else NONE（fid L84；
@@ -47,9 +50,8 @@ RNG 双流（与 igloo/pyramid 口径一致）：
          -64+15 = -49；平坦恒 1 nextInt）；
        - partly_buried(b)：nextBetween(2, 8)，y = 64-h+off；
        - on_land_surface(a)/on_ocean_floor(c)：无消耗，y = 64
-         （$$4 = getBaseHeight(...)-1，OCEAN_FLOOR/WORLD_SURFACE
-         平坦口径同 64；ocean 变体 heightmap 用 OCEAN_FLOOR 但
-         findSuitableY 的 y 取 surface 分支，无额外 RNG）。
+         （$$4 = getBaseHeight(...)-1；ocean 的 heightmap 用
+         OCEAN_FLOOR 但 findSuitableY 的 y 取 surface 分支）。
        四角向下扫描（L143-157）平坦地形恒首格命中返回初始值，
        无 RNG。y 依赖真实地形（getBaseHeight/噪声柱），平坦预览
        以 surface=64 代入，消耗序列与选择结构忠实照抄。
@@ -57,10 +59,12 @@ RNG 双流（与 igloo/pyramid 口径一致）：
   + decorator + 10000*step（loot_rng salt 表：ruined_portal 各变体
   step=4、decorator standard=10/desert=11/jungle=12/mountain=13/
   ocean=15/swamp=16；buried_treasure step=3、decorator 0）：
-  - 模板 placeInWorld 容器抽取：fjq L233 每 RandomizableContainer
-    1 nextLong；ruined 每模板恰 1 箱 -> 流首个 nextLong =
-    LootTableSeed（单 piece 无前置消耗，与 pyramid 的 createChest
-    直接连抽同口径）；
+  - 模板 placeInWorld 容器抽取：fjq placeInWorld 的 RandomizableContainer
+    分支每容器 1 nextLong；ruined 每模板恰 1 箱。**块处理器链
+    （fjj/fiq）的随机源全部走 fjm.getRandom 的位置哈希独立流
+    （RandomSource.create(Mth.getSeed(worldPos))，settings 未
+    setRandom——fjm L110-116 铁证），不消耗 postProcess 流** ->
+    流首个 nextLong = 箱子 LootTableSeed（与块序无关）；
   - buried_treasure：找地表/清液体全程无 RNG（fhh L18-48）-> 流
     首个 nextLong = 箱子 seed（与 loot_seed_for_chest skips=0 等价）。
 
@@ -77,6 +81,38 @@ ocean, nether，第一个 tag 命中者胜出；全不命中时 fallback standar
   pivot（sx//2, 0, sz//2）的 CW90=(-z,x)/CW180=(-x,-z)/CCW90=(z,-x)，
   pivot 恒不动，与 shipwreck _rotate_voxels 的 R_raw 同向；形状码
   先 shape_mirror(FRONT_BACK) 后 shape_rotation；
+- 降解处理器链逐块精确模拟（块序 = NBT blocks 序；每块两条独立
+  LegacyRandomSource(Mth.getSeed(worldPos)) 流，fjj 链内共用、fiq
+  单独新流，processor 间互不影响）：
+  * fjj RuleProcessor（fic L46-55 硬编码 3 规则，命中即止）：
+    - gold：RandomBlockMatchTest(block of gold, 0.3) -> AIR；
+    - lava：ocean 变体 BlockMatchTest -> magma；cold 变体
+      BlockMatchTest -> netherrack；其余 RandomBlockMatchTest
+      (lava, 0.2) -> magma；
+    - netherrack（非 cold）：RandomBlockMatchTest(0.07) -> magma；
+    - 其余块输入谓词短路 0 消耗；
+  * fiq BlockAgeProcessor（mossiness 降解，.temp/rp_procs/fiq.java）：
+    - stone_bricks/stone/chiseled_stone_bricks：nextFloat>=0.5 不变；
+      否则构造 mossy 组 [mossy_stone_bricks, mossy_stone_brick_stairs
+      (随机 facing+half)] 与 cracked 组 [cracked_stone_bricks,
+      stone_brick_stairs(随机 facing+half)]（两组 stairs 构造各消耗
+      nextInt(4)+nextInt(2)，顺序 mossy 后 cracked——即 od 先 fS 后
+      逆序？否：L44-45 先 $$1(cracked 组 fS) 后 $$2(mossy 组 od)），
+      再 nextFloat<mossiness 选组、nextInt(2) 选元素；
+    - stairs（模板仅 stone brick stairs）：nextFloat>=0.5 不变；否则
+      nextFloat<mossiness ? mossy 组 [mossy_stone_brick_stairs(原
+      facing/half), mossy_stone_brick_slab] : [stone_slab,
+      stone_brick_slab]，nextInt(2) 选；
+    - slab（stone brick slab/stone slab）：nextFloat<mossiness ->
+      mossy_stone_brick_slab（保留原属性）；
+    - wall：nextFloat<mossiness -> mossy_stone_brick_wall（模板无）；
+    - obsidian：nextFloat<0.15 -> crying obsidian；
+    - 其余块 0 消耗；
+  * fjg ProtectedBlockProcessor（features_cannot_replace 标签）：
+    模板无成员块恒不触发；fiy LavaSubmergedBlockProcessor 依赖
+    真实地形流体（fjq placeInWorld 时世界查询），平坦预览无熔岩
+    环境，恒不触发；fip BlackstoneReplaceProcessor 仅 nether 变体
+    （主世界不收录）。三者 0 消耗。
 - postProcess 修饰（土堆/支撑柱/藤/叶）与箱子同一条 postProcess 流
   （箱子 seed 先取，后续修饰消耗不影响箱子），按平坦口径模拟：
   - 菱形土堆（fic L139-173）：off = nextInt(max(1, 8-(spanX+spanZ)//4))
@@ -100,7 +136,7 @@ ocean, nether，第一个 tag 命中者胜出；全不命中时 fallback standar
 - 已知妥协：
   - 土堆/支撑柱的地表采样平坦口径恒 64，形状与真实地形下不同
     （RNG 消耗序列自洽，箱子 seed 不受影响——箱子在模板
-    placeInWorld 内先行抽取）；
+    placeInWorld 内先行抽取、修饰在容器之后）；
   - vines 支撑面判定简化为"邻位空气即可挂"（真实按
     getBlockSupport 完整判定）；
   - buried_treasure 真实 y 依赖地形（OCEAN_FLOOR 向下扫到"下方为
@@ -109,7 +145,10 @@ ocean, nether，第一个 tag 命中者胜出；全不命中时 fallback standar
     游戏严格一致（找地表无 RNG）；
   - buried_treasure 箱子朝向按"四周全埋"的 createChest fallback
     链（NORTH 被占->SOUTH->WEST->EAST，ffs L321-336）取 EAST，
-    真实朝向随地形开口变化（无 RNG，预览不可判）。
+    真实朝向随地形开口变化（无 RNG，预览不可判）；
+  - fiq stairs 随机朝向的 FACING 用 Plane.HORIZONTAL（nextInt(4)，
+    faces[N,E,S,W]）、HALF 用 Half.values()[nextInt(2)]（TOP,BOTTOM
+    序——1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
 """
 from __future__ import annotations
 
@@ -117,7 +156,7 @@ import os
 from functools import lru_cache
 
 from Utils.SeedReverser import block_shapes as bs
-from Utils.SeedReverser import structure_models
+from Utils.SeedReverser import mc_rng, structure_models
 from . import loot_rng
 
 # --------------------------------------------------------------- 材质键
@@ -125,17 +164,27 @@ NETHERRACK = "netherrack"
 MAGMA = "magma block"
 LAVA = "lava"
 OBSIDIAN = "obsidian"
+CRYING_OBSIDIAN = "crying obsidian"
 GOLD_BLOCK = "block of gold"
 IRON_BARS = "iron bars"
 STONE = "stone"
 STONE_BRICKS = "stone bricks"
+CRACKED_STONE_BRICKS = "cracked stone bricks"
+MOSSY_STONE_BRICKS = "mossy stone bricks"
+CHISELED_STONE_BRICKS = "chiseled stone bricks"
+STONE_BRICK_STAIRS = "stone brick stairs"
+MOSSY_STONE_BRICK_STAIRS = "mossy stone brick stairs"
+STONE_BRICK_SLAB = "stone brick slab"
+MOSSY_STONE_BRICK_SLAB = "mossy stone brick slab"
+STONE_SLAB = "stone slab"
+MOSSY_STONE_BRICK_WALL = "mossy stone brick wall"
 JUNGLE_LEAVES = "jungle leaves"
 SAND = "sand"
 SANDSTONE = "sandstone"
 CHEST = "chest"                       # chest:<f>:single 形状元组
 VINE = "vine"                         # vine:<dir>
 
-# 13 个模板统计（size=(sx,sy,sz)、chest 局部坐标 + 朝向码；
+# 13 个模板统计（size=(sx,sy,sz)、chest 局部坐标 + 局部朝向；
 # .temp/rp_tpl_out.txt NBT 逐项核对，键 = 模板名后缀）
 _RP_TPL = {
     "portal_1":        (6, 9, 6,  2, 2, 0, "w"),
@@ -230,32 +279,46 @@ def variant_for_biome(biome_id: int) -> str:
 _PILE_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
                  0.9, 0.9, 0.8, 0.7, 0.6, 0.4, 0.2)
 
-# 水平方向（fid/ffs faces 序：Plane.HORIZONTAL = [N,E,S,W]；
-# step 向量 = Direction.getStepX/getStepZ）
+# 水平方向（ffs faces 序：Plane.HORIZONTAL = [N,E,S,W]）
 _HORIZONTAL = ("n", "e", "s", "w")
 _DIR_VEC = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
 _OPPOSITE = {"n": "s", "s": "n", "e": "w", "w": "e"}
 
+# fiq 输入集（材质键口径）
+_FIQ_STONE = (STONE_BRICKS, STONE, CHISELED_STONE_BRICKS)
+# stairs/slabs/walls tag 判定按模板内唯一成员（NBT 材质统计实证：
+# stairs 仅 stone brick stairs、slab 仅 stone brick slab / stone slab、
+# 无 wall——tag 本身为全部楼梯/台阶/墙，模板内无其他成员）
+_FIQ_SLABS = (STONE_BRICK_SLAB, STONE_SLAB)
+_FIQ_WALLS: tuple = ()
+
+# Half 枚举序（epg：Mojang 源序 TOP,BOTTOM）
+_HALVES = ("t", "b")
+
 
 @lru_cache(maxsize=16)
 def _load_template(fname: str) -> dict:
-    """模板 NBT -> 体素 dict（局部坐标；lru 缓存只读共享）。"""
+    """模板 NBT -> 体素 dict（局部坐标，NBT blocks 序；只读共享）。"""
     return structure_models._voxels_from_template_file(
         os.path.join(structure_models.TEMPLATE_DIR,
                      "ruined_portal__%s.nbt" % fname))
 
 
-def _next_between(lo: int, hi: int):
-    """Mth.randomBetweenInclusive + fid a(rand,lo,hi)（lo<hi 才消耗）。
+def _stairs_shape(quad: str, half: str) -> str:
+    return bs.SHAPE_STAIRS[quad] if half != "t" \
+        else bs.SHAPE_STAIRS[quad].replace(":b", ":t")
 
-    返回 (值, 或 None 表示无消耗——调用方用 fallback 值)。
-    """
-    # 由 _RPSim 内联实现（需要 state 推进），此函数仅作文档锚点。
-    raise NotImplementedError
+
+def _rand_stairs(rng: mc_rng.LegacyRandomSource) -> tuple:
+    """fiq L71：随机 stairs（FACING=Plane.HORIZONTAL[nextInt(4)]、
+    HALF=Half.values()[nextInt(2)]）。返回 (quad, half)。"""
+    quad = _HORIZONTAL[rng.next_int(4)]
+    half = _HALVES[rng.next_int(2)]
+    return quad, half
 
 
 class _RPSim:
-    """废弃传送门单 piece 模拟（setup 流 + postProcess 流 + 体素）。"""
+    """废弃传送门单 piece 模拟（setup 流 + 处理器链 + postProcess 修饰）。"""
 
     def __init__(self, world_seed: int, ax: int, az: int,
                  variant_key: str) -> None:
@@ -265,7 +328,7 @@ class _RPSim:
         self.az = az
         self.variant = variant_key
 
-        # ---------------- setup 流（Legacy LCG） ----------------
+        # ---------------- setup 流（Legacy LCG，chunk_generate_rnd） --
         from Utils.Public import structure_map
         state = structure_map.chunk_generate_rnd(world_seed, ax >> 4,
                                                  az >> 4)
@@ -305,11 +368,11 @@ class _RPSim:
         mf, state = mc_random.next_float(state)
         self.mirror_fb = mf < 0.5                           # FRONT_BACK
 
-        self.sx, self.sy, self.sz, clx, cly, clz, cface = _RP_TPL[tpl_name]
+        self.sx, self.sy, self.sz, clx, cly, clz, _cf = _RP_TPL[tpl_name]
         self.px = self.sx // 2
         self.pz = self.sz // 2
 
-        # ---------------- findSuitableY（平坦口径） ----------------
+        # ---------------- findSuitableY（fid L116-158 平坦口径） ----
         surface = 64                 # getBaseHeight(type)-1 平坦基准
         if self.placement == "in_nether":
             self.y0 = surface        # 主世界不出现，防御分支
@@ -337,11 +400,12 @@ class _RPSim:
         self.rng = loot_rng.XoroshiroJava(
             (pop + decorator + 10000 * step) & loot_rng._M64)
 
-        # 模板 placeInWorld（fjq：容器各 1 nextLong；单箱 = 首个）
+        # 模板 placeInWorld（容器 1 nextLong；块序 = NBT blocks 序，
+        # 处理器走位置哈希独立流不影响该流）
         chest_seed = self.rng.next_long()
         self._place_template(chest_seed, (clx, cly, clz))
         # 修饰：菱形土堆 -> 底层支撑柱 -> vines/overgrown 叶
-        # （fic L76-88 语句序；注意 b(菱形) 在 a(支撑柱) 之前）
+        # （fic L76-88 语句序；b(菱形) 在 a(支撑柱) 之前）
         self._mound()
         self._support()
         self._decor()
@@ -370,47 +434,137 @@ class _RPSim:
     def _get(self, wx: int, wy: int, wz: int):
         return self.voxels.get((wx, wy, wz))
 
+    # -- 处理器链（每块独立位置哈希流；块序 = NBT blocks 序） ------
+
+    def _process_fjj(self, mat, wx: int, wy: int, wz: int):
+        """fjj RuleProcessor（fic L46-55 规则；fjj L17 每块
+        RandomSource.create(Mth.getSeed(pos)) 新流，链内共用）。"""
+        name = mat[0] if isinstance(mat, tuple) else mat
+        rng = mc_rng.LegacyRandomSource(
+            mc_rng.mth_get_seed(wx, wy, wz))
+        if name == GOLD_BLOCK:
+            # 规则1：RandomBlockMatchTest(gold, 0.3) -> AIR
+            if rng.next_float() < 0.3:
+                return None
+            # 规则2（placement 熔岩规则）：lava 输入不命中（gold 非
+            # lava，BlockMatchTest / RandomBlockMatchTest 输入谓词
+            # 短路，0 消耗）；规则3 netherrack 同理 0 消耗。
+            return mat
+        if name == LAVA:
+            if self.placement == "on_ocean_floor":
+                return MAGMA                  # fis BlockMatchTest 0 消耗
+            if self.cold:
+                return NETHERRACK
+            if rng.next_float() < 0.2:
+                return MAGMA
+            return mat
+        if name == NETHERRACK and not self.cold:
+            if rng.next_float() < 0.07:
+                return MAGMA
+        return mat
+
+    def _process_fiq(self, mat, wx: int, wy: int, wz: int):
+        """fiq BlockAgeProcessor（mossiness；settings.getRandom(pos)
+        独立新流——fjm L110-116）。"""
+        rng = mc_rng.LegacyRandomSource(
+            mc_rng.mth_get_seed(wx, wy, wz))
+        name = mat[0] if isinstance(mat, tuple) else mat
+        if name in _FIQ_STONE:
+            if rng.next_float() >= 0.5:       # L40 门（>=0.5 不变）
+                return mat
+            # L44-45：先 cracked 组（fS stairs）、后 mossy 组（od）
+            c_stairs = _rand_stairs(rng)
+            m_stairs = _rand_stairs(rng)
+            if rng.next_float() < self.mossiness:
+                if rng.next_int(2) == 0:
+                    return MOSSY_STONE_BRICKS
+                return (MOSSY_STONE_BRICK_STAIRS,
+                        _stairs_shape(*m_stairs))
+            if rng.next_int(2) == 0:
+                return CRACKED_STONE_BRICKS
+            return (STONE_BRICK_STAIRS, _stairs_shape(*c_stairs))
+        if name == STONE_BRICK_STAIRS:
+            if rng.next_float() >= 0.5:       # L50 门
+                return mat
+            if rng.next_float() < self.mossiness:   # L55 mossy 组
+                if rng.next_int(2) == 0:
+                    quad, half = self._stairs_props(mat)
+                    return (MOSSY_STONE_BRICK_STAIRS,
+                            _stairs_shape(quad, half))
+                # or.m() = 默认属性 = bottom slab
+                return (MOSSY_STONE_BRICK_SLAB, bs.SHAPE_SLAB_BOT)
+            if rng.next_int(2) == 0:
+                return STONE_SLAB             # e 组静态常量
+            return STONE_BRICK_SLAB
+        if name in _FIQ_SLABS:
+            if rng.next_float() < self.mossiness:   # L59
+                half = self._slab_half(mat)
+                if half is None:
+                    return mat
+                return (MOSSY_STONE_BRICK_SLAB,
+                        bs.SHAPE_SLAB_TOP if half == "t"
+                        else bs.SHAPE_SLAB_BOT)
+            return mat
+        if name in _FIQ_WALLS:
+            if rng.next_float() < self.mossiness:
+                return MOSSY_STONE_BRICK_WALL
+            return mat
+        if name == OBSIDIAN:
+            if rng.next_float() < 0.15:       # L67
+                return CRYING_OBSIDIAN
+            return mat
+        return mat                            # 其余块 0 消耗
+
+    @staticmethod
+    def _stairs_props(mat) -> tuple:
+        """楼梯形状码 -> (quad, half)。"""
+        if isinstance(mat, tuple):
+            segs = mat[1].split(":")
+            return segs[1], (segs[2] if len(segs) > 2 else "b")
+        return "n", "b"
+
+    @staticmethod
+    def _slab_half(mat) -> str | None:
+        """slab 形状码 -> half（"t"/"b"）；整格/异形码返回 None
+        （fiq 的 mossy 输出仅保留原 half，double slab 判定不变）。"""
+        if isinstance(mat, tuple) and isinstance(mat[1], str):
+            segs = mat[1].split(":")
+            if segs[0] == "half" and len(segs) >= 2:
+                return segs[1]
+        return None
+
+    # -- 模板放置 -------------------------------------------------------
+
     def _place_template(self, chest_seed: int,
                         chest_local: tuple) -> None:
-        """模板 NBT -> mirror/rot 变换 -> 世界体素（以 y0 贴到 piece）。"""
+        """模板 NBT -> mirror/rot 变换 -> 处理器链 -> 世界体素。"""
         vox = _load_template(self.template.split("/", 1)[1])
         for (lx, ly, lz), mat in vox.items():
             tx, ty, tz = self._t(lx, ly, lz)
+            wx, wy, wz = self.ax + tx, self.y0 + ty, self.az + tz
             if isinstance(mat, tuple):
                 base, shape = mat
                 if self.mirror_fb:
                     shape = bs.shape_mirror(shape, "FRONT_BACK")
                 shape = bs.shape_rotation(shape, self.rot)
                 mat = (base, shape) if shape else base
-            self.voxels[(self.ax + tx, self.y0 + ty,
-                         self.az + tz)] = mat
-        # 箱子（模板内恰 1 个）：世界坐标与 LootTableSeed
+            mat = self._process_fjj(mat, wx, wy, wz)
+            if mat is not None:
+                mat = self._process_fiq(mat, wx, wy, wz)
+            if mat is None:
+                self._put(wx, wy, wz, None)   # gold 降解为 AIR（挖开）
+                continue
+            self.voxels[(wx, wy, wz)] = mat
+        # 箱子（模板内恰 1 个；形状码已经 mirror/rot 变换）
         tx, ty, tz = self._t(*chest_local)
         wx, wy, wz = self.ax + tx, self.y0 + ty, self.az + tz
-        self._put(wx, wy, wz, (CHEST, "chest:%s:single"
-                               % self._face_of(chest_local[5] if False
-                                               else _RP_TPL[
-                                                   self.template.split(
-                                                       "/", 1)[1]][6])))
         self.chests.append((wx, wz, wy, "chests/ruined_portal",
                             chest_seed))
 
-    def _face_of(self, local: str) -> str:
-        """局部水平朝向 -> 世界朝向（mirror+rotate 净变换）。"""
-        if self.mirror_fb:
-            local = {"e": "w", "w": "e"}.get(local, local)
-        mp = ("nnnn", "nesw", "nsne", "nwns")[self.rot]
-        # rot 表（与 bs.shape_rotation 同）：1:n->e 2:n->s 3:n->w
-        table = {0: {"n": "n", "e": "e", "s": "s", "w": "w"},
-                 1: {"n": "e", "e": "s", "s": "w", "w": "n"},
-                 2: {"n": "s", "e": "w", "s": "n", "w": "e"},
-                 3: {"n": "w", "e": "n", "s": "e", "w": "s"}}[self.rot]
-        return table[local]
-
-    # -- 修饰（fic postProcess L76-88，平坦口径） ----------------
+    # -- postProcess 修饰（fic L76-88，平坦口径） -------------------
 
     def _bb(self):
-        """变换后 bb（世界口径，y 不随 rot/mirror）。"""
+        """变换后 bb（世界口径；y 不随 rot/mirror）。"""
         corners = [self._t(0, 0, 0), self._t(self.sx - 1, 0, 0),
                    self._t(0, 0, self.sz - 1),
                    self._t(self.sx - 1, 0, self.sz - 1)]
@@ -452,13 +606,13 @@ class _RPSim:
         cx = bb0x + (bb1x - bb0x + 1) // 2       # BoundingBox.getCenter
         cz = bb0z + (bb1z - bb0z + 1) // 2
         span2 = ((bb1x - bb0x + 1) + (bb1z - bb0z + 1)) // 2
-        self.pile_off = self.rng.next_int(max(1, 8 - span2 // 2))
+        pile_off = self.rng.next_int(max(1, 8 - span2 // 2))
         surface_like = self.placement in ("on_land_surface",
                                           "on_ocean_floor")
         target = 64 if surface_like else min(self.y0, 64)
         for dx in range(-14, 15):                # x 外层 z 内层
             for dz in range(-14, 15):
-                dist = max(0, abs(dx) + abs(dz) + self.pile_off)
+                dist = max(0, abs(dx) + abs(dz) + pile_off)
                 if dist >= 14:
                     continue
                 if self.rng.next_double() >= _PILE_WEIGHTS[dist]:
@@ -531,7 +685,7 @@ class _BTSim:
 
 
 # ---------------------------------------------------------------------------
-# Composition 装配入口（composition.compose_display_model 调用）
+# Composition 装配入口（composition 层调用）
 # ---------------------------------------------------------------------------
 
 def sim_ruined_portal(world_seed: int, ax: int, az: int,

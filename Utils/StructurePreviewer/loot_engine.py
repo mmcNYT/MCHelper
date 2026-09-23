@@ -1162,6 +1162,12 @@ _LOOT_TABLE_ERAS: dict[str, tuple[int, str, str]] = {
     # → 未分档单文件。
     "desert_pyramid": (E_1_21_11, E_1_21, "1_20"),
     "jungle_temple": (E_1_21_11, E_1_21, "1_20"),
+    # 废弃传送门/埋藏的宝藏：三档官方 jar 原生表；ruined_portal
+    # 三档逐档 diff 有差异（1.21.11 增 lodestone、1.21 调整权重）；
+    # buried_treasure 1_21 档与 1_20 档逐字节相同（复制 1_20 内容
+    # 占位），1_21_11 增鹦鹉螺铠四色 + iron_spear。
+    "ruined_portal": (E_1_21_11, E_1_21, "1_20"),
+    "buried_treasure": (E_1_21_11, E_1_21, "1_20"),
 }
 
 # 快照档后缀 -> 解析 era（对齐 C 烘焙表 version 烧死语义）

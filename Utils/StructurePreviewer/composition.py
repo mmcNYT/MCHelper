@@ -1184,6 +1184,91 @@ def compose_jungle_temple(world_seed: int, block_x: int, block_z: int,
                             block_x, block_z, version_key)
 
 
+# ---------------------------------------------------------------------------
+# ruined_portal（废弃传送门）/ buried_treasure（埋藏的宝藏）
+# ---------------------------------------------------------------------------
+
+# 变体显示名（tool 层信息行用）
+_RP_VARIANT_CN = {
+    "ruined_portal": "普通",
+    "ruined_portal_desert": "沙漠",
+    "ruined_portal_jungle": "丛林",
+    "ruined_portal_swamp": "沼泽",
+    "ruined_portal_mountain": "山地",
+    "ruined_portal_ocean": "海洋",
+}
+_RP_PLACEMENT_CN = {
+    "on_land_surface": "地表",
+    "partly_buried": "半埋",
+    "on_ocean_floor": "海床",
+    "in_mountain": "山体",
+    "underground": "地下",
+}
+
+
+def compose_ruined_portal(world_seed: int, block_x: int, block_z: int,
+                          biome_id: int = -1,
+                          version_key: str = "1.21") -> Composition:
+    """废弃传送门：变体群系映射 + setup 流（setup 权重/air_pocket/
+    giant 门/模板/rotation/mirror/findSuitableY 平坦口径）+
+    模板单箱 LootTableSeed（postProcess 流首个 nextLong；块处理器
+    走位置哈希独立流不消耗该流——fjm.getRandom 铁证）。
+
+    显示体素由 ruined_portal_pieces._RPSim 重跑生成（同一 RNG 序，
+    箱子 pos3 exact 匹配），y 基准 = 64（平坦基准，underground/
+    in_mountain 的负 y 值表达埋深）。
+    """
+    from . import ruined_portal_pieces
+    min_bx = block_x & ~15
+    min_bz = block_z & ~15
+    variant = ruined_portal_pieces.variant_for_biome(biome_id)
+    sim = ruined_portal_pieces._RPSim(world_seed, min_bx, min_bz,
+                                      variant)
+    piece = Piece("ruined_portal", (min_bx, sim.y0, min_bz), [],
+                  rot=sim.rot)
+    for (wx, wz, wy, table, seed) in sim.chests:
+        piece.chests.append(Chest((wx, wz), table, seed,
+                                  pos3=(wx, wy, wz)))
+    return Composition("ruined_portal", variant, sim.rot,
+                       sim.mirror_fb, (min_bx, min_bz), [piece],
+                       {"world_seed": world_seed,
+                        "variant": variant,
+                        "variant_cn": _RP_VARIANT_CN.get(variant,
+                                                         variant),
+                        "placement": sim.placement,
+                        "placement_cn": _RP_PLACEMENT_CN.get(
+                            sim.placement, sim.placement),
+                        "template": sim.template,
+                        "giant": sim.giant,
+                        "air_pocket": sim.air_pocket,
+                        "mossiness": sim.mossiness,
+                        "overgrown": sim.overgrown,
+                        "vines": sim.vines,
+                        "cold": sim.cold,
+                        "mirror_fb": sim.mirror_fb,
+                        "y0": sim.y0,
+                        "n_containers": len(piece.chests)})
+
+
+def compose_buried_treasure(world_seed: int, block_x: int,
+                            block_z: int,
+                            version_key: str = "1.21") -> Composition:
+    """埋藏的宝藏：锚点 (minBlock+9) + 单箱 LootTableSeed（找地表
+    全程无 RNG，流首 nextLong 即箱子；fhh/fhi 定案）。"""
+    from . import ruined_portal_pieces
+    min_bx = block_x & ~15
+    min_bz = block_z & ~15
+    sim = ruined_portal_pieces._BTSim(world_seed, min_bx, min_bz)
+    piece = Piece("buried_treasure", (min_bx, 64, min_bz), [])
+    for (wx, wz, wy, table, seed) in sim.chests:
+        piece.chests.append(Chest((wx, wz), table, seed,
+                                  pos3=(wx, wy, wz)))
+    return Composition("buried_treasure", "buried_treasure", 0, False,
+                       (min_bx, min_bz), [piece],
+                       {"world_seed": world_seed,
+                        "n_containers": len(piece.chests)})
+
+
 def compose_pillager_outpost(world_seed: int, block_x: int, block_z: int,
                              version_key: str = "1.21") -> Composition:
     """掠夺者前哨站：jigsaw 拼装 + 战利品预测（1.21.11 语义）。
@@ -2516,6 +2601,12 @@ def compose(struct_key: str, world_seed: int, block_x: int, block_z: int,
     if struct_key == "jungle_temple":
         return compose_jungle_temple(world_seed, block_x, block_z,
                                      version_key)
+    if struct_key == "ruined_portal":
+        return compose_ruined_portal(world_seed, block_x, block_z,
+                                     biome_id, version_key)
+    if struct_key == "buried_treasure":
+        return compose_buried_treasure(world_seed, block_x, block_z,
+                                       version_key)
     raise ValueError(f"composition 未支持的结构键：{struct_key}")
 
 
@@ -2564,6 +2655,18 @@ def _pyramid_voxels(comp: Composition) -> tuple[dict, set]:
     """
     from . import pyramid_pieces
     return pyramid_pieces.build_pyramid_voxels(comp)
+
+
+def _ruined_portal_voxels(comp: Composition) -> tuple[dict, set]:
+    """废弃传送门显示：模板 NBT + 处理器降解 + 修饰（ruined_portal_pieces）。"""
+    from . import ruined_portal_pieces
+    return ruined_portal_pieces.build_ruined_portal_voxels(comp)
+
+
+def _buried_treasure_voxels(comp: Composition) -> tuple[dict, set]:
+    """埋藏的宝藏显示：沙+箱+砂岩覆盖（ruined_portal_pieces）。"""
+    from . import ruined_portal_pieces
+    return ruined_portal_pieces.build_buried_treasure_voxels(comp)
 
 # jigsaw 旋转名 -> block_shapes.shape_rotation 的 0-3 索引
 # （与 cubiomes/cubiomes 注释同序：0=NONE 1=CW90 2=CW180 3=CCW90）
@@ -2933,6 +3036,17 @@ def compose_display_model(comp: Composition) -> dict:
         # （同一 _Sim），pos3 3D exact 匹配，y 基准 = 64（平坦基准）。
         voxels, nether_chest_offs = _pyramid_voxels(comp)
         start_off = (0, 0)
+    elif comp.struct_key == "ruined_portal":
+        # 废弃传送门：模板 NBT（13 个）+ 处理器降解 + 土堆/藤/叶
+        # （ruined_portal_pieces._RPSim 重跑，与 RNG 容器同源），
+        # pos3 3D exact 匹配，y 基准 = 64（平坦基准）。
+        voxels, nether_chest_offs = _ruined_portal_voxels(comp)
+        start_off = (0, 0)
+    elif comp.struct_key == "buried_treasure":
+        # 埋藏的宝藏：沙+箱+砂岩示意覆盖（单箱，与 RNG 同源），
+        # pos3 3D exact 匹配，y 基准 = 64。
+        voxels, nether_chest_offs = _buried_treasure_voxels(comp)
+        start_off = (0, 0)
     elif comp.struct_key == "bastion_remnant":
         voxels, nether_chest_offs = _bastion_jigsaw_voxels(comp)
         start_off = (0, 0)
@@ -3119,10 +3233,12 @@ def compose_display_model(comp: Composition) -> dict:
                     and _is_chest_value(voxels[(bx, by, bz)]):
                 c0.pos_model = (bx, by, bz)
                 assigned.add(ci)
-    elif comp.struct_key in ("desert_pyramid", "jungle_temple") \
+    elif comp.struct_key in ("desert_pyramid", "jungle_temple",
+                             "ruined_portal", "buried_treasure") \
             and chest_voxel_y:
-        # 沙漠神殿/丛林神庙：同 stronghold，pos3 3D exact 匹配，
-        # y 基准 = 64；容器含 dispenser（发射器，jungle 陷阱）。
+        # 沙漠神殿/丛林神庙/废弃传送门/埋藏的宝藏：同 stronghold，
+        # pos3 3D exact 匹配，y 基准 = 64；pyramid 容器含 dispenser
+        # （发射器，jungle 陷阱），ruined/buried 单箱。
         assigned = set()
         for ci, c0 in enumerate(comp.chests):
             if c0.pos3 is None:

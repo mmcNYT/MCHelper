@@ -72,7 +72,8 @@ _STRUCT_KEYS = ("igloo", "shipwreck", "ocean_ruin", "stronghold",
                 "nether_fortress", "bastion_remnant", "end_city",
                 "trial_chambers", "ancient_city", "village",
                 "pillager_outpost", "woodland_mansion",
-                "desert_pyramid", "jungle_temple")
+                "desert_pyramid", "jungle_temple",
+                "ruined_portal", "buried_treasure")
 
 # UI 键 -> 枚举/校验/图标/显示名链路键（cubiomes 键名差异桥接）
 _UI_TO_ENUM = {"woodland_mansion": "mansion"}
@@ -175,6 +176,14 @@ _ITEM_CN = {
     "sand": "沙子", "spider_eye": "蜘蛛眼",
     "dune_armor_trim_smithing_template": "沙丘盔甲纹样锻造模板",
     "wild_armor_trim_smithing_template": "荒野盔甲纹样锻造模板",
+    # -- 废弃传送门/埋藏的宝藏表物品补全（中文 Wiki 名）--
+    "bell": "钟", "fire_charge": "火焰弹", "flint": "燧石",
+    "glistering_melon_slice": "闪烁的西瓜片",
+    "golden_hoe": "金锄", "golden_shovel": "金锹",
+    "light_weighted_pressure_plate": "轻质测重压力板",
+    "heart_of_the_sea": "海洋之心", "prismarine_crystals": "海晶结晶",
+    "cooked_cod": "熟鳕鱼", "cooked_salmon": "熟鲑鱼",
+    "iron_spear": "铁矛",
 }
 
 # 附魔短名 -> 中文名（loot_engine.ENCHANTMENT_ORDER 全集；中文 Wiki 名）
@@ -1728,6 +1737,22 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
             lines.append(f"朝向：{dir_cn}"
                          f"｜容器数：{comp.extra.get('n_containers', '?')}"
                          "（含发射器）")
+        elif key == "ruined_portal":
+            mirror = comp.extra.get("mirror_fb", False)
+            lines.append(f"变体：{comp.extra.get('variant_cn', '?')}"
+                         f"｜放置：{comp.extra.get('placement_cn', '?')}")
+            lines.append(f"模板：{comp.extra.get('template', '?')}")
+            rot = comp.rotation % 4
+            lines.append(f"朝向：{('北', '东', '南', '西')[rot]}"
+                         f"｜镜像（前后）：{'是' if mirror else '否'}")
+            lines.append(f"埋放 y：{comp.extra.get('y0', '?')}"
+                         f"（平坦基准，地下/山体变体为负）"
+                         f"｜气室：{'有' if comp.extra.get('air_pocket') else '无'}"
+                         f"｜藤蔓：{'有' if comp.extra.get('vines') else '无'}"
+                         f"｜葱郁：{'有' if comp.extra.get('overgrown') else '无'}")
+        elif key == "buried_treasure":
+            lines.append("锚点：区块内 (9, 9)"
+                         "｜单箱埋于地表下一格（平坦示意）")
         elif key == "woodland_mansion":
             lines.append(f"拼装旋转：{comp.extra.get('rot_name', '?')}"
                          f"｜房间件数：{comp.extra.get('n_pieces', '?')}")
