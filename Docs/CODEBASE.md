@@ -1958,7 +1958,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 整体数据流为一条「输入 → 枚举 → compose → 渲染 → 战利品 → 图标合成」的流水线：
 
-1. **输入层**：世界种子（支持十进制、负数、`0x` 十六进制，校验 64 位有符号范围，`_parse_seed`）、版本键（`26.2`/`1.21.11`/`1.21`，来自 `structure_params.VERSION_KEYS`）、结构类型（12 种 `_STRUCT_KEYS`：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion）、锚点坐标 X/Z（手动输入或「粘贴F3+C」解析剪贴板）。「woodland_mansion」是 UI/展示/compose 用键，枚举与群系校验链路用 cubiomes 键 `mansion`，由 `_UI_TO_ENUM` 别名映射桥接。
+1. **输入层**：世界种子（支持十进制、负数、`0x` 十六进制，校验 64 位有符号范围，`_parse_seed`）、版本键（`26.2`/`1.21.11`/`1.21`，来自 `structure_params.VERSION_KEYS`）、结构类型（14 种 `_STRUCT_KEYS`：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion/desert_pyramid/jungle_temple）、锚点坐标 X/Z（手动输入或「粘贴F3+C」解析剪贴板）。「woodland_mansion」是 UI/展示/compose 用键，枚举与群系校验链路用 cubiomes 键 `mansion`，由 `_UI_TO_ENUM` 别名映射桥接。
 
 2. **实例枚举（后台线程）**：单按钮两态的「附近的实例」态触发 `_on_locate_clicked`，创建 `_LocateThread`（QThread）在后台调用 `Utils/Public/structure_map.enumerate_structures`，以输入坐标（留空为原点）为中心 ±`_LOCATE_RADIUS`(2048) 方块视口，按结构所属维度（`structure_params.STRUCT_DIMENSION`，下界结构自动走 NetherSampler）逐区块枚举真实生成的结构实例（含群系校验，结果与游戏 `/locate` 一致），以 `progress`/`finished_ok`/`error` 信号回传主线程；结果按距中心距离平方排序填入左侧 `treeWidget`（结构/X/Z/群系四列），行 UserRole 存 `(x, z, 结构键)`，双击行加载实例，右键复制 F3+C 格式传送指令（`_tp_command` 生成 `/execute in <维度> run tp @s X 100 Z 0 0`）。
 
@@ -2128,7 +2128,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 |---|---|---|
 | `_SESSION_FILE` | `str` = `"structure_previewer_session.json"` | 会话持久化文件名，落在 QStandardPaths AppConfigLocation 目录。 |
 | `_SENS_MIN` / `_SENS_MAX` / `_SENS_DEFAULT` | `1` / `30` / `5` | 灵敏度滑条整数档范围与默认值；实际灵敏度 = 档位/100 度/像素（0.01~0.30）。 |
-| `_STRUCT_KEYS` | `tuple[str, ...]`（12 项） | 本工具支持的结构键：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion；下界结构维度路由查 `structure_params.STRUCT_DIMENSION`。 |
+| `_STRUCT_KEYS` | `tuple[str, ...]`（14 项） | 本工具支持的结构键：igloo/shipwreck/ocean_ruin/stronghold/nether_fortress/bastion_remnant/end_city/trial_chambers/ancient_city/village/pillager_outpost/woodland_mansion/desert_pyramid/jungle_temple；下界结构维度路由查 `structure_params.STRUCT_DIMENSION`。 |
 | `_UI_TO_ENUM` | `{"woodland_mansion": "mansion"}` | UI 键 → cubiomes 键别名映射（枚举/校验/图标/显示名链路用），compose 仍用 UI 键。 |
 | `_LOOT_DIR` | `str` 路径 | loot 快照目录 `<项目根>/Utils/StructurePreviewer/data/loot`，传给 `load_loot_snapshot`。 |
 | `_ITEM_CN` | `dict[str, str]`（约 160 项） | 物品短名 → 中文 Wiki 名（六张表全集 + 试炼密室/要塞/林地府邸/远古城市/海底废墟/掠夺者前哨站/堡垒遗迹/村庄补全）。 |
@@ -3706,7 +3706,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `_mat_shape` | `_mat_shape(v) -> tuple` | 体素值 → (基纹理键, 形状码\|None)：元组直取（门上半 `door:u:*` 且基键以 `" door bottom"` 结尾时换 `" door top"`）；旧 `halfheight:` 前缀字符串 → (去前缀, SHAPE_SLAB_BOT)；非字符串 → UNKNOWN_MAT。 |
 | `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。 |
 | `_RU` / `_RS` | `_RU(a,b,c,d)` / `_RS(a,b,c,d)` | 官方模型 JSON 像素窗 → 归一化窗换算：up 面 `v=(1-b,1-d)`；side/down 面 `v=(1-d,1-b)`；u=(a,c)；除以 16。 |
-| `_decor_face_mat` | `_decor_face_mat(mat, kind, rest, normal, box) -> tuple` | 装饰方块（新形状码族）按面分流：rswire（世界平铺自动命中）、repeater/comparator（底板 smooth stone / 火把柱 redstone torch off）、sculk（底座/触须）、lamp（lit 两态）、pist（platform/bottom/side）、brewing（底板三分窗+杆）、flowerpot（壁侧横带+内底 dirt）、candle、torch（立式 + 墙上斜杆三级台阶段按段等分杆身带）、lantern（顶盖/主体盒）、erod（底座/杆盒）、dhead（龙首 5 面）、bed（顶面枕带/毯区分区窗，e/w 走 swap）、wsign（板盒正面窗）、pisth（平台/轴盒；轴端面返回 `_SKIP_FACE` 不生成）、lectern。 |
+| `_decor_face_mat` | `_decor_face_mat(mat, kind, rest, normal, box) -> tuple` | 装饰方块（新形状码族）按面分流：rswire（世界平铺自动命中）、thook（多盒按最小维度分流：0.5px 绊线段→tripwire / 0.8px 钩件→基键 tripwire hook / 1.4px 横臂与背板→oak planks）、repeater/comparator（底板 smooth stone / 火把柱 redstone torch off）、sculk（底座/触须）、lamp（lit 两态）、pist（platform/bottom/side）、brewing（底板三分窗+杆）、flowerpot（壁侧横带+内底 dirt）、candle、torch（立式 + 墙上斜杆三级台阶段按段等分杆身带）、lantern（顶盖/主体盒）、erod（底座/杆盒）、dhead（龙首 5 面）、bed（顶面枕带/毯区分区窗，e/w 走 swap）、wsign（板盒正面窗）、pisth（平台/轴盒；轴端面返回 `_SKIP_FACE` 不生成）、lectern。 |
 | `_rect` | `_rect(b: tuple, axis: int) -> tuple` | AABB 在 axis 法向平面上的投影矩形（x 面投影 (z,y)、y 面 (x,z)、z 面 (x,y)）。 |
 | `_covered` | `_covered(inner: tuple, outer: tuple) -> bool` | 投影矩形 inner 是否被 outer 完全覆盖（容差 1e-9）。 |
 | `_boxes_with_arms` | `_boxes_with_arms(vox: dict, pos: tuple, shape) -> list` | 某位置形状的完整 AABB 列表：post/pane/wall 按四向邻居 `bs.connect_kind` + `bs.connect_arms` 补连通臂；自身面生成与邻居贴界面矩形共用，保证接缝判定对称。 |
@@ -3871,17 +3871,18 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `shape_from_props` | `(name: str, props: dict) -> str \| None` | 官方方块名（`minecraft:xxx`）+ properties → 形状码。无形状语义返回 `None`（调用方按整格处理）。按后缀/名单逐族判定：植物类→`plant`；`*_slab`（double 返回 None 整格）；`*_stairs`（half=top 换 `:t`）；`*_trapdoor`；`bell`（attachment=ceiling→`bell:ceiling`）；`composter`；`*_door`；`chest`/`trapped_chest`/`ender_chest`/`barrel`（type=left/right/single）；火把族（带 facing→墙上火把）；`lantern`（hanging→`lantern:h`）；炉族/发射器/vault→`fc:<f>[:lit]`（u/d 保竖直）；`*_log`/basalt/quartz_pillar→`col:<axis>`（`*_wood` 六面同纹不进）；栅栏/墙/压力板/地毯；`*_bed`→`bed:head\|foot:<f>`；`chain`→`bar:<axis>`；`end_rod`；`ladder`/`tripwire_hook`/`*_wall_banner`→`panel:<贴边>`；`*_wall_sign`→`wsign:<att>`；落地 `*_sign`/`*_banner`→`cross`；`*_button`；`lever`；`redstone_wire`（none/side/up→`-/s/u` 四段）；`repeater`/`comparator`；`sculk_sensor`；`piston`/`sticky_piston`→`pist:<f>[:s][:x]`（extended 加 `:x`）；`redstone_lamp`→`lamp:0|1`；`tripwire`→`bar:x\|z`；`cauldron` 族；`*_bars`/`glass_pane`→`pane`；蜡烛；`brewing_stand`；`potted_*`→`flowerpot`；龙首（wall 变体→`dhead:<f>:w`，站立 rot 0/4/8/12→四向）；`piston_head(_short)`→`pisth:<f>[:s]`；`lectern` |
+| `shape_from_props` | `(name: str, props: dict) -> str \| None` | 官方方块名（`minecraft:xxx`）+ properties → 形状码。无形状语义返回 `None`（调用方按整格处理）。按后缀/名单逐族判定：植物类→`plant`；`*_slab`（double 返回 None 整格）；`*_stairs`（half=top 换 `:t`）；`*_trapdoor`；`bell`（attachment=ceiling→`bell:ceiling`）；`composter`；`*_door`；`chest`/`trapped_chest`/`ender_chest`/`barrel`（type=left/right/single）；火把族（带 facing→墙上火把）；`lantern`（hanging→`lantern:h`）；炉族/发射器/vault→`fc:<f>[:lit]`（u/d 保竖直）；`*_log`/basalt/quartz_pillar→`col:<axis>`（`*_wood` 六面同纹不进）；栅栏/墙/压力板/地毯；`*_bed`→`bed:head\|foot:<f>`；`chain`→`bar:<axis>`；`end_rod`；`ladder`/`*_wall_banner`→`panel:<贴边>`；`tripwire_hook`→`thook:<贴边>[:a]`（attached 加 `:a`）；`vine`→`vine:<dir>[+<dir>]`；`*_wall_sign`→`wsign:<att>`；落地 `*_sign`/`*_banner`→`cross`；`*_button`；`lever`；`redstone_wire`（none/side/up→`-/s/u` 四段）；`repeater`/`comparator`；`sculk_sensor`；`piston`/`sticky_piston`→`pist:<f>[:s][:x]`（extended 加 `:x`）；`redstone_lamp`→`lamp:0|1`；`tripwire`→`twire:<n>:<s>:<e>:<w>`（true→`1`）；`cauldron` 族；`*_bars`/`glass_pane`→`pane`；蜡烛；`brewing_stand`；`potted_*`→`flowerpot`；龙首（wall 变体→`dhead:<f>:w`，站立 rot 0/4/8/12→四向）；`piston_head(_short)`→`pisth:<f>[:s]`；`lectern` |
 | `shape_from_palette` | `(name: str, props: dict \| None) -> str \| None` | jigsaw/模板 palette 条目 → 形状码（组装层加载器专用）。一律转调 `shape_from_props`（props 缺失按空 dict）——无 Properties ≠ 无形状：火把/灯笼/地毯/花盆等无属性方块靠内建默认定型；旧加载点 `if props else None` 会把它们错当整格（落地火把变整块）。返回 None 时下游 `halfheight:` fallback 兜底 |
-| `shape_mirror` | `(shape: str \| None, mirror: str) -> str \| None` | 形状码按放置镜像换向。`FRONT_BACK`（x=-x）下 e↔w、`LEFT_RIGHT`（z=-z）下 n↔s，u/d 透传。按 `_MIRROR_KIND_FACE` 找 kind 的朝向段下标（`bed`=1、`door`=2、其余 0）；`rswire` 特殊处理四向段交换（段序 n,s,e,w）。调用方须在 `shape_rotation` 之前调用（StructureTemplate.transform 先镜像后旋转） |
-| `shape_rotation` | `(shape: str \| None, rot: int) -> str \| None` | 形状码按放置旋转 rot（0..3）换向。`_ROT_FACE[rot&3]` 查映射（rot1 = n→e，与 cubiomes 放置旋转 R 的 `(x,z)->(-z,x)` 一致）。door 保铰链/开门状态（纯旋转手性不变）；`bar` 奇数旋转 x/z 轴互换；`col` 轴向无旋转语义；`fc`/`repeater`/`comparator`/`pist`/`pisth` 竖直朝向（u/d）不随 R 旋转；`rswire` 四向段按 rot 轮换；stairs/chest/trapdoor/panel/button/lever/torch/dhead 换尾段朝向；half/post/pane 等不变 |
+| `shape_mirror` | `(shape: str \| None, mirror: str) -> str \| None` | 形状码按放置镜像换向。`FRONT_BACK`（x=-x）下 e↔w、`LEFT_RIGHT`（z=-z）下 n↔s，u/d 透传。按 `_MIRROR_KIND_FACE` 找 kind 的朝向段下标（`bed`=1、`door`=2、其余 0）；`rswire`/`twire` 特殊处理四向段交换（段序 n,s,e,w）；`vine` 多面段逐向换（`+` 连接单字母）。调用方须在 `shape_rotation` 之前调用（StructureTemplate.transform 先镜像后旋转） |
+| `shape_rotation` | `(shape: str \| None, rot: int) -> str \| None` | 形状码按放置旋转 rot（0..3）换向。`_ROT_FACE[rot&3]` 查映射（rot1 = n→e，与 cubiomes 放置旋转 R 的 `(x,z)->(-z,x)` 一致）。door 保铰链/开门状态（纯旋转手性不变）；`bar` 奇数旋转 x/z 轴互换；`col` 轴向无旋转语义；`fc`/`repeater`/`comparator`/`pist`/`pisth` 竖直朝向（u/d）不随 R 旋转；`rswire`/`twire` 四向段按 rot 轮换；`vine` 多面段逐向映射（u 不变）；stairs/chest/trapdoor/panel/button/lever/torch/dhead/thook 换尾段朝向；half/post/pane 等不变 |
 | `shape_boxes` | `(shape: str \| None) -> tuple` | 形状码 → AABB 元组（本地方块坐标，y 向上），`lru_cache(maxsize=512)`；None=整格；`col`/`fc`/`lamp` 整格（分面专用码）；`plant` 空 AABB（非实体，不参与面剔除/遮挡）；未知码兜底整格。核心分发器：按 kind 调下方几何函数 |
 | `connect_kind` | `(v) -> str \| None` | 体素值 → 连通类别：`'full'`/`'post'`/`'pane'`/`'wall'`/None 不连。纯字符串 = full（`halfheight:` 前缀除外）；二元组看 shape 首段，`col`/`fc` 视作 full |
 | `connect_arms` | `(kind: str, nbs) -> tuple` | kind + 四向邻居类别 nbs（顺序 n,s,e,w）→ 臂 AABB 元组。pane 臂全高 2/16 板、wall 臂 6/16 宽高 14/16、post 臂双横轨 y 12..15/6..9；臂沿连接方向触格边，邻居为同类或 `full` 才补 |
-| `panel_shape` | `(att: str) -> str` | 贴边方向 → `panel:<att>` 形状码（梯子/拌线钩/墙横幅共用） |
+| `panel_shape` | `(att: str) -> str` | 贴边方向 → `panel:<att>` 形状码（梯子/墙横幅共用） |
 | `wall_panel_edge` | `(facing: str) -> str` | 墙上挂件的贴边方向 = facing 反侧（`_OPPOSITE` 查表，缺省 "n"） |
 | 几何私有族 | `_slab(vh, blank)`、`_stairs(quad, half)`、`_door(part, open_, facing, hinge)`、`_trapdoor(facing, open_, half)`、`_bar(axis)`、`_barrel()`、`_cauldron()`、`_composter()`、`_brewing()`、`_flowerpot()`、`_candle()`、`_lantern(hang)`、`_end_rod(facing)`、`_dragon_head(wall, facing)`、`_wall_sign(att)`、`_piston_head(facing)`、`_lectern()`、`_chest(typ, facing)`、`_bell(att)`、`_torch(kind, facing)` | 每函数返回该形状的 AABB 元组，尺寸取自官方模型：半砖半格（blank m/s/e/w 缺角版保留扩展）；楼梯 = 底层全宽半格 + 踏步半格，half=t 为整体 y 镜像（侧置楼梯踏步落底半格不越界，旧版 +0.5 会插进上方格）；门 3/16 厚板贴 facing 侧框边、开门转 90° 贴铰链侧（每半块门板占满全高，half 只影响纹理选择）；活板门关=水平薄板置于半区、开=竖薄板贴 facing 反侧格缘；钟 = floor 双柱+横梁 / ceiling 吊杆 + 三段阶梯钟体（颈/肩/口），facing 无静态几何影响；箱子单箱 14³ 居中、大箱左右半 15/16 宽接缝贴格界（left 占 facing 逆时针 90° 格，`_CHEST_LEFT_OF` 查表）；桶 13/16 高 14x14 柱；锅/堆肥桶四壁+底杯状；酿造台中央杆+三底板（官方四元素原样）；花盆四壁+内底；蜡烛 2x6x2 主柱；灯笼主体+顶盖（悬挂 +1px）；末地烛底座+立杆按 facing 旋转（水平时底座贴反侧壁）；龙首 12³ 单盒（落地贴底居中 / 墙挂抬 0.25 外凸 0.25）；墙告示牌 1.0×8/16×2/16 板 y6..14；活塞头平台 16x16x4 + 突轴 4x4x12（越界 4px 与本体凹口咬合）；讲台底座+立柱+水平顶板近似斜置 |
 | 红石族私有 | `_rot_y(box, f)`、`_redstone_wire(rest)`、`_diode(f, comparator)`、`_sculk_sensor()`、`_piston_base(f)` | `_rot_y` = facing=n 基准 AABB 按 blockstate y 旋转（e=90/s=180/w=270 坐标变换）；红石线 = 4px 宽辐射臂贴地 1/64 厚片 + up 全高贴边竖片 + 孤点中心板；中继器/比较器 = 平滑石底板 2/16 + 火把柱（比较器背面双火把+输出端小火把）；幽匿感测体 = 8/16 底座 + 四角直立薄板近似官方 45° 斜片；extended 活塞本体 = facing 端缩进 4px 露杆室（u/d 沿 y 缩进） |
+| 机关件私有 | `_lever(rest)`、`_tripwire_hook(rest)`、`_tripwire(rest)`、`_vine(rest)` | 拉杆 = 圆石底座 6x3x8 + 2x10x2 杆未触发 -45° 斜置（4 段 45° 阶梯盒逼近；up=floor 原始 / down=ceiling x180 / 墙贴 = x90 家族旋转 f=贴边反侧过 `_rot_y`）；绊线钩 = 官方 tripwire_hook[_attached].json 多盒（背板+横臂+钩件，attached 带绊线伸出段，斜置件以包围盒近似，贴边 = facing 反侧过 `_rot_y`）；绊线 = 0.5px 细线面片 y=1.5（1/64 厚薄盒，每连接向半格段）；藤蔓 = 贴边薄面片 0.8/16 厚盒（vine:n 原始贴北缘，e/s/w 由 `_rot_y` 旋转，u=顶面片） |
 
 **接口**（grep 核实）：被 7 个文件 import，跨 SeedReverser 与 StructurePreviewer 两个工具复用：
 - `Utils/SeedReverser/structure_models.py:41`（`as bs`）——`build_mesh` 网格化、`_mat_shape` 释义的核心依赖；
@@ -3900,7 +3901,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `SHAPE_DOOR_LC/UC` | `"door:l:c:s:left"` / `"door:u:c:s:left"` | 门下半/上半（关/朝南/左铰链基准码） |
 | `SHAPE_TRAPDOOR_CB/CT` | `"trapdoor:n:c:b"` / `"trapdoor:n:c:t"` | 活板门关/底半、关/顶半 |
 | `SHAPE_FENCE_POST` / `SHAPE_WALL` | `"post"` / `"wall"` | 栅栏 4/16 柱 / 墙 8/16 柱（臂由 `connect_arms` 补） |
-| `SHAPE_BAR_X/Y/Z` | `"bar:x"` / `"bar:y"` / `"bar:z"` | 横杆（y = 链；绊线复用 x/z） |
+| `SHAPE_BAR_X/Y/Z` | `"bar:x"` / `"bar:y"` / `"bar:z"` | 横杆（y = 链） |
 | `SHAPE_PANE` | `"pane"` | 玻璃板/铁栏杆中央竖板（连通臂自动补） |
 | `SHAPE_TORCH_V` / `SHAPE_TORCH_H` | `"torch:v"` / `"torch:h"` | 立式火把 / 悬挂灯笼（历史命名，H 槽现指居中小块） |
 | `SHAPE_CHEST_N` | `"chest:n:single"` | 箱子基准码（完整码 `chest:<f>:<single\|left\|right>`，两段旧码兼容） |
@@ -3918,6 +3919,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `SHAPE_WALL_SIGN` | `"wsign:n"` | 墙挂告示牌（att 段 = 贴边边） |
 | `SHAPE_PISTON_HEAD` | `"pisth:n"` | 活塞头（sticky 加 `:s`） |
 | `SHAPE_LECTERN` / `SHAPE_RSWIRE` | `"lectern"` / `"rswire:-:-:-:-"` | 讲台 / 红石线（四向段 `-`/`s`/`u`） |
+| （内联码）`thook:<贴边>[:a]` / `twire:<n>:<s>:<e>:<w>` / `vine:<dir>[+<dir>]` / `lever:<贴边\|up\|down>` | 无 SHAPE_ 常量（pyramid 等调用方逐方块生成） | 绊线钩（官方多盒几何 + `:a`=attached）/ 绊线 0.5px 细线 / 藤蔓贴边薄面片 / 拉杆官方底座+斜杆 |
 | `_FACING_ABBR` | dict | `north/south/east/west` → `n/s/e/w` |
 | `_CHEST_LEFT_OF` | `{"n":"w","e":"n","s":"e","w":"s"}` | 大箱 left 半所在方向（facing 逆时针 90°） |
 | `_MIRROR_KIND_FACE` | dict | kind → 朝向字母在码中的下标（`bed`=1、`door`=2、多数=0；不在表 = 无朝向语义） |
@@ -4304,11 +4306,19 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 `compose_village` 流程（RNG 消耗顺序）：① `variant = village_assembly.variant_from_biome(biome_id)`（变体由锚点群系决定，meadow 按 plains）；② `chunk_generate_rnd` 建流；③ `rotation = nextInt(4)`；④ start pick（`nextInt(总权重)`，plains 204：4 普通×50 + 4 僵尸×1；僵尸起点 street 标记指向 `<variant>/zombie/streets` 池→完整僵尸链）在 `assemble_village` 引擎内消耗（size=6 / max_dist=80 / start_y=地表平坦基准 63 / expansion_hack=true）；⑤ 容器收集分区块；⑥ 每区块装饰流 salt `village_{variant}`（step 4、decorator 22..26 按变体）连抽 nextLong。`extra = {variant, zombie, start, world_seed, start_y, n_pieces, n_chests}`；variant_name = `"village/{variant}"` + 僵尸起点加 `"/zombie"`。
 
+### desert_pyramid / jungle_temple（沙漠神殿/丛林神庙）
+
+| 名称 | 签名 | 说明 |
+|---|---|---|
+| `_compose_pyramid`（L1135） | `_compose_pyramid(struct_key: str, salt_key: str, world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 两结构共用组合入口：`chunk_generate_rnd` → `nextInt(4)`（Plane.HORIZONTAL faces 序 {N,E,S,W}）得 facing；调 `pyramid_pieces._sim_desert/_sim_jungle` 模拟流（postProcess 转写层，容器 LootTableSeed 在模拟流中直接取——createChest 路径无 skip，箱子前置消耗含 nextInt(3)/nextFloat 序列，skips 模型不可表达）；Piece.rot = facing；`extra = {world_seed, facing, n_containers}`；variant_name 与键同名 |
+| `compose_desert_pyramid`（L1181） | `compose_desert_pyramid(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 沙漠神殿：salt desert_pyramid=(4,1)，4 臂箱 chests/desert_pyramid |
+| `compose_jungle_temple`（L1188） | `compose_jungle_temple(world_seed, block_x, block_z, version_key = "1.21") -> Composition` | 丛林神庙：salt jungle_pyramid=(4,4)，2 箱 chests/jungle_temple + 2 发射器 chests/jungle_temple_dispenser |
+
 ### 公共入口与显示模型
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `compose`（L2415） | `compose(struct_key: str, world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 总分派入口：12 个结构键 if 链转发对应 `compose_*`（biome_id 仅 shipwreck/village/ocean_ruin 消费），未支持键抛 `ValueError("composition 未支持的结构键：…")` |
+| `compose`（L2415） | `compose(struct_key: str, world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 总分派入口：14 个结构键 if 链转发对应 `compose_*`（biome_id 仅 shipwreck/village/ocean_ruin 消费），未支持键抛 `ValueError("composition 未支持的结构键：…")` |
 | `_load_template_voxels`（L2457） | `@lru_cache(maxsize=32) _load_template_voxels(fname: str) -> dict` | `structure_models._voxels_from_template_file(TEMPLATE_DIR/fname)` 的 lru 缓存（igloo/shipwreck 显示模板 NBT → 体素 dict）；大视野批量 compose_display_model 时同一模板只解析一次，返回值只读遍历/复制不改内部态 |
 | `_fortress_solid_voxels`（L2466） | `_fortress_solid_voxels(comp: Composition) -> tuple[dict, set]` | fortress 显示：`fortress_pieces.build_fortress_voxels(comp)`（按 NetherFortressPieces.java postProcess 逐段转写，坐标映射/朝向变换/箱刷怪笼岩浆等特殊块字节码级核对，遍历顺序 = accepted 序 = postProcess 序）；chest_offs = 有箱拐角件的 (x,z) 集合，供 display 抬高/近邻兜底（xp 箱子坐标与 Java 布局有已知偏差达 7 格） |
 | `_trial_raw_blocks`（L2498） | `_trial_raw_blocks(key: str) -> dict` | trial 模板 NBT → 原始体素 dict（`_TRIAL_RAW_CACHE` 缓存；key 剥 `trial_chambers/` 前缀映射 assets/SeedReverser/trial_chambers/templates/） |
@@ -4317,9 +4327,10 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `_trial_jigsaw_voxels`（L2647） | `_trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | trial 显示：重跑 `assemble_trial_chambers`（含 pool_aliases 解析与铜灯降解），逐方块 `ta.apply_trial_degradation`（仅 waxed_copper_bulb 消耗方块随机流，其它零消耗）；材质 `_map_block`（凝灰岩系/铜灯系/vault→stone 已核）；y 基准 = `extra["start_y"]` |
 | `_outpost_raw_blocks`（L2703） | `_outpost_raw_blocks(key: str) -> dict` | 前哨站模板 NBT → 原始体素 dict（`_OUTPOST_RAW_CACHE` 缓存） |
 | `_outpost_jigsaw_voxels`（L2747） | `_outpost_jigsaw_voxels(comp: Composition) -> tuple[dict, set]` | 前哨站显示：重跑 `assemble_outpost`，逐 piece 展开子模板（list piece = watchtower + overgrown 依序放置，后写覆盖先写）；`minecraft:jigsaw` DATA 标记不渲染占位方块；overgrown 子元素逐方块 `apply_outpost_rot`（95% 蚀空）；箱子体素由容器记录补写（DATA 标记不产出 NBT 方块），旗帜按游戏语义渲染为白色旗帜；y 基准 64（起点底面 63 → 模型 y 从 1 起） |
+| `_pyramid_voxels`（L2540） | `_pyramid_voxels(comp: Composition) -> tuple[dict, set]` | 沙漠神殿/丛林神庙显示：`pyramid_pieces.build_pyramid_voxels(comp)`（postProcess 逐行转写，体素与 RNG 容器同源严格重合） |
 | `compose_display_model`（L2805） | `compose_display_model(comp: Composition) -> dict` | Composition → 3D 视口显示模型。流程见下 |
 
-`compose_display_model` 流程：① 按 struct_key 生成体素 + start_off（igloo 拼 `_igloo_model_parts` 模板；shipwreck 按 `extra["sw_typ"]` 加载 `shipwreck__<名>.nbt` 后 `_rotate_voxels`（nominal 名义尺寸）+ `_SW_START_POS`；其余各走 `_*_voxels`；end_city 走 `end_city_pieces.end_city_voxels`）；② 体素 min_x/min_z < 0 时整体平移回非负并把平移量补偿进 start_off，算 `size=(宽, y 跨度, 深)` 与 `min_y`；③ 箱子标注匹配并回填 `Chest.pos_model`：nether_fortress 用全局 1:1 贪心分配（全部 (箱子, chest 体素) 对按切比雪夫距离排序、≤8、近距离优先互斥认领）；bastion(基准 64)/trial(基准 start_y)/ancient_city(start_y)/village(start_y)/stronghold(64)/pillager_outpost(64)/woodland_mansion(64)/ocean_ruin(90) 走 `pos3` 三维 exact 匹配；其余（igloo/shipwreck/end_city）走通用路径：mx/mz = pos − anchor − start_off，my 查 `chest_voxel_y[(mx,mz)]`，igloo 单箱无歧义直接用模板内 chest 块（模型未旋转的已知妥协），匹配不到落基准面（igloo 为 −3−3×size，其余 0），nether 键且 (x,z) 在 chest_offs 内时抬到所在柱顶层（bastion 示意体恒走此路的旧口径已由 jigsaw 拼装取代）；④ `anchor_y`：igloo/ocean_ruin=90、shipwreck=64、trial/ancient_city/village=`extra["start_y"]`、其余=64；⑤ `chest_blocks` = 渲染体素中全部容器方块（3D 开箱准星交互全集，bastion 渲染箱可能多于预测箱、未预测的开箱走提示）；⑥ `tex_keys` = 材质基名集合；`mesh = structure_models.build_mesh(voxels)`；⑦ 返回 dict：`{key, variant, voxels, size, min_y, mesh, tex_keys, chests, chest_blocks, anchor, anchor_off(start_off), anchor_y, anchor_local(=−start_off), chunk_origin(=anchor_local % 16), comp}`。
+`compose_display_model` 流程：① 按 struct_key 生成体素 + start_off（igloo 拼 `_igloo_model_parts` 模板；shipwreck 按 `extra["sw_typ"]` 加载 `shipwreck__<名>.nbt` 后 `_rotate_voxels`（nominal 名义尺寸）+ `_SW_START_POS`；其余各走 `_*_voxels`；end_city 走 `end_city_pieces.end_city_voxels`）；② 体素 min_x/min_z < 0 时整体平移回非负并把平移量补偿进 start_off，算 `size=(宽, y 跨度, 深)` 与 `min_y`；③ 箱子标注匹配并回填 `Chest.pos_model`：nether_fortress 用全局 1:1 贪心分配（全部 (箱子, chest 体素) 对按切比雪夫距离排序、≤8、近距离优先互斥认领）；bastion(基准 64)/trial(基准 start_y)/ancient_city(start_y)/village(start_y)/stronghold(64)/desert_pyramid/jungle_temple(64，容器含 dispenser)/pillager_outpost(64)/woodland_mansion(64)/ocean_ruin(90) 走 `pos3` 三维 exact 匹配；其余（igloo/shipwreck/end_city）走通用路径：mx/mz = pos − anchor − start_off，my 查 `chest_voxel_y[(mx,mz)]`，igloo 单箱无歧义直接用模板内 chest 块（模型未旋转的已知妥协），匹配不到落基准面（igloo 为 −3−3×size，其余 0），nether 键且 (x,z) 在 chest_offs 内时抬到所在柱顶层（bastion 示意体恒走此路的旧口径已由 jigsaw 拼装取代）；④ `anchor_y`：igloo/ocean_ruin=90、shipwreck=64、trial/ancient_city/village=`extra["start_y"]`、其余=64；⑤ `chest_blocks` = 渲染体素中全部容器方块（3D 开箱准星交互全集，bastion 渲染箱可能多于预测箱、未预测的开箱走提示）；⑥ `tex_keys` = 材质基名集合；`mesh = structure_models.build_mesh(voxels)`；⑦ 返回 dict：`{key, variant, voxels, size, min_y, mesh, tex_keys, chests, chest_blocks, anchor, anchor_off(start_off), anchor_y, anchor_local(=−start_off), chunk_origin(=anchor_local % 16), comp}`。
 
 ---
 
@@ -4588,7 +4599,7 @@ RNG 与结构信息表：
 | `_NON_TREASURE_PRE_1_21_11` / `_NON_TREASURE_1_21_11` | 1.21+ non_treasure tag 成员（后者 +lunge）。 |
 | `_ON_RANDOM_LOOT_TAIL` | on_random_loot tag 尾部四附魔 (binding, vanishing, frost_walker, mending)。 |
 | `_SNAPSHOT_DIR` | 快照目录 `<本文件目录>/data/loot`。 |
-| `_LOOT_TABLE_ERAS` | 分档表 → (边界1, 边界2, 旧档后缀)：shipwreck_supply/map/treasure 与 woodland_mansion、underwater_ruin_big/small、ancient_city 均为 `(E_1_21_11, E_1_21, "1_20")`；pillager_outpost 为 `(E_1_21_9, E_1_21, "1_20")`。附注每个分档的考证依据（1.21 档取 1.21.1 官方 jar 原生表等）。 |
+| `_LOOT_TABLE_ERAS` | 分档表 → (边界1, 边界2, 旧档后缀)：shipwreck_supply/map/treasure 与 woodland_mansion、underwater_ruin_big/small、ancient_city、desert_pyramid、jungle_temple 均为 `(E_1_21_11, E_1_21, "1_20")`；pillager_outpost 为 `(E_1_21_9, E_1_21, "1_20")`。附注每个分档的考证依据（1.21 档取 1.21.1 官方 jar 原生表等）。 |
 | `_SNAPSHOT_ERAS` | 档后缀 → 解析 era：`1_20`→E_1_14、`1_21`→E_1_21、`1_21_11`→E_1_21_11。 |
 | `__all__` | 导出 ItemStack/LootFunction/LootTable、三个 load_*、generate_loot、era_for_version、附魔查询函数族与 era 常量。 |
 
@@ -4863,6 +4874,42 @@ RNG 与结构信息表：
 | `_WART` | `("nether wart", bs.SHAPE_CROSS)`，地狱疣作物。 |
 | `_WX_STAIRS` | 楼梯局部朝向→世界朝向映射表（索引 = piece facing 0..3）：0 恒等、1 CW90（n→e/s→w/e→s/w→n）、2 LEFT_RIGHT 镜像（n/s 不变、e↔w）、3 镜像+CW90（n→e/s→w/e→n/w→s）。被 stronghold_pieces 复用。 |
 | `_DISPATCH` | 类型号 → 布局函数：0/2 → start_bridge_crossing（NeStart/NeBCr 同布局）、1 → bridge_straight、3 → room_crossing、4 → stairs_room、5 → monster_throne、6 → castle_entrance、7 → castle_small_corridor、8 → corridor_crossing、12 → t_balcony、13 → stalk_room；9/10（左右拐角，需 chest 标志）与 14（需 selfSeed）单独分发。 |
+
+---
+
+## `Utils/StructurePreviewer/pyramid_pieces.py`
+
+**功能**：沙漠神殿（desert_pyramid）/ 丛林神庙（jungle_temple）**postProcess 逐方块转写层**——把 `composition._compose_pyramid` 的变体朝向与锚点展开为模型体素 dict `{(x,y,z): 值}`，并在模拟流中同步产出容器（箱/发射器）LootTableSeed。两结构均为 `SinglePieceStructure`（26.2 未混淆源码核对：piece 锚点 = `chunkPos.getMinBlockX/Z`），无模板 NBT（三版本 jar 实证），基准为 1.21.11 jar 反编译的 `fhj`（DesertPyramidPiece）/ `fhq`（JungleTemplePiece）/ `ffs`（StructurePiece）/ `ffm`（ScatteredFeaturePiece）。
+
+**RNG 双流**：变体流 `chunkGenerateRnd → nextInt(4)`（`Plane.HORIZONTAL` faces 数组序 {N,E,S,W}，26.2 `Direction$Plane` 定案）；postProcess 流 = `population_seed(anchor 区块) + decorator + 10000*step`（salt：desert_pyramid={4,1}、jungle_pyramid={4,4}）。容器由 `createChest/createDispenser` 放置（各 1 nextLong，ffs 定案），有 `hasPlacedChest/placed*` 布尔保护只在首次放置；箱子前置消耗非 nextLong（desert 的 `nextInt(3)`、jungle 的逐格 nextFloat），`loot_seed_for_chest` 的 skips 模型不可表达，故用 `_Sim` 模拟流边推进边取 seed（outpost 探针「population 流直接连抽」口径）。desert 消耗序：`nextInt(3)`（updateAverageGroundHeight 参数，调用前求值恒消耗）→ 4 箱 N→E→S→W（位置 `(10+stepX*2,-11,10+stepZ*2)`）；jungle 消耗序：全部 mossy 框逐格 nextFloat（`generateBox(selector)` y→x→z 每格恒 1 次）→ 发射器(3,-2,1)N → 发射器(9,-2,3)W → 主箱(8,-3,3) → 暗箱(9,-3,10)。
+
+**楼梯/机关方向净变换**（`_STAIRS_MAP`，1.21.11 setOrientation 字节码 + 26.2 `StairBlock.mirror` 源码双证）：placeBlock 先 mirror 后 rotate；N=(NONE,NONE) 恒等、E=(NONE,CW90)、S=(LEFT_RIGHT,NONE)（LEFT_RIGHT 仅对 axis==Z 楼梯 rotate180 → n↔s）、W=(LEFT_RIGHT,CW90)。desert 秘密室下行楼梯为 `SANDSTONE_STAIRS.rotate(CCW90)` → 局部 w 再查表。机关方块（发射器/活塞/中继器/绊线钩/拉杆/藤蔓/绊线/红石线）的方向属性同表净变换（`_Sim.facing_of`；u/d 不随 mirror/rotate）——链条：局部属性 → `facing_of` → 世界朝向/贴边/连接段 → 官方几何形状码。
+
+**类与函数**：
+
+| 名称 | 签名 | 说明 |
+|---|---|---|
+| `_Sim` | 类 | 单结构 postProcess 模拟器：`_w`（getWorldPos：局部→世界，y+64）、`facing_of`（局部水平朝向→世界，机关方向属性净变换）、`next_long/next_int`、`place`（val=None 为 AIR 挖空）、`stairs`（局部 FACING 经 `_STAIRS_MAP[facing]`）、`fill_hollow`（generateBox edge/inner）、`fill_air`（generateAirBox）、`fill_mossy`（MossStoneSelector 逐格 nextFloat <0.4→cobblestone）、`fill_down`（fillColumnDown 平坦画单层）、`create_chest/create_dispenser`（1 nextLong + 体素 + chests 记录 (世界 x,z, y_local, table, seed)；dispenser 带 fc 朝向码）。 |
+| `_thook`/`_segs`（模块级） | helper | `_thook(sim, local)` = 绊线钩体素值（世界贴边 + `:a`）；`_segs(sim, mat, kind, n/so/e/w)` = rswire/twire 四向连接段体素值（局部连接向经净变换重排段序）。 |
+| `_sim_desert` | `(world_seed, ax, az, facing) -> _Sim` | fhj L34-231 逐行转写：底座/9 层金字塔/双塔楼/中室/走廊/大厅/陶瓦菱形/前后墙面装饰/门洞/TNT 竖井（3×3 TNT + 压力板）/四臂通道口/4 箱/秘密室。 |
+| `_desert_secret_room` | `(s) -> None` | fhj L227-306：挖掘室——下行楼梯（局部 w）+ 沙墙（`level.getRandom().nextBoolean()` 不可预测，固定 true 分支）+ 三层外框（原 skipExisting=true，平坦预览恒写入）+ 顶面挖空 + 陶瓦装饰。挖掘点记录（k 列表）不转写（仅 gameplay）。 |
+| `_sim_jungle` | `(world_seed, ax, az, facing) -> _Sim` | fhq L32-205 逐行转写：mossy 框全套/挖空 9 处/立柱/楼梯/出口下沉台阶/暗室/陷阱区机关（绊线钩 thook ×4、绊线 twire ×5、红石线 rswire ×15 含 (9,-2,4)）/发射器×2（fc 码带净变换朝向）/主箱/暗箱/拉杆×3（lever:s）/粘性活塞×3（pist:u:s、pist:w:s×2）/中继器（repeater:n）/藤蔓×3（vine 贴边）。 |
+| `build_pyramid_voxels` | `(comp) -> (dict, set)` | 入口（display 调用）：按 `comp.struct_key`/`extra["facing"]` 选模拟器，返回 (体素 dict（模型系 = 世界-anchor、y-64）, 容器 (x,z) 相对偏移集合)。体素与容器同源严格重合。 |
+
+**接口**：被 `composition.py` 导入（`_compose_pyramid` 用 `_sim_desert/_sim_jungle`；`_pyramid_voxels` 用 `build_pyramid_voxels`）。本模块自身导入：`block_shapes`（SHAPE_STAIRS/SHAPE_PLATE/SHAPE_CHEST_N）、`loot_rng`（salt_configs_for_version/get_population_seed/XoroshiroJava/_M64）。
+
+**关键变量/常量**：
+
+| 名称 | 值/含义 |
+|---|---|
+| `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。 |
+| `STONE_PLATE` | `("stone", bs.SHAPE_PLATE)` 石质压力板（desert TNT 井口）。 |
+| `CHEST` | `("chest", bs.SHAPE_CHEST_N)`，朝向固定局部 north（真实游戏经 reorient）。 |
+| `_EDGE` / `_SEG_IDX` | 挂件贴边 = FACING 反侧表 / rswire/twire 段序 n:s:e:w 下标。 |
+| `_DIR_STEPS` | `((0,-1),(1,0),(0,1),(-1,0))`——{N,E,S,W} 的 getStepX/getStepZ（C 口径）。 |
+| `_STAIRS_MAP` | 楼梯局部→世界朝向表（0 恒等、1 CW90、2 n↔s、3 n→w/s→e/e→s/w→n）。**注意与 fortress `_WX_STAIRS` 的 2/3 两行不一致**（fortress 表疑把 LEFT_RIGHT/FRONT_BACK 效果互换；1.21.11 字节码 eev.a=NONE/b=LEFT_RIGHT/c=FRONT_BACK + 26.2 StairBlock.mirror 双证指向本表）。 |
+
+**已知妥协**：无地形（desert 底座 fillColumnDown 画单层）；挖掘室沙/砂岩分布固定 nextBoolean=true 分支；afterPlace 可疑的沙子（forkPositional 独立流，不影响箱子 seed）统一画普通 sand；箱子朝向固定 north；y 基准恒 64（不模拟 updateAverageGroundHeight 的地表修正）。机关方块已全官方几何码（绊线钩/绊线/红石线/拉杆/活塞/中继器/藤蔓/发射器，方向属性净变换），无近似形状。
 
 ---
 
@@ -5495,10 +5542,9 @@ RNG 与结构信息表：
 |---|---|---|
 | `data/enchants.json` | 附魔定义（32KB，八字段结构） | enchant_data_manager（DataManager 单例） |
 | `Utils/SeedReverser/btree_tables.npz` | 群系噪声 B 树查找表（按版本键 btree21wd/btree262） | biome_noise |
-| `Utils/StructurePreviewer/data/loot/` | 65 个战利品表快照 JSON，命名 `<表>.<档>.json`（档：1_20/1_21/1_21_11，不分档无后缀） | loot_engine（快照加载）+ tool_StructurePreviewer._LOOT_DIR |
+| `Utils/StructurePreviewer/data/loot/` | 72 个战利品表快照 JSON，命名 `<表>.<档>.json`（档：1_20/1_21/1_21_11，不分档无后缀） | loot_engine（快照加载）+ tool_StructurePreviewer._LOOT_DIR |
 | `Utils/SeedReverser/_native/`、`Utils/MapPreviewer/_native/` | pybind11 原生扩展源码与构建脚本（build_*.py 调 MSVC cl.exe） | map_sampler / biome_noise / world_seed_refine 优先加载编译产物，失败回退纯 Python |
 
 ## 11.4 用户配置（不随项目走）
 
 运行时配置写入 `QStandardPaths.AppConfigLocation`（失败回退模块所在目录）：`tab_order.json`（Tab 顺序）、`settings_config.json`（设置页）、`backup_config.json`（备份页）、`enchant_session.json`、`seed_reverser_session.json`、`structure_previewer_session.json` 等（会话持久化）。Windows 开机自启写注册表 Run 键。
-

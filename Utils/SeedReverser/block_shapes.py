@@ -66,7 +66,9 @@ SHAPE_PLATE = "plate"
 SHAPE_CARPET = "carpet"
 # 炼药锅/堆肥桶（四壁+底杯状）：cauldron
 SHAPE_CAULDRON = "cauldron"
-# 按钮 button:<贴边朝向> / 拉杆 lever:<贴边朝向|up|down>
+# 拉杆 lever:<贴边|up|down>（官方 lever.json：圆石底座 6x3x8 +
+# 2x10x2 杆未触发 -45° 斜置，4 段 45° 阶梯盒逼近；墙贴 = x90 家族
+# 旋转，up=floor 原始 / down=ceiling x180）
 SHAPE_BUTTON = "button:n"
 SHAPE_LEVER = "lever:up"
 # 钟（bell:<attachment>）：floor=双柱+横梁+钟体、ceiling=吊杆+钟体；
@@ -125,8 +127,13 @@ SHAPE_RSWIRE = "rswire:-:-:-:-"
 # 粘性活塞/活塞 pist:<f>（整格 + 朝向分面：顶 sticky/普通、侧
 # piston_side、底 piston_bottom；官方 piston.json cube 组）
 # 红石灯 lamp:<0|1>（整格，lit 选 on 纹理）
-# 绊线沿向复用 bar:x|z（1/16 线以 2/16 杆近似）；绊线钩复用
-# button:<edge> 板近似
+# 绊线 twire:<n>:<s>:<e>:<w>（官方 tripwire_n*.json：0.5px 细线
+# 面片 y=1.5，1/64 厚薄盒近似；段序同 rswire，1=连接/-=无）
+# 绊线钩 thook:<贴边>[:a]（官方 tripwire_hook[_attached].json：
+# 背板+横臂+钩件多盒，attached 带绊线伸出段；贴边 = 背板所在
+# 格缘，facing 反侧）
+# 藤蔓 vine:<dir>[+<dir>]（官方 vine.json：贴边薄面片 0.8/16
+# 厚盒近似，dir = n/s/e/w/u，多面组合态 + 连接）
 
 
 _E = 0.0625   # 1/16
@@ -626,9 +633,22 @@ def shape_from_props(name: str, props: dict) -> str | None:
     if name == "minecraft:ladder":
         return panel_shape(wall_panel_edge(facing))
 
+    if name == "minecraft:vine":
+        # 藤蔓：官方 vine.json 贴边薄面片（0.8/16 厚盒近似，双面
+        # 渲染）；多面组合态 + 连接（vine:<dir>[+<dir>...]，u=顶面）
+        dirs = [ab for k, ab in (("north", "n"), ("south", "s"),
+                                 ("east", "e"), ("west", "w"),
+                                 ("up", "u"))
+                if props.get(k) == "true"]
+        return "vine:" + ("+".join(dirs) if dirs else "n")
+
     if name == "minecraft:tripwire_hook":
-        # 拌线钩：贴墙板近似（梯子同款 panel；attached 态不区分）
-        return panel_shape(wall_panel_edge(facing))
+        # 绊线钩：官方 tripwire_hook[_attached].json 几何（贴边 =
+        # facing 反侧；attached 带绊线伸出段，码尾 :a）
+        code = "thook:" + wall_panel_edge(facing)
+        if props.get("attached") == "true":
+            code += ":a"
+        return code
 
     if name.endswith("_wall_banner"):
         # 墙上横幅：banner 无独立板模型（entity 渲染），保持 panel 近似
@@ -687,14 +707,10 @@ def shape_from_props(name: str, props: dict) -> str | None:
         return "lamp:1" if props.get("lit") == "true" else "lamp:0"
 
     if name == "minecraft:tripwire":
-        # 绊线：沿连接向细杆（attached 端点只影响纹理）
-        if props.get("east") == "true" or props.get("west") == "true":
-            return "bar:x"
-        return "bar:z"
-
-    if name == "minecraft:tripwire_hook":
-        # 挂墙小钩板近似 button 几何（facing 反侧贴墙）
-        return f"button:{wall_panel_edge(facing)}"
+        # 绊线：官方 tripwire_n*.json 0.5px 细线（连接向 true -> 段码 1）
+        segs = ["1" if props.get(k) == "true" else "-"
+                for k in ("north", "south", "east", "west")]
+        return "twire:" + ":".join(segs)
 
     if name == "minecraft:composter":
         # 官方 composter 模型：四壁全高杯状（同锅形，壁顶共面
@@ -764,7 +780,7 @@ _MIRROR_KIND_FACE = {
     "torch": 0, "panel": 0, "wsign": 0, "button": 0, "lever": 0,
     "stairs": 0, "fc": 0, "dhead": 0, "erod": 0, "chest": 0,
     "trapdoor": 0, "repeater": 0, "comparator": 0, "pist": 0,
-    "pisth": 0,
+    "pisth": 0, "thook": 0,
     "bed": 1,       # bed:part:f
     "door": 2,      # door:part:op:f:hinge
 }
@@ -780,7 +796,7 @@ def shape_mirror(shape: str | None, mirror: str) -> str | None:
     if not shape or mirror not in ("LEFT_RIGHT", "FRONT_BACK"):
         return shape
     kind, _, rest = shape.partition(":")
-    if kind == "rswire":
+    if kind == "rswire" or kind == "twire":
         # 四向连接段镜像（段序 n,s,e,w）：FRONT_BACK（x=-x）
         # e<->w、LEFT_RIGHT（z=-z）n<->s
         segs = rest.split(":")
@@ -788,7 +804,13 @@ def shape_mirror(shape: str | None, mirror: str) -> str | None:
             segs = [segs[0], segs[1], segs[3], segs[2]]
         else:
             segs = [segs[1], segs[0], segs[2], segs[3]]
-        return "rswire:" + ":".join(segs)
+        return kind + ":" + ":".join(segs)
+    if kind == "vine":
+        # 藤蔓多面段逐向换（段为 n/s/e/w/u 单字母）
+        sw = {"e": "w", "w": "e"} if mirror == "FRONT_BACK" \
+            else {"n": "s", "s": "n"}
+        return "vine:" + "+".join(sw.get(d, d)
+                                  for d in rest.split("+"))
     idx = _MIRROR_KIND_FACE.get(kind)
     if idx is None:
         return shape
@@ -904,7 +926,7 @@ def shape_rotation(shape: str | None, rot: int) -> str | None:
         if f in ("u", "d"):
             return shape                     # 竖直朝向不随 R 旋转
         return f"{kind}:{mp.get(f, f)}" + (f":{tail}" if tail else "")
-    if kind == "rswire":
+    if kind == "rswire" or kind == "twire":
         # 四向连接段轮换：原北连接在 rot1 下移至东段
         segs = rest.split(":")
         r = rot & 3
@@ -914,9 +936,13 @@ def shape_rotation(shape: str | None, rot: int) -> str | None:
             segs = [segs[1], segs[0], segs[3], segs[2]]
         elif r == 3:
             segs = [segs[2], segs[3], segs[1], segs[0]]
-        return "rswire:" + ":".join(segs)
+        return kind + ":" + ":".join(segs)
+    if kind == "vine":
+        # 藤蔓多面段逐向映射（u 不随水平旋转）
+        return "vine:" + "+".join(mp.get(d, d)
+                                  for d in rest.split("+"))
     if kind in ("stairs", "chest", "trapdoor", "panel", "button",
-                "lever", "torch", "dhead"):
+                "lever", "torch", "dhead", "thook"):
         f, _, tail = rest.partition(":")
         return f"{kind}:{mp.get(f, f)}" + (f":{tail}" if tail else "")
     return shape                                     # half/post/pane 等不变
@@ -1018,16 +1044,13 @@ def shape_boxes(shape: str | None) -> tuple:
             return ((1 - t, 5 * _E, 3 * _E, 1.0, 11 * _E, 13 * _E),)
         return ((0.0, 5 * _E, 3 * _E, t, 11 * _E, 13 * _E),)   # w
     if kind == "lever":
-        if rest in ("n", "s", "e", "w"):
-            t = 2 * _E
-            if rest == "n":
-                return ((6 * _E, 4 * _E, 0.0, 10 * _E, 10 * _E, t),)
-            if rest == "s":
-                return ((6 * _E, 4 * _E, 1 - t, 10 * _E, 10 * _E, 1.0),)
-            if rest == "e":
-                return ((1 - t, 4 * _E, 6 * _E, 1.0, 10 * _E, 10 * _E),)
-            return ((0.0, 4 * _E, 6 * _E, t, 10 * _E, 10 * _E),)   # w
-        return ((7 * _E, 0.0, 7 * _E, 9 * _E, 10 * _E, 9 * _E),)
+        return _lever(rest)
+    if kind == "thook":
+        return _tripwire_hook(rest)
+    if kind == "twire":
+        return _tripwire(rest)
+    if kind == "vine":
+        return _vine(rest)
     if kind == "brewing":
         return _brewing()
     if kind == "flowerpot":
@@ -1170,3 +1193,106 @@ def _piston_base(f: str) -> tuple:
         return ((0.0, t, 0.0, 1.0, 1.0, 1.0),)
     # facing=n：北面（z=0 端）缩进
     return (_rot_y((0.0, 0.0, t, 1.0, 1.0, 1.0), f),)
+
+
+# ------------------------------------------------------------ 机关件
+
+
+def _lever(rest: str) -> tuple:
+    """拉杆（jar lever.json：圆石底座 (5,0,4)-(11,3,12) + 2x10x2
+    杆未触发绕 x -45° 斜置，AABB 以 4 段 45° 阶梯盒逼近斜杆）。
+
+    码语义：up = floor（原始几何）/ down = ceiling（x180）/
+    其余 = 墙贴（贴边 edge：官方 face=wall 家族 x90 旋转，f =
+    edge 反侧过 _rot_y）。"""
+    def _x90(b):
+        # (x,y,z)->(x,z,16-y)：AABB (x0,y0,z0,x1,y1,z1) 变换
+        return (b[0], b[2], 1.0 - b[4], b[3], b[5], 1.0 - b[1])
+
+    def _x180(b):
+        # (x,y,z)->(x,16-y,16-z)
+        return (b[0], 1.0 - b[4], 1.0 - b[5], b[3], 1.0 - b[1],
+                1.0 - b[2])
+
+    base = (5 * _E, 0.0, 4 * _E, 11 * _E, 3 * _E, 12 * _E)
+    # 杆 45° 阶梯：底段贴底座（y 1..3、z 7..9）-> 顶段（y 7..9、
+    # z 1..3），北斜（floor/未触发朝 facing 倒）
+    segs = tuple(
+        (7 * _E, (1 + 2 * i) * _E, (7 - 2 * i) * _E,
+         9 * _E, (3 + 2 * i) * _E, (9 - 2 * i) * _E)
+        for i in range(4))
+    if rest == "up":
+        return (base,) + segs
+    if rest == "down":
+        return (_x180(base),) + tuple(_x180(b) for b in segs)
+    f = _OPPOSITE.get(rest, "s")       # 贴边 edge -> facing 反侧
+    return tuple(_rot_y(_x90(b), f) for b in (base,) + segs)
+
+
+def _tripwire_hook(rest: str) -> tuple:
+    """绊线钩（jar tripwire_hook[_attached].json；facing=n 基准 =
+    背板贴 z=16 南墙，码用贴边 edge，f = edge 反侧过 _rot_y）。
+
+    attached 版元素：背板 (6,1,14)-(10,9,16) + 横臂
+    (7.4,5.2,10)-(8.8,6.8,14)（#wood）、钩件 (6.2,4.2,6.7)-
+    (9.8,5,10.3)（#hook，官方 -22.5° 斜置以包围盒近似）+ 绊线
+    伸出段 (7.75,1.5,0)-(8.25,1.5,6.7)（#tripwire，官方 -22.5°
+    斜置，包围盒 y 0..2.6）。未 attached 版（tripwire_hook.json）
+    横臂/钩件 ±45° 斜置，包围盒分别近似。"""
+    edge, _, att = rest.partition(":")
+    f = _OPPOSITE.get(edge, "s")
+    back = (6 * _E, 1 * _E, 14 * _E, 10 * _E, 9 * _E, 1.0)
+    if att == "a":
+        boxes = (
+            back,
+            (7.4 * _E, 5.2 * _E, 10 * _E, 8.8 * _E, 6.8 * _E, 14 * _E),
+            (6.2 * _E, 4.2 * _E, 6.7 * _E, 9.8 * _E, 5 * _E, 10.3 * _E),
+            (7.75 * _E, 0.0, 0.0, 8.25 * _E, 2.6 * _E, 6.7 * _E),
+        )
+    else:
+        # ±45° 斜件包围盒（横臂 +45° 绕 (8,6,14)、钩件 -45° 绕
+        # (8,6,5.2)，逐顶点极值投影算得）
+        boxes = (
+            back,
+            (7.4 * _E, 5.4 * _E, 10.6 * _E, 8.8 * _E, 9.0 * _E,
+             14.1 * _E),
+            (6.2 * _E, 6.35 * _E, 8.1 * _E, 9.8 * _E, 9.5 * _E,
+             11.2 * _E),
+        )
+    return tuple(_rot_y(b, f) for b in boxes)
+
+
+def _tripwire(rest: str) -> tuple:
+    """绊线（jar tripwire_n*.json：0.5px 宽细线面片 y=1.5，连接向
+    各画半格段；AABB 以 1/64 厚薄盒近似零厚面片）。段序 n:s:e:w
+    同 rswire，1=连接 / - = 无。"""
+    t = _DUST_T / 2.0
+    n, s, e, w = rest.split(":")
+    a, b = 7.75 * _E, 8.25 * _E
+    y0, y1 = 1.5 * _E - t, 1.5 * _E + t
+    boxes = []
+    if n == "1":
+        boxes.append((a, y0, 0.0, b, y1, 0.5))
+    if s == "1":
+        boxes.append((a, y0, 0.5, b, y1, 1.0))
+    if w == "1":
+        boxes.append((0.0, y0, a, 0.5, y1, b))
+    if e == "1":
+        boxes.append((0.5, y0, a, 1.0, y1, b))
+    if not boxes:                        # 孤点（官方无此态，兜底）
+        boxes.append((a, y0, a, b, y1, b))
+    return tuple(boxes)
+
+
+def _vine(rest: str) -> tuple:
+    """藤蔓（jar vine.json：单面片 z=0.8/16 贴北墙，north/south
+    双面渲染；blockstate 逐面 y 旋转，AABB 以 0.8/16 厚薄盒近似）。
+    vine:<dir>[+<dir>]，n = 原始（贴北缘），u = 顶面片（x270）。"""
+    t = 0.8 * _E
+    boxes = []
+    for d in rest.split("+"):
+        if d == "u":
+            boxes.append((0.0, 1.0 - t, 0.0, 1.0, 1.0, 1.0))
+            continue
+        boxes.append(_rot_y((0.0, 0.0, 0.0, 1.0, 1.0, t), d))
+    return tuple(boxes)

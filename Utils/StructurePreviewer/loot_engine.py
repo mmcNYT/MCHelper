@@ -1157,6 +1157,11 @@ _LOOT_TABLE_ERAS: dict[str, tuple[int, str, str]] = {
     # 1.21.1/1.20.1 条目一致仅 enchant_randomly 格式差），三档
     # 均取官方 jar 原生表。ice_box 三版本逐字节相同 → 未分档单文件。
     "ancient_city": (E_1_21_11, E_1_21, "1_20"),
+    # 沙漠神殿/丛林神庙：三档官方 jar 原生表（1.20.1/1.21/1.21.11
+    # 逐档 diff 有差异）；jungle_temple_dispenser 三版本逐字节相同
+    # → 未分档单文件。
+    "desert_pyramid": (E_1_21_11, E_1_21, "1_20"),
+    "jungle_temple": (E_1_21_11, E_1_21, "1_20"),
 }
 
 # 快照档后缀 -> 解析 era（对齐 C 烘焙表 version 烧死语义）

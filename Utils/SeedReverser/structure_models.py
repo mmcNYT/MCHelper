@@ -2452,6 +2452,25 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
     if kind == "rswire":
         # 十字图世界平铺 UV 自动命中线带（臂/中心板/竖片皆然）
         return (None, None)
+    if kind == "thook":
+        # 官方 tripwire_hook[_attached].json 多纹理分区：绊线伸出
+        # 段 #tripwire / 钩件 #hook（=基键 tripwire hook）/ 背板+
+        # 横臂 #wood（oak planks）。按盒最小维度分流（0.5px 线 /
+        # 0.8px 钩件薄盒 / 1.4px 横臂；剩余大盒=背板或未 attached
+        # ±45° 斜件包围盒——后者以最长维 <6px 区分回基键）。
+        if box is not None:
+            dims = (box[3] - box[0], box[4] - box[1], box[5] - box[2])
+            md, xd = min(dims), max(dims)
+            if md <= 0.6 * _E16:
+                return ("tripwire", None)         # 绊线伸出段
+            if md <= 1.0 * _E16:
+                return (None, None)               # 钩件（attached 版）
+            if md <= 1.5 * _E16:
+                return ("oak planks", None)       # 横臂
+            if xd >= 6 * _E16:
+                return ("oak planks", None)       # 背板
+            return (None, None)                   # 未 attached 钩件
+        return (None, None)
     if kind in ("repeater", "comparator"):
         # 官方 repeater_1tick/comparator.json：底板 #slab=smooth_stone、
         # 顶面 #top=repeater/comparator（基键）；火把柱 #unlit=

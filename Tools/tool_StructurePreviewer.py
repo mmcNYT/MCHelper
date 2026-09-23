@@ -71,7 +71,8 @@ _SENS_DEFAULT = 5
 _STRUCT_KEYS = ("igloo", "shipwreck", "ocean_ruin", "stronghold",
                 "nether_fortress", "bastion_remnant", "end_city",
                 "trial_chambers", "ancient_city", "village",
-                "pillager_outpost", "woodland_mansion")
+                "pillager_outpost", "woodland_mansion",
+                "desert_pyramid", "jungle_temple")
 
 # UI 键 -> 枚举/校验/图标/显示名链路键（cubiomes 键名差异桥接）
 _UI_TO_ENUM = {"woodland_mansion": "mansion"}
@@ -170,6 +171,10 @@ _ITEM_CN = {
     "tripwire_hook": "绊线钩",
     # -- 村庄表物品补全（中文 Wiki 名）--
     "bundle": "收纳袋", "dandelion": "蒲公英", "oak_sapling": "橡树苗",
+    # -- 沙漠神殿/丛林神庙表物品补全（中文 Wiki 名）--
+    "sand": "沙子", "spider_eye": "蜘蛛眼",
+    "dune_armor_trim_smithing_template": "沙丘盔甲纹样锻造模板",
+    "wild_armor_trim_smithing_template": "荒野盔甲纹样锻造模板",
 }
 
 # 附魔短名 -> 中文名（loot_engine.ENCHANTMENT_ORDER 全集；中文 Wiki 名）
@@ -286,7 +291,7 @@ _BASTION_START_CN = ("堡垒主体", "疣猪兽棚", "宝藏房", "桥")
 _ANCIENT_CITY_START_CN = ("中心喷泉型", "大型中心型", "回字环型")
 
 # 附近实例枚举半径（方块；32*16=512 方块 ≈ 8 区块半径）
-_LOCATE_RADIUS = 2048
+_LOCATE_RADIUS = 4096
 
 # loot 表缓存：{era: {表名: LootTable}}
 _loot_cache: dict[int, dict[str, "loot_engine.LootTable"]] = {}
@@ -1718,6 +1723,11 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
             lines.append(f"部件数：{comp.extra.get('n_pieces', '?')}（含起始件）")
             lines.append(f"传送门已填眼：{bin(eyes).count('1')}/12"
                          f"（{hex(eyes)}）")
+        elif key in ("desert_pyramid", "jungle_temple"):
+            dir_cn = ("北", "东", "南", "西")[comp.extra.get("facing", 0) % 4]
+            lines.append(f"朝向：{dir_cn}"
+                         f"｜容器数：{comp.extra.get('n_containers', '?')}"
+                         "（含发射器）")
         elif key == "woodland_mansion":
             lines.append(f"拼装旋转：{comp.extra.get('rot_name', '?')}"
                          f"｜房间件数：{comp.extra.get('n_pieces', '?')}")

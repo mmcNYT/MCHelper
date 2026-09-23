@@ -120,7 +120,7 @@ MCHelper/
 - `Utils/StructurePreviewer/locator` —— 定位门面：结构枚举→拼装→显示模型三步流水线
 - `Utils/StructurePreviewer/composition` —— 拼装总引擎：按结构类型分派，逐种子复现每块体素的方块/材质/朝向（箱子等容器位置随拼装产出）
 - `Utils/StructurePreviewer/village_assembly`、`outpost_assembly`、`trial_assembly`、`ancient_city_assembly` —— 村庄/前哨站/试炼密室/远古城市的 jigsaw 拼装：加载各自 `assets/SeedReverser/<结构>/` 模板与 template_pool，复用通用引擎
-- `Utils/StructurePreviewer/stronghold_pieces`、`mansion_pieces`、`end_city_pieces`、`fortress_pieces` —— 要塞/林地府邸/末地城/下界堡垒的结构件生成（递归/队列组装，复刻游戏逐件 RNG 消耗）
+- `Utils/StructurePreviewer/stronghold_pieces`、`mansion_pieces`、`end_city_pieces`、`fortress_pieces`、`pyramid_pieces` —— 要塞/林地府邸/末地城/下界堡垒/沙漠神殿+丛林神庙的结构件生成（递归/队列组装或 postProcess 逐行转写，复刻游戏逐件 RNG 消耗）
 - `Utils/SeedReverser/jigsaw_assembly` —— jigsaw 通用拼装引擎：模板池解析、连接块匹配、旋转与放置（SeedReverser 核心库，跨工具复用）
 - `Utils/SeedReverser/structure_models` —— NBT 模板解析与材质映射（体素与纹理键来源）
 - `Utils/SeedReverser/mc_random`、`mc_rng` —— Java Random LCG 与布局 RNG 常量（拼装随机流复刻）

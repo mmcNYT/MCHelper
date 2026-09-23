@@ -1132,6 +1132,58 @@ _OUTPOST_RAW_CACHE: dict = {}
 _OUTPOST_CONTAINERS_CACHE: dict = {}
 
 
+# ---------------------------------------------------------------------------
+# desert_pyramid / jungle_temple（沙漠神殿 / 丛林神庙，程序化 piece）
+# ---------------------------------------------------------------------------
+
+def _compose_pyramid(struct_key: str, salt_key: str, world_seed: int,
+                     block_x: int, block_z: int,
+                     version_key: str = "1.21") -> Composition:
+    """沙漠神殿 / 丛林神庙：变体朝向 + 部件锚点 + 容器 LootTableSeed。
+
+    SinglePieceStructure（26.2 未混淆源码核对）：piece 锚点 =
+    chunkPos.getMinBlockX/Z（区块最小角，与 igloo 同口径）。
+    变体流 chunkGenerateRnd -> nextInt(4)（Plane.HORIZONTAL faces
+    数组序 {N,E,S,W}）决定 piece orientation。容器坐标与
+    LootTableSeed 由 pyramid_pieces._Sim 模拟流同步产出（箱子有
+    hasPlacedChest 布尔保护，只首次 postProcess 放置；箱子前置消耗
+    含 nextInt(3)/nextFloat 序列，非 skips 可表达，故不用
+    loot_seed_for_chest 而直接取模拟流 nextLong，outpost 探针同款
+    「population 流直接连抽」口径）。
+    """
+    from . import pyramid_pieces
+    min_bx = block_x & ~15
+    min_bz = block_z & ~15
+    state = structure_map.chunk_generate_rnd(world_seed, block_x >> 4,
+                                             block_z >> 4)
+    facing, state = mc_random.next_int(state, 4)
+    sim = (pyramid_pieces._sim_desert if struct_key == "desert_pyramid"
+           else pyramid_pieces._sim_jungle)(world_seed, min_bx, min_bz,
+                                            facing)
+    piece = Piece(struct_key, (min_bx, 64, min_bz), [], rot=facing)
+    for (wx, wz, y_local, table, seed) in sim.chests:
+        piece.chests.append(Chest((wx, wz), table, seed,
+                                  pos3=(wx, y_local + 64, wz)))
+    return Composition(struct_key, struct_key, facing, False,
+                       (min_bx, min_bz), [piece],
+                       {"world_seed": world_seed, "facing": facing,
+                        "n_containers": len(piece.chests)})
+
+
+def compose_desert_pyramid(world_seed: int, block_x: int, block_z: int,
+                           version_key: str = "1.21") -> Composition:
+    """沙漠神殿：变体朝向 + 4 臂箱 LootTableSeed（pyramid_pieces 转写）。"""
+    return _compose_pyramid("desert_pyramid", "desert_pyramid", world_seed,
+                            block_x, block_z, version_key)
+
+
+def compose_jungle_temple(world_seed: int, block_x: int, block_z: int,
+                          version_key: str = "1.21") -> Composition:
+    """丛林神庙：变体朝向 + 2 箱 2 发射器 LootTableSeed（转写同上）。"""
+    return _compose_pyramid("jungle_temple", "jungle_pyramid", world_seed,
+                            block_x, block_z, version_key)
+
+
 def compose_pillager_outpost(world_seed: int, block_x: int, block_z: int,
                              version_key: str = "1.21") -> Composition:
     """掠夺者前哨站：jigsaw 拼装 + 战利品预测（1.21.11 语义）。
@@ -1317,6 +1369,14 @@ def _is_chest_value(v) -> bool:
     if isinstance(v, tuple):
         return v[0] in _CHEST_MATS
     return v in _CHEST_MATS
+
+
+def _is_dispenser_value(v) -> bool:
+    """体素值是否发射器（pyramid 机关：mat 键 dispenser + fc 码
+    元组，或旧版纯字符串兼容）。"""
+    if isinstance(v, tuple):
+        return bool(v) and v[0] == "dispenser"
+    return v == "dispenser"
 
 # 下界结构键（显示模型箱子标注 y 抬升逻辑用）
 _NETHER_KEYS = frozenset({"nether_fortress", "bastion_remnant"})
@@ -2450,6 +2510,12 @@ def compose(struct_key: str, world_seed: int, block_x: int, block_z: int,
     if struct_key == "village":
         return compose_village(world_seed, block_x, block_z, biome_id,
                                version_key)
+    if struct_key == "desert_pyramid":
+        return compose_desert_pyramid(world_seed, block_x, block_z,
+                                      version_key)
+    if struct_key == "jungle_temple":
+        return compose_jungle_temple(world_seed, block_x, block_z,
+                                     version_key)
     raise ValueError(f"composition 未支持的结构键：{struct_key}")
 
 
@@ -2488,6 +2554,16 @@ def _fortress_solid_voxels(comp: Composition) -> tuple[dict, set]:
 # bastion 模板原始方块名体素缓存（key -> {(x,y,z): 方块名}）。
 # 降解须在材质映射前按世界坐标判定，故绕过 _MAT_MAP 直取 NBT Name。
 _BASTION_RAW_CACHE: dict = {}
+
+
+def _pyramid_voxels(comp: Composition) -> tuple[dict, set]:
+    """沙漠神殿/丛林神庙显示：postProcess 逐行转写（pyramid_pieces）。
+
+    体素与 RNG 容器同源（同一 _Sim 运行），坐标严格重合（pos3
+    exact 匹配）。返回 (体素 dict, 容器 (x,z) 相对偏移集合)。
+    """
+    from . import pyramid_pieces
+    return pyramid_pieces.build_pyramid_voxels(comp)
 
 # jigsaw 旋转名 -> block_shapes.shape_rotation 的 0-3 索引
 # （与 cubiomes/cubiomes 注释同序：0=NONE 1=CW90 2=CW180 3=CCW90）
@@ -2851,6 +2927,12 @@ def compose_display_model(comp: Composition) -> dict:
     elif comp.struct_key == "nether_fortress":
         voxels, nether_chest_offs = _fortress_solid_voxels(comp)
         start_off = (0, 0)
+    elif comp.struct_key in ("desert_pyramid", "jungle_temple"):
+        # 沙漠神殿/丛林神庙：postProcess 逐行转写（无模板 NBT，
+        # pyramid_pieces）。RNG 容器（箱+发射器）与体素同源
+        # （同一 _Sim），pos3 3D exact 匹配，y 基准 = 64（平坦基准）。
+        voxels, nether_chest_offs = _pyramid_voxels(comp)
+        start_off = (0, 0)
     elif comp.struct_key == "bastion_remnant":
         voxels, nether_chest_offs = _bastion_jigsaw_voxels(comp)
         start_off = (0, 0)
@@ -3035,6 +3117,22 @@ def compose_display_model(comp: Composition) -> dict:
             bz = c0.pos3[2] - comp.anchor[1] - start_off[1]
             if voxels.get((bx, by, bz)) is not None \
                     and _is_chest_value(voxels[(bx, by, bz)]):
+                c0.pos_model = (bx, by, bz)
+                assigned.add(ci)
+    elif comp.struct_key in ("desert_pyramid", "jungle_temple") \
+            and chest_voxel_y:
+        # 沙漠神殿/丛林神庙：同 stronghold，pos3 3D exact 匹配，
+        # y 基准 = 64；容器含 dispenser（发射器，jungle 陷阱）。
+        assigned = set()
+        for ci, c0 in enumerate(comp.chests):
+            if c0.pos3 is None:
+                continue
+            bx = c0.pos3[0] - comp.anchor[0] - start_off[0]
+            by = c0.pos3[1] - 64
+            bz = c0.pos3[2] - comp.anchor[1] - start_off[1]
+            v = voxels.get((bx, by, bz))
+            if v is not None and (_is_chest_value(v)
+                                  or _is_dispenser_value(v)):
                 c0.pos_model = (bx, by, bz)
                 assigned.add(ci)
     elif comp.struct_key == "pillager_outpost" and chest_voxel_y:
