@@ -53,7 +53,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from Utils.MapPreviewer import structure_map
+from Utils.Public import structure_map
 from Utils.SeedReverser import mc_random
 from . import loot_rng
 

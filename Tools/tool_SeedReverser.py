@@ -60,19 +60,20 @@ from Threads.task_WorldSeedRefine import (
     CANCELLED_SUMMARY as _REFINE_CANCELLED_SUMMARY,
     WorldSeedRefineThread,
 )
-from Utils.AutoBackUp.notification import NotificationWidget
-from Utils.MapPreviewer import structure_icons as struct_icons
-from Utils.SeedReverser import (seed_math, structure_params,
-                                structure_3dview, structure_preview)
-from Utils.SeedReverser.biome_names import (
+from Utils.Public.notification import NotificationWidget
+from Utils.Public import structure_icons as struct_icons
+from Utils.SeedReverser import (seed_math, structure_3dview,
+                                structure_preview)
+from Utils.Public import structure_params
+from Utils.Public.biome_names import (
     BIOME_CHOICES,
     biome_label,
     icon_path,
     resolve_biome,
 )
-from Utils.SeedReverser.biome_signature_colors import color_for_label
+from Utils.Public.biome_signature_colors import color_for_label
 from Utils.SeedReverser.structure_math import verify_candidate_seed
-from Utils.StrongHoldFinder.stronghold_math import (
+from Utils.Public.stronghold_math import (
     looks_like_f3c,
     parse_f3c_command,
     parse_f3c_command_full,

@@ -10,7 +10,7 @@
              1 像素精细档）或 "cell"（4x4 方块合 1 像素快速档）；
            - TileRenderThread：视口驱动的瓦片批量增量渲染（拖动/
              缩放时只渲染新进入视口的区域，LOD 与主图一致）；
-        3. 结构枚举：Utils/MapPreviewer/structure_map.enumerate_structures
+        3. 结构枚举：Utils/Public/structure_map.enumerate_structures
            （21 种结构按维度正向定位 + 群系校验，结构粒度回调进度）。
 
     工作线程不做任何 UI 操作，只通过信号把进度/结果/错误回主线程：
@@ -42,7 +42,7 @@ from Utils.MapPreviewer.nether_end_sampler import (
     sample_region_nether, sample_region_end)
 from Utils.MapPreviewer.block_colors import (render_block_rgb,
                                              render_cell_rgb)
-from Utils.MapPreviewer.structure_map import (available_structures,
+from Utils.Public.structure_map import (available_structures,
                                               enumerate_structures)
 
 # 取消结束时的 render_finished 摘要标记（区别于正常统计摘要）
@@ -520,7 +520,7 @@ class TileRenderThread(QThread):
 # ---------------------------------------------------------------------------
 
 # 下界/末地群系 id（cubiomes biomes.h 枚举，与 nether_end_sampler 同源）；
-# 主世界下拉项用 Utils/SeedReverser/biome_names.BIOME_CHOICES（54 项）
+# 主世界下拉项用 Utils/Public/biome_names.BIOME_CHOICES（54 项）
 NETHER_BIOMES = (
     ("下界荒地 nether_wastes", 8),
     ("灵魂沙峡谷 soul_sand_valley", 170),

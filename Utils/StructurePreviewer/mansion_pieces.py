@@ -54,7 +54,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from Utils.MapPreviewer import structure_map
+from Utils.Public import structure_map
 from Utils.SeedReverser import block_shapes as _bs
 from Utils.SeedReverser import mc_random, structure_models
 from . import loot_rng

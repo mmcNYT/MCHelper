@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-from Utils.MapPreviewer import structure_map
+from Utils.Public import structure_map
 from Utils.SeedReverser import block_shapes as bs
 from Utils.SeedReverser import mc_random, structure_models
 from . import loot_rng

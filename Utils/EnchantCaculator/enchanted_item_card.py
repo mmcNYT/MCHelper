@@ -70,7 +70,7 @@ def get_item_icon_path(item_name: str) -> str:
 class _GlintIcon(QWidget):
     """附魔流光图标控件：物品纹理上叠加游戏附魔光效（紫色流光双层反向滚动）
 
-    - 光效纹理 assets/EnchantCaculator/enchanted_glint.png（游戏原版 128x128，透明底紫色流纹）
+    - 光效纹理 assets/Public/enchanted_glint.png（游戏原版 128x128，透明底紫色流纹）
     - QTimer 每帧平移光效贴图坐标（两层不同速度/相位反向滚动），仅重绘本控件
     - 实现游戏内附魔物品的"微微发光"视觉效果
     """
@@ -104,7 +104,7 @@ class _GlintIcon(QWidget):
         if _GlintIcon._glint_tex is None:
             base_dir = os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__))))
-            glint_path = os.path.join(base_dir, "assets", "EnchantCaculator",
+            glint_path = os.path.join(base_dir, "assets", "Public",
                                       "enchanted_glint.png")
             if os.path.exists(glint_path):
                 _GlintIcon._glint_tex = QPixmap(glint_path)

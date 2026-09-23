@@ -53,7 +53,7 @@ from typing import Optional
 
 # --- 项目内依赖（与 composition.py 同口径：项目根须在 sys.path，
 #     即从 MCHelper 根目录运行；结构上对齐 fortress_pieces.py）------
-from Utils.MapPreviewer import structure_map      # noqa: F401
+from Utils.Public import structure_map      # noqa: F401
 from Utils.SeedReverser import mc_random          # noqa: F401
 from .loot_rng import XoroshiroJava, get_population_seed, _M64  # noqa: F401
 

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QFileDialog, QListWidgetItem
 from .tool_base import BaseToolWidget
 from Utils.AutoBackUp.signals_AutoBackUp import backup_bus
 from Utils.AutoBackUp.process_monitor import ProcessMonitor
-from Utils.AutoBackUp.notification import NotificationWidget
+from Utils.Public.notification import NotificationWidget
 from Utils.AutoBackUp.right_icon_delegate import RightIconDelegate
 from Threads.task_AutoBackUp import BackupTask
 

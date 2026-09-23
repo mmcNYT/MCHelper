@@ -49,12 +49,12 @@ from PySide6.QtWidgets import (QApplication, QDialog, QGridLayout,
 
 from .tool_base import BaseToolWidget
 from CodesUI.StructurePreviewer import Ui_structurePreviewer
-from Utils.MapPreviewer import structure_icons as struct_icons
-from Utils.MapPreviewer.structure_map import (
+from Utils.Public import structure_icons as struct_icons
+from Utils.Public.structure_map import (
     BiomeSampler, check_structure_at, enumerate_structures)
-from Utils.SeedReverser import structure_params
+from Utils.Public import structure_params
 from Utils.SeedReverser import structure_3dview
-from Utils.SeedReverser.biome_names import biome_label
+from Utils.Public.biome_names import biome_label
 from Utils.StructurePreviewer import composition, loot_engine, loot_rng
 
 # 会话持久化（本页输入状态重启不丢）：配置目录 JSON 文件
@@ -234,11 +234,12 @@ _ICON_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(
         __file__))), "assets", "StructurePreviewer", "items")
 
-# 附魔光效纹理（游戏原版 enchanted_glint_item，128x128 透明底紫白流纹）
+# 附魔光效纹理（游戏原版 enchanted_glint_item，128x128 透明底紫白流纹；
+# 与 EnchantCaculator 共用同一份，已归入公共资源 assets/Public）
 _GLINT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(
-        __file__))), "assets", "EnchantCaculator",
-    "enchanted_glint_item.png")
+        __file__))), "assets", "Public",
+    "enchanted_glint.png")
 _GLINT_OK = os.path.exists(_GLINT_PATH)
 _glint_cache: dict[int, "QPixmap"] = {}
 

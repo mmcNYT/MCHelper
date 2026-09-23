@@ -62,14 +62,14 @@ from Threads.task_MapPreviewer import (
     TileRenderThread,
     _TILE_BLOCKS,
 )
-from Utils.AutoBackUp.notification import NotificationWidget
-from Utils.MapPreviewer import structure_icons as st_icons
+from Utils.Public.notification import NotificationWidget
+from Utils.Public import structure_icons as st_icons
 from Utils.MapPreviewer.biome_colors import biome_cn_name
 from Utils.MapPreviewer.choose_structure import ChooseStructureWindow
-from Utils.MapPreviewer.structure_map import available_structures
-from Utils.SeedReverser import biome_names, structure_params
-from Utils.SeedReverser.biome_signature_colors import color_for_label
-from Utils.SeedReverser.structure_params import DIMENSION_NAMES, STRUCT_NAMES
+from Utils.Public.structure_map import available_structures
+from Utils.Public import biome_names, structure_params
+from Utils.Public.biome_signature_colors import color_for_label
+from Utils.Public.structure_params import DIMENSION_NAMES, STRUCT_NAMES
 
 # 会话文件名（用户配置目录下）
 _SESSION_FILE = "map_previewer_session.json"
