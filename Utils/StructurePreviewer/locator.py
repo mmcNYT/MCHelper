@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """StructurePreviewer：结构定位层（locator）。
 
-基于 Utils.MapPreviewer.structure_map.enumerate_structures 复用既有
+基于 Utils.Public.structure_map.enumerate_structures 复用既有
 枚举与群系校验（与 MapPreviewer 的 GUI 验收口径一致），限定
 igloo / shipwreck 两个结构键，并对每个锚点求完整构造组合。
 
@@ -12,7 +12,7 @@ UI 主流程（btnPreview）：
 """
 from __future__ import annotations
 
-from Utils.MapPreviewer import structure_map
+from Utils.Public import structure_map
 from . import composition, loot_rng
 
 SUPPORTED = ("igloo", "shipwreck")

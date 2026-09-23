@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """MapPreviewer 群系配色表。
 
-id 依据 cubiomes biomes.h BiomeID 枚举（与 Utils/SeedReverser/biome_names.py
+id 依据 cubiomes biomes.h BiomeID 枚举（与 Utils/Public/biome_names.py
 同源）；配色参考 Amidst/cubiomes mapview 风格并按俯视观感微调。
 覆盖 1.18+ 主世界表层、下界五群系与末地五群系常见群系，未收录 id 兜底灰色，不致渲染失败。
 
-中文群系名（悬停/图例）以 Utils/SeedReverser/biome_names.py 的 54 项
+中文群系名（悬停/图例）以 Utils/Public/biome_names.py 的 54 项
 权威对照表为唯一数据源动态生成，与 SeedReverser 显示严格一致；
 其余非自然生成变种与下界/末地为本地兑底表。
 """
@@ -149,7 +149,7 @@ def _build_biome_cn_names() -> dict[int, str]:
     权威表导入失败时仅用兑底表，悬停不致报错。"""
     names: dict[int, str] = dict(_BASE_CN_NAMES)
     try:
-        from Utils.SeedReverser.biome_names import BIOME_CHOICES, resolve_biome
+        from Utils.Public.biome_names import BIOME_CHOICES, resolve_biome
         for label, _key in BIOME_CHOICES:
             bid = resolve_biome(label)
             if bid is not None:

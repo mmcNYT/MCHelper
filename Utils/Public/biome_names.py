@@ -266,12 +266,12 @@ def biome_label(bid: int) -> str:
 
 
 # ---- 图标 ----
-# assets/SeedReverser/<内部键>.png（16x16，中文 Wiki BiomeSprite 下载后转存 PNG）。
-# 图标统一放项目 assets/ 按工具分子目录，便于用户按喜好替换图片。
+# assets/Public/<内部键>.png（16x16，中文 Wiki BiomeSprite 下载后转存 PNG）。
+# 多工具共用图标统一放 assets/Public，便于用户按喜好替换图片。
 _ASSETS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(  # Utils/SeedReverser/ → 项目根
+    os.path.dirname(os.path.dirname(  # Utils/Public/ → 项目根
         os.path.dirname(os.path.abspath(__file__)))),
-    "assets", "SeedReverser")
+    "assets", "Public")
 ICON_DIR = _ASSETS_DIR
 
 

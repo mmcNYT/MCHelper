@@ -2,8 +2,8 @@
 """MapPreviewer 结构图标：结构键 + 群系 id → Wiki EnvSprite PNG 图标。
 
 图标来源：英文 Minecraft Wiki 的 EnvSprite 环境精灵（16x16 PNG），2026-09
-经浏览器通道批量下载转存。图标统一放项目 assets/MapPreviewer/（而非打进
-资源文件）便于用户按喜好替换图片（同 SeedReverser 模式）。
+经浏览器通道批量下载转存。图标统一放项目 assets/Public/（而非打进
+资源文件）便于用户按喜好替换图片（多工具共用）。
 
 Wiki 原始 URL 模式：https://minecraft.wiki/images/EnvSprite_<name>.png
 - Wiki 无独立"平原村庄"文件名：plains-village 是 new-village 的重定向；
@@ -15,10 +15,10 @@ Wiki 原始 URL 模式：https://minecraft.wiki/images/EnvSprite_<name>.png
 import os
 
 # ---------------------------------------------------------------------------
-# 图标目录：assets/MapPreviewer/（图标统一放项目 assets/ 按工具分子目录）
+# 图标目录：assets/Public/（多工具共用图标统一放 assets/Public）
 # ---------------------------------------------------------------------------
-ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(  # Utils/MapPreviewer/ → 项目根
-    os.path.dirname(os.path.abspath(__file__)))), "assets", "MapPreviewer")
+ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(  # Utils/Public/ → 项目根
+    os.path.dirname(os.path.abspath(__file__)))), "assets", "Public")
 
 # ---------------------------------------------------------------------------
 # 群系 id 常量（cubiomes biomes.h，与 structure_map.py 同源；

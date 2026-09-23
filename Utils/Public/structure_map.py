@@ -48,7 +48,7 @@ import math
 import numpy as np
 
 from Utils.SeedReverser import mc_random
-from Utils.SeedReverser import structure_params
+from Utils.Public import structure_params
 from Utils.SeedReverser.structure_math import get_structure_pos
 from Utils.SeedReverser.biome_noise import (
     BiomeSampler, Xoroshiro, climate_to_biome_dat)

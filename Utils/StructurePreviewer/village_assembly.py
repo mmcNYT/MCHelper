@@ -68,7 +68,7 @@ VARIANTS = ("desert", "plains", "savanna", "snowy", "taiga")
 def variant_from_biome(biome_id: int) -> str:
     """锚点群系 id -> 村庄变体（structure_map._check_village 同口径：
     meadow 按 plains）。未知群系回退 plains（演示模式）。"""
-    from Utils.MapPreviewer import structure_map as sm
+    from Utils.Public import structure_map as sm
     if biome_id == sm.MEADOW:
         return "plains"
     for var, const in (("desert", "DESERT"), ("plains", "PLAINS"),

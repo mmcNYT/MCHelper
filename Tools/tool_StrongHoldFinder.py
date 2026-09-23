@@ -34,8 +34,8 @@ from PySide6.QtWidgets import QApplication, QTabWidget
 from .tool_base import BaseToolWidget
 from CodesUI.StrongHoldFinder import Ui_strongHoldFinder
 from Threads.task_StrongHoldFinder import ClipboardListenerThread
-from Utils.AutoBackUp.notification import NotificationWidget
-from Utils.StrongHoldFinder.stronghold_math import (
+from Utils.Public.notification import NotificationWidget
+from Utils.Public.stronghold_math import (
     intersect_rays,
     looks_like_f3c,
     normalize_yaw,

@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QListWidget,
                                QListWidgetItem)
 
 from CodesUI.ChooseStructureWin import Ui_chooseStructureWin
-from Utils.MapPreviewer import structure_icons as st_icons
-from Utils.SeedReverser.structure_params import (DIMENSION_NAMES,
+from Utils.Public import structure_icons as st_icons
+from Utils.Public.structure_params import (DIMENSION_NAMES,
                                                  STRUCT_DIMENSION,
                                                  STRUCT_NAMES)
 

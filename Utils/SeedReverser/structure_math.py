@@ -62,7 +62,7 @@
 
 from . import mc_random
 from . import seed_math
-from . import structure_params
+from Utils.Public import structure_params
 
 # ---- C++ 层 2 扩展（可选，缺失或异常时降级 numpy 路径）----
 try:
