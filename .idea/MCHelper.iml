@@ -5,6 +5,11 @@
       <sourceFolder url="file://$MODULE_DIR$" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/docs" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/loot_rp" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_classes2" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_classes3" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_fjm" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_procs" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
