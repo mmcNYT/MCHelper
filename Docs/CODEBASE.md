@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'ee589ac8-5e6a-4973-9852-41d0973a50cd'
-  PropagateID: 'ee589ac8-5e6a-4973-9852-41d0973a50cd'
-  ReservedCode1: '3bb1e293-9135-4bed-9949-503301a6cfab'
-  ReservedCode2: '3bb1e293-9135-4bed-9949-503301a6cfab'
+  ProduceID: '232fb458-957f-4ebe-b23e-e927e6f9af3e'
+  PropagateID: '232fb458-957f-4ebe-b23e-e927e6f9af3e'
+  ReservedCode1: 'fb289307-5b88-47b1-a4aa-b940087af7c9'
+  ReservedCode2: 'fb289307-5b88-47b1-a4aa-b940087af7c9'
 ---
 
 # MCHelper 代码库手册
@@ -3681,7 +3681,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 - **染色/装饰**：陶瓦/釉面陶瓦→同色羊毛、羊毛/地毯同色同键、床 16 色、横幅（gray/white/brown→ominous wall banner；magenta→magenta_wool 末地城纯色布）、盆栽→potted cactus 合成图近似。
 - **铜系（试炼密室）**：copper/oxidized/chiseled/grate/bulb/door/trapdoor 全量真实纹理，waxed_* 共用未涂蜡纹理。
 - **古城专区**：幽匿系（sculk/sculk_catalyst/sculk_sensor 真实纹理）、cobbled deepslate 半高族、iron trapdoor/note block/snow（雪层半高近似）/campfire（熄灭原木半高，lit 两态不区分）/skeleton_skull（骨块半高近似，无独立 block 纹理）/soul_fire（透明十字火焰）。
-- **村庄专区**：金合欢系全量（planks/log/stairs/slab/fence/fence_gate/pressure_plate/door/sapling，栅栏块模型 = planks 纹理）、作物（wheat/carrots/potatoes/beetroots 静态兑底 + `crop_stage_mat` 动态 age 接管）、工作方块（cartography/fletching/smithing/stonecutter，side 基键 + `_FULL_FACES` 顶面）、植物花草（poppy/dandelion/oxeye daisy/short_grass/tall grass/fern/dead bush 十字）、bell（floor/ceiling 真模型分面）、melon/pumpkin/clay/cactus/玻璃板染色系。
+- **村庄专区**：金合欢系全量（planks/log/stairs/slab/fence/fence_gate/pressure_plate/door/sapling，栅栏块模型 = planks 纹理）、作物（wheat/carrots/potatoes/beetroots 静态兑底 + `crop_stage_mat` 动态 age 接管）、工作方块（cartography/fletching/smithing/stonecutter，side 基键 + `_FULL_FACES` 顶面）、植物花草（poppy/dandelion/oxeye daisy/short_grass/tall grass/fern/dead bush 十字）、bell（floor/ceiling 真模型分面 + wall 变体；钟体 = `_BELL_BODY_R`/`_BELL_BASE_R` 实体盒窗 bell body 32x32）、melon/pumpkin/clay/cactus/玻璃板染色系。
 - **末地城**：end_stone_bricks/purpur 系（purpur_stairs/slab → halfheight:purpur_block）、end_rod（官方模型底座 2/16 + 立杆，`bar:y` 近似）。
 - **非实体/透明**：air 三态/light/barrier/structure_void/moving_piston、水保留材质键（视口半透明）、lava 不透明绘制（与水同格时在 build_mesh 让位于水）、树叶带透明孔 discard 镂空、部分细杆/按钮/铁轨/蘑菇杆 None。
 
@@ -3717,7 +3717,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `build_model` | `build_model(key: str, variant: int \| None = None) -> dict` | 构建并返回模型 dict（`(key, variant)` 单条缓存 + 线程锁）：`build_voxels` → `build_mesh` → `tex_keys`（`_mat_shape` 取纹理位排序去重）。返回 `{"key","variant","voxels","size","mesh","tex_keys"}`。 |
 | `tex_keys_used` | `tex_keys_used(model: dict) -> list` | 模型用到的纹理键（`halfheight:` 前缀去前缀），排序返回。 |
 | `_mat_shape` | `_mat_shape(v) -> tuple` | 体素值 → (基纹理键, 形状码\|None)：元组直取（门上半 `door:u:*` 且基键以 `" door bottom"` 结尾时换 `" door top"`）；旧 `halfheight:` 前缀字符串 → (去前缀, SHAPE_SLAB_BOT)；非字符串 → UNKNOWN_MAT。 |
-| `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。 |
+| `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell（柱/梁/吊杆精确 uv + 钟体 32x32 实体盒窗）/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。 |
 | `_RU` / `_RS` | `_RU(a,b,c,d)` / `_RS(a,b,c,d)` | 官方模型 JSON 像素窗 → 归一化窗换算：up 面 `v=(1-b,1-d)`；side/down 面 `v=(1-d,1-b)`；u=(a,c)；除以 16。 |
 | `_decor_face_mat` | `_decor_face_mat(mat, kind, rest, normal, box) -> tuple` | 装饰方块（新形状码族）按面分流：rswire（世界平铺自动命中）、thook（多盒按最小维度分流：0.5px 绊线段→tripwire / 0.8px 钩件→基键 tripwire hook / 1.4px 横臂与背板→oak planks）、repeater/comparator（底板 smooth stone / 火把柱 redstone torch off）、sculk（底座/触须）、lamp（lit 两态）、pist（platform/bottom/side）、brewing（底板三分窗+杆）、flowerpot（壁侧横带+内底 dirt）、candle、torch（立式 + 墙上斜杆三级台阶段按段等分杆身带）、lantern（顶盖/主体盒）、erod（底座/杆盒）、dhead（龙首 5 面）、bed（顶面枕带/毯区分区窗，e/w 走 swap）、wsign（板盒正面窗）、pisth（平台/轴盒；轴端面返回 `_SKIP_FACE` 不生成）、lectern。 |
 | `_rect` | `_rect(b: tuple, axis: int) -> tuple` | AABB 在 axis 法向平面上的投影矩形（x 面投影 (z,y)、y 面 (x,z)、z 面 (x,y)）。 |
@@ -3884,7 +3884,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `shape_from_props` | `(name: str, props: dict) -> str \| None` | 官方方块名（`minecraft:xxx`）+ properties → 形状码。无形状语义返回 `None`（调用方按整格处理）。按后缀/名单逐族判定：植物类→`plant`；`*_slab`（double 返回 None 整格）；`*_stairs`（half=top 换 `:t`）；`*_trapdoor`；`bell`（attachment=ceiling→`bell:ceiling`）；`composter`；`*_door`；`chest`/`trapped_chest`/`ender_chest`/`barrel`（type=left/right/single）；火把族（带 facing→墙上火把）；`lantern`（hanging→`lantern:h`）；炉族/发射器/vault→`fc:<f>[:lit]`（u/d 保竖直）；`*_log`/basalt/quartz_pillar→`col:<axis>`（`*_wood` 六面同纹不进）；栅栏/墙/压力板/地毯；`*_bed`→`bed:head\|foot:<f>`；`chain`→`bar:<axis>`；`end_rod`；`ladder`/`*_wall_banner`→`panel:<贴边>`；`tripwire_hook`→`thook:<贴边>[:a]`（attached 加 `:a`）；`vine`→`vine:<dir>[+<dir>]`；`*_wall_sign`→`wsign:<att>`；落地 `*_sign`/`*_banner`→`cross`；`*_button`；`lever`；`redstone_wire`（none/side/up→`-/s/u` 四段）；`repeater`/`comparator`；`sculk_sensor`；`piston`/`sticky_piston`→`pist:<f>[:s][:x]`（extended 加 `:x`）；`redstone_lamp`→`lamp:0|1`；`tripwire`→`twire:<n>:<s>:<e>:<w>`（true→`1`）；`cauldron` 族；`*_bars`/`glass_pane`→`pane`；蜡烛；`brewing_stand`；`potted_*`→`flowerpot`；龙首（wall 变体→`dhead:<f>:w`，站立 rot 0/4/8/12→四向）；`piston_head(_short)`→`pisth:<f>[:s]`；`lectern` |
+| `shape_from_props` | `(name: str, props: dict) -> str \| None` | 官方方块名（`minecraft:xxx`）+ properties → 形状码。无形状语义返回 `None`（调用方按整格处理）。按后缀/名单逐族判定：植物类→`plant`；`*_slab`（double 返回 None 整格）；`*_stairs`（half=top 换 `:t`）；`*_trapdoor`；`bell`（attachment+facing 全携带：ceiling→`bell:ceiling`、floor 按 facing 轴向→`bell:floor:x|z`、single_wall→`bell:wall1:<f>`、double_wall→`bell:wall2:x|z`）；`composter`；`*_door`；`chest`/`trapped_chest`/`ender_chest`/`barrel`（type=left/right/single）；火把族（带 facing→墙上火把）；`lantern`（hanging→`lantern:h`）；炉族/发射器/vault→`fc:<f>[:lit]`（u/d 保竖直）；`*_log`/basalt/quartz_pillar→`col:<axis>`（`*_wood` 六面同纹不进）；栅栏/墙/压力板/地毯；`*_bed`→`bed:head\|foot:<f>`；`chain`→`bar:<axis>`；`end_rod`；`ladder`/`*_wall_banner`→`panel:<贴边>`；`tripwire_hook`→`thook:<贴边>[:a]`（attached 加 `:a`）；`vine`→`vine:<dir>[+<dir>]`；`*_wall_sign`→`wsign:<att>`；落地 `*_sign`/`*_banner`→`cross`；`*_button`；`lever`；`redstone_wire`（none/side/up→`-/s/u` 四段）；`repeater`/`comparator`；`sculk_sensor`；`piston`/`sticky_piston`→`pist:<f>[:s][:x]`（extended 加 `:x`）；`redstone_lamp`→`lamp:0|1`；`tripwire`→`twire:<n>:<s>:<e>:<w>`（true→`1`）；`cauldron` 族；`*_bars`/`glass_pane`→`pane`；蜡烛；`brewing_stand`；`potted_*`→`flowerpot`；龙首（wall 变体→`dhead:<f>:w`，站立 rot 0/4/8/12→四向）；`piston_head(_short)`→`pisth:<f>[:s]`；`lectern` |
 | `shape_from_palette` | `(name: str, props: dict \| None) -> str \| None` | jigsaw/模板 palette 条目 → 形状码（组装层加载器专用）。一律转调 `shape_from_props`（props 缺失按空 dict）——无 Properties ≠ 无形状：火把/灯笼/地毯/花盆等无属性方块靠内建默认定型；旧加载点 `if props else None` 会把它们错当整格（落地火把变整块）。返回 None 时下游 `halfheight:` fallback 兜底 |
 | `shape_mirror` | `(shape: str \| None, mirror: str) -> str \| None` | 形状码按放置镜像换向。`FRONT_BACK`（x=-x）下 e↔w、`LEFT_RIGHT`（z=-z）下 n↔s，u/d 透传。按 `_MIRROR_KIND_FACE` 找 kind 的朝向段下标（`bed`=1、`door`=2、其余 0）；`rswire`/`twire` 特殊处理四向段交换（段序 n,s,e,w）；`vine` 多面段逐向换（`+` 连接单字母）。调用方须在 `shape_rotation` 之前调用（StructureTemplate.transform 先镜像后旋转） |
 | `shape_rotation` | `(shape: str \| None, rot: int) -> str \| None` | 形状码按放置旋转 rot（0..3）换向。`_ROT_FACE[rot&3]` 查映射（rot1 = n→e，与 cubiomes 放置旋转 R 的 `(x,z)->(-z,x)` 一致）。door 保铰链/开门状态（纯旋转手性不变）；`bar` 奇数旋转 x/z 轴互换；`col` 轴向无旋转语义；`fc`/`repeater`/`comparator`/`pist`/`pisth` 竖直朝向（u/d）不随 R 旋转；`rswire`/`twire` 四向段按 rot 轮换；`vine` 多面段逐向映射（u 不变）；stairs/chest/trapdoor/panel/button/lever/torch/dhead/thook 换尾段朝向；half/post/pane 等不变 |
@@ -3893,7 +3893,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `connect_arms` | `(kind: str, nbs) -> tuple` | kind + 四向邻居类别 nbs（顺序 n,s,e,w）→ 臂 AABB 元组。pane 臂全高 2/16 板、wall 臂 6/16 宽高 14/16、post 臂双横轨 y 12..15/6..9；臂沿连接方向触格边，邻居为同类或 `full` 才补 |
 | `panel_shape` | `(att: str) -> str` | 贴边方向 → `panel:<att>` 形状码（梯子/墙横幅共用） |
 | `wall_panel_edge` | `(facing: str) -> str` | 墙上挂件的贴边方向 = facing 反侧（`_OPPOSITE` 查表，缺省 "n"） |
-| 几何私有族 | `_slab(vh, blank)`、`_stairs(quad, half)`、`_door(part, open_, facing, hinge)`、`_trapdoor(facing, open_, half)`、`_bar(axis)`、`_barrel()`、`_cauldron()`、`_composter()`、`_brewing()`、`_flowerpot()`、`_candle()`、`_lantern(hang)`、`_end_rod(facing)`、`_dragon_head(wall, facing)`、`_wall_sign(att)`、`_piston_head(facing)`、`_lectern()`、`_chest(typ, facing)`、`_bell(att)`、`_torch(kind, facing)` | 每函数返回该形状的 AABB 元组，尺寸取自官方模型：半砖半格（blank m/s/e/w 缺角版保留扩展）；楼梯 = 底层全宽半格 + 踏步半格，half=t 为整体 y 镜像（侧置楼梯踏步落底半格不越界，旧版 +0.5 会插进上方格）；门 3/16 厚板贴 facing 侧框边、开门转 90° 贴铰链侧（每半块门板占满全高，half 只影响纹理选择）；活板门关=水平薄板置于半区、开=竖薄板贴 facing 反侧格缘；钟 = floor 双柱+横梁 / ceiling 吊杆 + 三段阶梯钟体（颈/肩/口），facing 无静态几何影响；箱子单箱 14³ 居中、大箱左右半 15/16 宽接缝贴格界（left 占 facing 逆时针 90° 格，`_CHEST_LEFT_OF` 查表）；桶 13/16 高 14x14 柱；锅/堆肥桶四壁+底杯状；酿造台中央杆+三底板（官方四元素原样）；花盆四壁+内底；蜡烛 2x6x2 主柱；灯笼主体+顶盖（悬挂 +1px）；末地烛底座+立杆按 facing 旋转（水平时底座贴反侧壁）；龙首 12³ 单盒（落地贴底居中 / 墙挂抬 0.25 外凸 0.25）；墙告示牌 1.0×8/16×2/16 板 y6..14；活塞头平台 16x16x4 + 突轴 4x4x12（越界 4px 与本体凹口咬合）；讲台底座+立柱+水平顶板近似斜置 |
+| 几何私有族 | `_slab(vh, blank)`、`_stairs(quad, half)`、`_door(part, open_, facing, hinge)`、`_trapdoor(facing, open_, half)`、`_bar(axis)`、`_barrel()`、`_cauldron()`、`_composter()`、`_brewing()`、`_flowerpot()`、`_candle()`、`_lantern(hang)`、`_end_rod(facing)`、`_dragon_head(wall, facing)`、`_wall_sign(att)`、`_piston_head(facing)`、`_lectern()`、`_chest(typ, facing)`、`_bell(att)`、`_torch(kind, facing)` | 每函数返回该形状的 AABB 元组，尺寸取自官方模型：半砖半格（blank m/s/e/w 缺角版保留扩展）；楼梯 = 底层全宽半格 + 踏步半格，half=t 为整体 y 镜像（侧置楼梯踏步落底半格不越界，旧版 +0.5 会插进上方格）；门 3/16 厚板贴 facing 侧框边、开门转 90° 贴铰链侧（每半块门板占满全高，half 只影响纹理选择）；活板门关=水平薄板置于半区、开=竖薄板贴 facing 反侧格缘；钟 = floor 双柱+横梁（梁沿 x/z 两变体）/ ceiling 吊杆 / single_wall 4 向梁 / double_wall 梁沿 x/z，均官方 JSON 原样；钟体 = 官方 BellRenderer 实体两段盒（口座 8x2x8 y[4,6] + 钟身 6x7x6 y[6,13]，= 官方选择盒 j），静态直立无摆动；箱子单箱 14³ 居中、大箱左右半 15/16 宽接缝贴格界（left 占 facing 逆时针 90° 格，`_CHEST_LEFT_OF` 查表）；桶 13/16 高 14x14 柱；锅/堆肥桶四壁+底杯状；酿造台中央杆+三底板（官方四元素原样）；花盆四壁+内底；蜡烛 2x6x2 主柱；灯笼主体+顶盖（悬挂 +1px）；末地烛底座+立杆按 facing 旋转（水平时底座贴反侧壁）；龙首 12³ 单盒（落地贴底居中 / 墙挂抬 0.25 外凸 0.25）；墙告示牌 1.0×8/16×2/16 板 y6..14；活塞头平台 16x16x4 + 突轴 4x4x12（越界 4px 与本体凹口咬合）；讲台底座+立柱+水平顶板近似斜置 |
 | 红石族私有 | `_rot_y(box, f)`、`_redstone_wire(rest)`、`_diode(f, comparator)`、`_sculk_sensor()`、`_piston_base(f)` | `_rot_y` = facing=n 基准 AABB 按 blockstate y 旋转（e=90/s=180/w=270 坐标变换）；红石线 = 4px 宽辐射臂贴地 1/64 厚片 + up 全高贴边竖片 + 孤点中心板；中继器/比较器 = 平滑石底板 2/16 + 火把柱（比较器背面双火把+输出端小火把）；幽匿感测体 = 8/16 底座 + 四角直立薄板近似官方 45° 斜片；extended 活塞本体 = facing 端缩进 4px 露杆室（u/d 沿 y 缩进） |
 | 机关件私有 | `_lever(rest)`、`_tripwire_hook(rest)`、`_tripwire(rest)`、`_vine(rest)` | 拉杆 = 圆石底座 6x3x8 + 2x10x2 杆未触发 -45° 斜置（4 段 45° 阶梯盒逼近；up=floor 原始 / down=ceiling x180 / 墙贴 = x90 家族旋转 f=贴边反侧过 `_rot_y`）；绊线钩 = 官方 tripwire_hook[_attached].json 多盒（背板+横臂+钩件，attached 带绊线伸出段，斜置件以包围盒近似，贴边 = facing 反侧过 `_rot_y`）；绊线 = 0.5px 细线面片 y=1.5（1/64 厚薄盒，每连接向半格段）；藤蔓 = 贴边薄面片 0.8/16 厚盒（vine:n 原始贴北缘，e/s/w 由 `_rot_y` 旋转，u=顶面片） |
 
@@ -3922,7 +3922,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `SHAPE_LAYER` / `SHAPE_PLATE` / `SHAPE_CARPET` | `"layer"` / `"plate"` / `"carpet"` | 整格截层 13/16 / 压力板 2/16 / 地毯 1/16 |
 | `SHAPE_CAULDRON` / `SHAPE_COMPOSTER` | `"cauldron"` / `"composter"` | 锅形杯状（四壁+底） |
 | `SHAPE_BUTTON` / `SHAPE_LEVER` | `"button:n"` / `"lever:up"` | 按钮/拉杆基准码 |
-| `SHAPE_BELL_FLOOR` | `"bell:floor"` | 落地钟（ceiling 变体码 `"bell:ceiling"` 内联） |
+| `SHAPE_BELL_FLOOR` | `"bell:floor:x"` | 落地钟（全变体：`bell:floor:z` / `bell:ceiling` / `bell:wall1:<e|n|s|w>` / `bell:wall2:<x|z>`；旧码 `"bell:floor"` 兼容读作 :x） |
 | `SHAPE_CROSS` / `SHAPE_PLANT` | `"cross"` / `"plant"` | 落地告示牌十字板 / 真·对角 X 植物（quad 专用路径，AABB 空） |
 | `SHAPE_COL_Y` | `"col:y"` | 轴心方块（整格几何 + 轴向分面纹理） |
 | `SHAPE_FC_N` | `"fc:n"` | 炉族前脸码（`fc:<f>[:lit]`，dispenser/vault 同族） |

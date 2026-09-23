@@ -874,7 +874,7 @@ class _SlotWidget(QLabel):
             else:
                 p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
                 f = QFont()
-                f.setPixelSize(12 * s)
+                f.setPixelSize(6 * s)       # 缩小 50%（原 12*s）
                 f.setBold(True)
                 p.setFont(f)
                 fm = p.fontMetrics()
