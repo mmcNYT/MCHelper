@@ -137,8 +137,10 @@ void main() {
 }
 """
 
-# 水第二遍 shader：同一纹理着色，输出半透明
-_FS_WATER = """#version 120
+# 半透明第二遍 shader：同一纹理着色，alpha 取贴图通道
+#（26.2 TRANSLUCENT 语义：水/冰/染色玻璃/传送门各按其贴图
+# 实际半透明度混合，不再固定系数）
+_FS_TRANS = """#version 120
 varying vec2 vUV;
 varying vec3 vNor;
 varying vec2 vTile;
@@ -153,9 +155,10 @@ void main() {
     vec2 uv = vTile + vec2(tileUV.x * SLOT_W,
                            (1.0 - tileUV.y) * SLOT_H);
     vec4 tex = texture2D(uAtlas, uv);
+    if (tex.a < 0.1) discard;
     float diff = max(dot(normalize(vNor), normalize(uLightDir)), 0.0);
     vec3 col = tex.rgb * (0.42 + 0.58 * diff);
-    gl_FragColor = vec4(col, 0.62);
+    gl_FragColor = vec4(col, tex.a);
 }
 """
 
@@ -221,8 +224,7 @@ def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
     - 主路径（quad_slot 提供）：quad→槽号直接查表，每 quad 4 顶点
       同 tile；空槽（count=0）不占 quad，槽号 = slots 下标；
     - quad_slot 缺省兼容旧 mesh：按「非空槽顺序填满」推归属；
-    - idx 仅用于尾段水区间：按索引位置（主体 6/quad 之后）取引用
-      值赋 water 槽原点；
+    - idx 仅用于兼容路径（quad_slot 缺省时按索引位置推归属）；
     - halfheight: 前缀材质与基材质共纹理（半高变体）；
     - list/numpy 输入先 numpy 化（低层注入旧格式兼容）；
     - 空 verts 返回 (0,10) 数组；无归属顶点（防御）tile=(0,0)。
@@ -247,9 +249,8 @@ def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
             tsel = np.full(n_v, -1, dtype=np.int64)
     else:
         q = np.asarray(quad_slot, dtype=np.int64)
-        # 每 quad 4 顶点同槽；越界 quad 号（防御）无归属走灰。
-        # 水顶点不在 quad_slot 内（水走独立第二遍）：尾部补 -1，
-        # tile 先走灰，水覆盖阶段再赋水槽原点
+        # 每 quad 4 顶点同槽（含尾段半透明槽：槽已注册，
+        # quad_slot 全量覆盖）；越界 quad 号（防御）无归属走灰
         q = np.where((q >= 0) & (q < len(slot_mat)), q, -1)
         tsel = np.repeat(q, 4)
         if tsel.size < n_v:
@@ -267,25 +268,9 @@ def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
         m2t.append((0.0, 0.0))
     m2t.append((0.0, 0.0))              # 无归属（-1）兜底槽
     # tsel 语义：>=0 = slots 下标（直接查 m2t[tsel]）；-1 = 无归属
-    # （水顶点先兜底，随后水覆盖阶段赋水槽原点）
     tsel2 = np.where(tsel >= 0, tsel, len(m2t) - 1)
     tile = np.array([m2t[i] for i in tsel2], dtype=np.float32)
     A10[:, 8:10] = tile
-    if idx is not None:
-        # 水顶点 tile 覆盖（整体 tile 赋值之后）：水区间按索引
-        # 「位置」划定（主体 6/quad 之后），引用「值」才是水顶点号
-        ref = np.asarray(idx).reshape(-1).astype(np.int64, copy=False)
-        if quad_slot is not None:
-            n_body = int(len(quad_slot)) * 6
-        else:
-            n_body = sum(c for (_s, c) in slots) if slots else 0
-        wv = ref[n_body:]
-        wv = wv[(wv >= 0) & (wv < n_v)]
-        if wv.size:
-            ws = atlas_slots.get("water",
-                                 atlas_slots.get("__unknown__", 0))
-            A10[wv, 8] = (ws % _ATLAS_COLS) / _ATLAS_COLS
-            A10[wv, 9] = (ws // _ATLAS_COLS) / _ATLAS_ROWS
     return A10
 
 
@@ -345,10 +330,9 @@ class Structure3DView(QOpenGLWidget):
         self._anchor_vbo = None
         self._chunk_verts = None             # 区块边界线段（展平 xyz）
         self._chunk_vbo = None
-        # 水第二遍数据（paintGL 内使用）
-        self._water_off = 0
-        self._water_count = 0
-        self._water_slot = 0
+        # 半透明第二遍数据（paintGL 内使用）
+        self._trans_off = 0
+        self._trans_count = 0
         # chunk 剔除数据（_upload_model 注入）：[(idx_off, idx_count,
         # AABB...)]；_idx_itemsize = 索引元素字节数（draw 偏移换算）
         self._chunks: list = []
@@ -1350,12 +1334,12 @@ class Structure3DView(QOpenGLWidget):
         self._shader.bindAttributeLocation("aNor", 2)
         self._shader.bindAttributeLocation("aTile", 3)   # 显式绑定：不绑则由驱动分配（实测 NVIDIA 顺序分配到 3，但不保证），环境变化会让 _upload_model 的硬编码 index 3 错位
         self._shader.link()
-        # 水第二遍着色器：顶点同 _VS，片元输出半透明
+        # 半透明第二遍着色器：顶点同 _VS，片元按贴图 alpha 混合
         self._wshader = QOpenGLShaderProgram()
         self._wshader.addShaderFromSourceCode(
             QOpenGLShader.ShaderTypeBit.Vertex, _VS)
         self._wshader.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit.Fragment, _FS_WATER)
+            QOpenGLShader.ShaderTypeBit.Fragment, _FS_TRANS)
         self._wshader.bindAttributeLocation("aPos", 0)
         self._wshader.bindAttributeLocation("aUV", 1)
         self._wshader.bindAttributeLocation("aNor", 2)
@@ -1450,10 +1434,9 @@ class Structure3DView(QOpenGLWidget):
                 else m
             self._slot_of_mat[i] = self._atlas_slots.get(
                 base, self._atlas_slots.get("__unknown__", 0))
-        # 水第二遍数据（build_mesh 已把水面分离到索引尾部）
-        self._water_off = mesh.get("water_off", 0)
-        self._water_count = mesh.get("water_count", 0)
-        self._water_slot = self._atlas_slots.get("water", 0)
+        # 半透明第二遍数据（build_mesh 已把半透明面分离到索引尾部）
+        self._trans_off = mesh.get("trans_off", 0)
+        self._trans_count = mesh.get("trans_count", 0)
         # 顶点重排 8→10 列：图集槽原点烘焙进 aTile（上传期一次性
         # numpy 向量化），绘制期不再逐槽设 uSlotOrigin；quad_slot
         # 主路径（build_mesh 直接给出 quad→槽号表，空槽天然跳过）
@@ -1511,7 +1494,7 @@ class Structure3DView(QOpenGLWidget):
             # 残留旧顶点数会让 glDrawArrays 读空缓冲）
             self._anchor_verts = None
             self._chunk_verts = None
-            self._water_count = 0
+            self._trans_count = 0
             self._chunks = []
             self._chunk_arr = None
             self._vao.release()
@@ -1820,7 +1803,7 @@ class Structure3DView(QOpenGLWidget):
                         _VOIDP(int(offs[s]) * self._idx_itemsize))
         else:
             # 全部不透明索引一次画完（水区间在索引尾部，单独排除）
-            total = self._water_off if self._water_count \
+            total = self._trans_off if self._trans_count \
                 else _seq_len(self._model["mesh"]["idx"])
             self._native_glDrawElements(0x0004, total, self._idx_type,
                                         _VOIDP(0))
@@ -1883,25 +1866,26 @@ class Structure3DView(QOpenGLWidget):
             self._chest_vbo.release()
             self._plain.release()
 
-    def _draw_water(self, mvp: QMatrix4x4) -> None:
-        """水第二遍：半透明，深度只读（渲染开关关闭时不画）。"""
-        if not self._water_count:
+    def _draw_translucent(self, mvp: QMatrix4x4) -> None:
+        """半透明第二遍（水/冰/染色玻璃/传送门/红石线）：
+        贴图 alpha 混合，深度只读（渲染开关关闭时不画）。"""
+        if not self._trans_count:
             return
         glf = self._glf
-        # 在线框之后绘制：水面混合叠在网格线上（透过水看到网格，
+        # 在线框之后绘制：半透明面混合叠在网格线上（透过水看到网格，
         # 与游戏内俯视观感一致）；不写深度避免挡住后画的透明面。
-        # 水体几何同为闭合盒（第二遍含底/背面），双面绘制保证
-        # 水下视角/斜视水侧不被背向剔除误裁。
+        # 几何含闭合盒（第二遍含底/背面），双面绘制保证
+        # 水下视角/斜视不被背向剔除误裁。
         glf.glDepthMask(0)
-        glf.glDisable(0x0BC5)                # GL_CULL_FACE：水双面
+        glf.glDisable(0x0BC5)                # GL_CULL_FACE：双面
         self._wshader.bind()
         self._wshader.setUniformValue(self._wu["uMVP"], mvp)
         self._qtex.bind(0)
         self._wshader.setUniformValue(self._wu["uAtlas"], 0)
         self._vao.bind()
-        byte_off = self._water_off * (2 if self._idx_type == 0x1403
+        byte_off = self._trans_off * (2 if self._idx_type == 0x1403
                                       else 4)
-        self._native_glDrawElements(0x0004, self._water_count,
+        self._native_glDrawElements(0x0004, self._trans_count,
                                     self._idx_type, _VOIDP(byte_off))
         self._vao.release()
         self._wshader.release()
@@ -1979,7 +1963,7 @@ class Structure3DView(QOpenGLWidget):
         occl_cells = None
         if self._sp_mode and self._occl and self._chunks:
             occl_cells = self._occl_cells_for_eye()
-        # 渲染开关：默认关闭只画线框层；开启后画模型主体与水。
+        # 渲染开关：默认关闭只画线框层；开启后画模型主体与半透明层。
         # 任一环节异常 -> 停渲染 + 信息框提示（本帧到此为止）；
         # 出错后 _render_failed 拦住后续帧重试，信号只发一次
         try:
@@ -1987,7 +1971,7 @@ class Structure3DView(QOpenGLWidget):
                 self._draw_model_body(mvp, occl_cells)
             self._draw_guide_lines(mvp)
             if self._render_enabled and not self._render_failed:
-                self._draw_water(mvp)
+                self._draw_translucent(mvp)
         except Exception as exc:
             self._handle_render_failure(f"3D 渲染出错：{exc}")
             return

@@ -460,6 +460,7 @@ _MAT_MAP = {
     # -- 二轮补映射（模板实际出现、首轮遗漏）--
     "minecraft:glass_pane": "glass",
     "minecraft:glass": "glass",
+    "minecraft:nether_portal": "nether portal",
     "minecraft:magenta_stained_glass": "magenta_stained_glass",
     "minecraft:iron_door": "iron door bottom",
     "minecraft:polished_deepslate_wall": "polished deepslate",
@@ -2113,7 +2114,27 @@ def tex_keys_used(model: dict) -> list:
 # ladder：梯子/横幅贴墙板纹理大部分镂空（FS discard），作为邻居
 # 时不得剔墙面——否则所贴方块整面消失、梯子看似悬空（官方
 # occlusion 亦不把 ladder 计入不透明遮挡）
-_TRANSPARENT_MATS = frozenset({"water", "glass", "ice", "ladder"})
+_TRANSPARENT_MATS = frozenset({
+    "water", "glass", "ice", "ladder",
+    # 染色玻璃族（官方 HalfTransparentBlock 家族：同类剔面、
+    # 异材豁免、不参与遮挡；26.2 染色玻璃贴图为半透明像素）
+    "white stained glass", "orange stained glass",
+    "yellow stained glass", "light gray stained glass",
+    "black stained glass", "magenta_stained_glass",
+})
+
+# 半透明渲染层（26.2 ChunkSectionLayer.TRANSLUCENT 语义：贴图含
+# 0<alpha<255 像素 -> 真混合管线，视口第二遍绘制）。集合由
+# .temp/scan_alpha_layers.py 按 26.2 NativeImage.computeTransparency
+# 规则离线扫描 TEX_DIR 全部贴图得出；redstone wire 按 26.2
+# 官方 force_translucent 语义并入。
+_TRANSLUCENT_MATS = frozenset({
+    "water", "ice", "nether portal",
+    "white stained glass", "orange stained glass",
+    "yellow stained glass", "light gray stained glass",
+    "black stained glass", "magenta_stained_glass",
+    "redstone wire",
+})
 
 # 体素值 -> (纹理键, 形状码|None) 归一化（兼容旧 halfheight: 前缀）
 _HP = "halfheight:"
@@ -3156,35 +3177,38 @@ def build_mesh(vox: dict) -> dict:
                                x, y, z, _box_face(b, normal), normal,
                                rect)
     verts_all, idx_all, slots, slot_mat = [], [], [], []
-    water_idx: list = []
+    trans_idx: list = []     # 半透明槽索引（垫尾，视口第二遍）
     quad_slot: list = []      # 每 quad 槽序（quad -> slots 下标，烘焙用）
     quad_pos: list = []       # 每 quad 所在方块（世界格坐标，chunk 排序用）
-    # 拼接顺序：非水槽按字母序，水槽强制垫底——主体顶点物理连续、
-    # 水顶点恒在尾部（水不注册槽，视口半透明第二遍按索引区间整体
-    # 绘制；字母序下 water 若插在主体中部会让 quad_slot 物理对位
-    # 与水索引引用双双错位，如 trial 的 water<white bed）
-    ordered_mats = [m for m in sorted(slot_verts) if m != "water"]
-    if "water" in slot_verts:
-        ordered_mats.append("water")
+    # 拼接顺序：非半透明槽按字母序，半透明槽强制垫底——主体顶点
+    # 物理连续、半透明顶点恒在尾部（视口按 (trans_off, trans_count)
+    # 索引区间整体第二遍绘制；字母序下若插在主体中部会让 quad_slot
+    # 物理对位与半透明索引引用双双错位，如 trial 的 water<white bed）。
+    # 半透明槽照常注册 slots/slot_mat/quad_slot（tile 烘焙统一走
+    # quad_slot），只把索引挪到尾部。
+    ordered_mats = [m for m in sorted(slot_verts)
+                    if m not in _TRANSLUCENT_MATS]
+    ordered_mats.extend(m for m in sorted(slot_verts)
+                        if m in _TRANSLUCENT_MATS)
     for mat in ordered_mats:
         vert_start = len(verts_all) // 8
         verts_all.extend(slot_verts[mat])
-        if mat == "water":
-            # 水面索引不进常规槽：收集后统一挪到索引尾部，
-            # 视口按 (water_off, water_count) 半透明第二遍绘制
-            for i in slot_index[mat]:
-                water_idx.append(i + vert_start)
-            continue
         idx_start = len(idx_all)
-        for i in slot_index[mat]:
-            idx_all.append(i + vert_start)
+        qi = len(slots)
         slots.append((idx_start, len(slot_index[mat])))
         slot_mat.append(mat)
         # 本槽 quad 的槽序（_emit_quad 每 quad 追加 32 浮点
         # = 4 顶点，quad 数 = 顶点数 // 4，按顶点顺序对应）
-        qi = len(slots) - 1
         for _v in range(len(slot_verts[mat]) // 32):
             quad_slot.append(qi)
+        if mat in _TRANSLUCENT_MATS:
+            # 半透明索引不进主体：收集后统一挪到索引尾部，
+            # 视口按 (trans_off, trans_count) 半透明第二遍绘制
+            for i in slot_index[mat]:
+                trans_idx.append(i + vert_start)
+        else:
+            for i in slot_index[mat]:
+                idx_all.append(i + vert_start)
     # 每 quad 的方块坐标：逐槽回放（顶点 8 列 x,y,z 在 0..2 列）。
     # 取「面所属格」而非角点：法线轴取朝面一侧（+向 ceil-1 / -向
     # floor，面在该轴 4 角共面，首角值即平面值）；其余轴取 4 角
@@ -3215,15 +3239,19 @@ def build_mesh(vox: dict) -> dict:
             elif nzv < 0:
                 gz = math.floor(vv[k + 2])
             quad_pos.append((int(gx), int(gy), int(gz)))
-    water_off = len(idx_all)
-    idx_all.extend(water_idx)
+    trans_off = len(idx_all)
+    idx_all.extend(trans_idx)
     # ---- chunk 空间重排（MC 式视锥剔除基础）----
     # 主体 idx 每 6 索引一个 quad，按 quad 所在方块坐标 16³ 分桶
-    # 排序；桶 = 视口逐 chunk 剔除的绘制单元。水区间保持在尾部
-    # 不动（半透明第二遍整体绘制）。
-    n_q = len(idx_all) // 6 - len(water_idx) // 6
+    # 排序；桶 = 视口逐 chunk 剔除的绘制单元。半透明区间保持在
+    # 尾部不动（半透明第二遍整体绘制，不参与 chunk 剔除）。
+    n_q = len(idx_all) // 6 - len(trans_idx) // 6
     idx_np_pre = np.asarray(idx_all, dtype=np.int64)
-    qs = np.asarray(quad_slot[:n_q], dtype=np.int64)
+    # quad_slot 全量输出（含尾段半透明槽）：视口 tile 烘焙统一按
+    # quad→槽号表赋值，半透明顶点不再需要特判；主体段（[:n_q]）
+    # 与 chunk 重排域对位，仅重排逻辑使用
+    qs_all = np.asarray(quad_slot, dtype=np.int64)
+    qs = qs_all[:n_q]
     qp = np.asarray(quad_pos[:n_q], dtype=np.int64)
     # 排序键：chunk 坐标 (cy,cx,cz) 主序（argsort 于首 chunk 出现
     # 序，即 lexsort 后的去重序）。保持 slots/chunks 物理序 =
@@ -3312,8 +3340,8 @@ def build_mesh(vox: dict) -> dict:
     verts_np = np.array(verts_all, dtype=np.float32)
     return {"verts": verts_np, "idx": idx_np,
             "slots": slots, "slot_mat": slot_mat,
-            "quad_slot": qs.tolist(),
-            "water_off": water_off, "water_count": len(water_idx),
+            "quad_slot": qs_all.tolist(),
+            "trans_off": trans_off, "trans_count": len(trans_idx),
             "chunks": chunks, "occl": occl}
 
 
