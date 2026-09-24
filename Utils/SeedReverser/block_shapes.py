@@ -128,9 +128,10 @@ SHAPE_LECTERN = "lectern"
 # up 全高贴边竖片，孤点画中心 4x4 板；纹理自制十字图，世界平铺
 # UV 自动命中线带）
 SHAPE_RSWIRE = "rswire:-:-:-:-"
-# 中继器/比较器 repeater:<f> / comparator:<f>（facing = 输出方向；
-# 官方 repeater_1tick / comparator.json：平滑石底板 2/16 + 火把柱，
-# 原始朝向 n；powered/mode 纯纹理差异几何不变）
+# 中继器/比较器 repeater:<f> / comparator:<f>（f = 官方 blockstate
+# facing 属性值 = 输入方向；官方 repeater_1tick / comparator.json：
+# 平滑石底板 2/16 + 火把柱，模型原样 = facing=south；powered/mode
+# 纯纹理差异几何不变）
 # 幽匿感测体 sculk（sculk_sensor.json：8/16 底座 + 四角触须，官方
 # 45° 斜片以直立薄板近似）
 # 粘性活塞/活塞 pist:<f>（整格 + 朝向分面：顶 sticky/普通、侧
@@ -1286,7 +1287,17 @@ def _diode(rest: str, comparator: bool) -> tuple:
         zt = (4 + 2 * max(1, min(4, delay))) * _E
         boxes.append((7 * _E, 2 * _E, zt, 9 * _E, 7 * _E, zt + 2 * _E))
         boxes.append((7 * _E, 2 * _E, 2 * _E, 9 * _E, 7 * _E, 4 * _E))
-    return tuple(_rot_y(bx, f) for bx in boxes)
+    # 朝向换算：码 f = 官方 blockstate facing 属性值（输入方向），
+    # 而 _rot_y 的公式表 = blockstate y90（facing=east 行）；官方
+    # repeater/comparator blockstate：模型原样 = facing=south（
+    # north=y180、east=y270、west=y90）→ 码 f 到 _rot_y 参数映射：
+    # s→恒等 / n→"s"(180) / e→"w"(270) / w→"e"(90)。此前把模型
+    # 原样当 facing=n 基准，所有朝向统一差 180°（delay 火把靠错
+    # 端、输入输出反）
+    ry = {"s": None, "n": "s", "e": "w", "w": "e"}.get(f, "s")
+    if ry is None:
+        return tuple(boxes)
+    return tuple(_rot_y(bx, ry) for bx in boxes)
 
 
 def _sculk_sensor() -> tuple:

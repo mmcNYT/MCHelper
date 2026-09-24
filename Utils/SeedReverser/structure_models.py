@@ -2636,22 +2636,50 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
             #   顶片 (7,5,2)-(9,5,4) up [7,6,9,8]
             #   x 片 (7,2,1)-(9,6,5) w/e [6,5,10,9]
             #   z 片 (6,2,2)-(10,6,4) n/s [6,5,10,9]
+            # 码 f = blockstate facing 值（模型原样=south），转 _rot_y
+            # 参数同 _diode：s→恒等 / n→"s" / e→"w" / w→"e"；可见面
+            # 法线随同一旋转（_rot_y 线性部分：e (x,z)->(-z,x) /
+            # w ->(z,-x) / s ->(-x,-z)）
+            ry = {"s": None, "n": "s", "e": "w", "w": "e"}.get(f, "s")
+            if ry is None:
+                def _rb(box, n):
+                    return box, n
+            elif ry == "s":
+                def _rb(box, n):
+                    return (bs._rot_y(box, "s"),
+                            (-n[0], n[1], -n[2]))
+            elif ry == "w":
+                def _rb(box, n):
+                    return (bs._rot_y(box, "w"),
+                            (n[2], n[1], -n[0]))
+            else:                              # "e"（y90）
+                def _rb(box, n):
+                    return (bs._rot_y(box, "e"),
+                            (-n[2], n[1], n[0]))
             for ref, wn, rect in (
                     ((7, 5, 2, 9, 5, 4), (0, 1, 0), _RU(7, 6, 9, 8)),
                     ((7, 2, 1, 9, 6, 5), (1, 0, 0), _RS(6, 5, 10, 9)),
                     ((7, 2, 1, 9, 6, 5), (-1, 0, 0), _RS(6, 5, 10, 9)),
                     ((6, 2, 2, 10, 6, 4), (0, 0, 1), _RS(6, 5, 10, 9)),
                     ((6, 2, 2, 10, 6, 4), (0, 0, -1), _RS(6, 5, 10, 9))):
-                rb = bs._rot_y(tuple(v * _E16 for v in ref), f)
+                rb, wn2 = _rb(tuple(v * _E16 for v in ref), wn)
                 if all(abs(box[i] - rb[i]) < 1e-6
-                       for i in range(6)) and normal == wn:
+                       for i in range(6)) and normal == wn2:
                     return ("redstone torch", rect)
             return (_SKIP_FACE, None)
         if box is not None and box[1] <= 1e-9:
             # 底板：up = 基键（#top 全幅）；down = #slab 全幅（贴
-            # 附面主循环剔）；侧 = #slab 底部 2px 条窗
+            # 附面主循环剔）；侧 = #slab 底部 2px 条窗。up 贴图红粉
+            # 痕有方向性（repeater 竖痕沿信号方向 / comparator 横杠
+            # 连接两输入火把），官方 up UV 随 blockstate y 旋转——
+            # 世界平铺仅码 s 正确，其余码需按逆 ry 旋转采样，否则
+            # 红痕偏 90°（e/w）或端部镜像（n）
             if ny > 0:
-                return (None, None)
+                # 四码统一显式 rect（官方 up 面贴图 y=z；世界平铺
+                # 贴图 y=16(1-wz) 镜像 → 红痕贴错端）：uv=逆 ry 回
+                # 局部再接官方映射，rot 算子含 v 翻转补偿
+                rot = {"s": 0, "n": 1, "w": 2, "e": 3}.get(f, 0)
+                return (mat, (0.0, 0.0, 1.0, 1.0, False, rot))
             if ny < 0:
                 return ("smooth stone", None)
             return ("smooth stone", _RS(0, 14, 16, 16))
@@ -3852,11 +3880,16 @@ def _emit_quad(arr: list, idx: list, x: int, y: int, z: int,
     """四角 quad（世界相对本地坐标）+ 法线入槽：顶点 + 双三角索引。
 
     rect = None：u/v 走世界平铺整格坐标（旧路径，零变化）；
-    非 None：(u0, v0, u1, v1[, swap]) 窗内按面内归一化坐标线性
-    插值——顶/底面 pu 沿 x、pv 沿 z；x 面 pu 沿 z、pv 沿 y；z 面
-    pu 沿 x、pv 沿 y（与旧 u/v 轴选择一致，保证 uv 窗方向与
+    非 None：(u0, v0, u1, v1[, swap[, rot]]) 窗内按面内归一化坐标
+    线性插值——顶/底面 pu 沿 x、pv 沿 z；x 面 pu 沿 z、pv 沿 y；
+    z 面 pu 沿 x、pv 沿 y（与旧 u/v 轴选择一致，保证 uv 窗方向与
     FaceInfo 顶点配对推导对齐）。swap=True（床顶 e/w）：u/v 承
-    轴互换（枕带在图 v 轴、映射到世界 x 轴）。
+    轴互换（枕带在图 v 轴、映射到世界 x 轴）。rot∈0..3：面内归
+    一化坐标变换后进窗（0=v 翻转 / 1=180° / 2=转置 / 3=反对称）
+    ——中继器/比较器底板顶面专用：官方 up 面贴图 y 直接等于
+    元素 z（FaceBakery 顶点配对），而 shader 采样域 v 轴向上，
+    世界平铺的贴图 y=16(1-wz) 与官方镜像，需按码逆 ry 变换采
+    样（含 v 翻转补偿），否则红粉痕偏 90°或贴错端。
     """
     nx, ny, nz = normal
     base_i = len(arr) // 8
@@ -3871,6 +3904,7 @@ def _emit_quad(arr: list, idx: list, x: int, y: int, z: int,
             arr.extend((x + cx, y + cy, z + cz, u, v, nx, ny, nz))
     else:
         swap = len(rect) > 4 and rect[4]
+        rot = rect[5] if len(rect) > 5 else 0
         u0, v0, u1, v1 = rect[0], rect[1], rect[2], rect[3]
         # 面两变轴的角点范围（4 角共面，窗 = AABB 投影）
         if ny != 0:
@@ -3890,6 +3924,14 @@ def _emit_quad(arr: list, idx: list, x: int, y: int, z: int,
             pv = (c[ib] - b0) / (b1 - b0) if b1 > b0 else 0.0
             if swap:
                 pu, pv = pv, pu
+            if rot == 0:                   # s：官方 v=z → v 翻转补偿
+                pu, pv = pu, 1.0 - pv
+            elif rot == 1:                 # n：180°
+                pu, pv = 1.0 - pu, pv
+            elif rot == 2:                 # w：转置（90°）
+                pu, pv = pv, pu
+            else:                          # e：反对称（270°）
+                pu, pv = 1.0 - pv, 1.0 - pu
             u = u0 + (u1 - u0) * pu
             v = v0 + (v1 - v0) * pv
             arr.extend((x + cx, y + cy, z + cz, u, v, nx, ny, nz))
