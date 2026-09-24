@@ -185,6 +185,49 @@ _CURSOR_W_LETTER = (
     (5.5, 27.5, 7.25, 30.5), (7.25, 30.5, 9, 25.5))
 
 
+# 群系色调 tint 材质（26.2 tintindex 语义）：官方贴图为灰度
+#（带 ±1 压缩噪声）、运行时由群系色染色；项目取固定平原草色
+# #91BD59 在图集烘培时预乘。仅收灰度草类——树叶贴图项目提取
+# 源已带色（避免双重染色）。
+_TINT_GRASS = (0x91, 0xBD, 0x59)
+_TINTED_MATS = frozenset({
+    "short grass", "tall grass top", "tall grass bottom",
+    "fern", "large fern top", "large fern bottom",
+    "vine", "vines", "grass bush", "pale moss carpet",
+})
+
+# 亮度提升材质（倍率）：绊线官方灰度 143~164 中灰，乘项目光照
+# （顶面 ~0.91）后偏暗；提亮至偏白对齐游戏内观感（半透明细线
+# 亮白可辨）。
+_BRIGHTEN_MATS = {"tripwire": 1.6}
+
+
+def _brighten(img: QImage, factor: float) -> QImage:
+    """整幅按倍率提亮（clamp 255，保留 alpha；原地修改）。"""
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.alpha():
+                img.setPixelColor(x, y, QColor(
+                    min(255, round(c.red() * factor)),
+                    min(255, round(c.green() * factor)),
+                    min(255, round(c.blue() * factor)), c.alpha()))
+    return img
+
+
+def _tint_grayscale(img: QImage, rgb) -> QImage:
+    """集合内贴图整幅乘群系色（原地修改返回自身）。"""
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.alpha():
+                img.setPixelColor(x, y, QColor(
+                    min(255, c.red() * rgb[0] // 255),
+                    min(255, c.green() * rgb[1] // 255),
+                    min(255, c.blue() * rgb[2] // 255), c.alpha()))
+    return img
+
+
 def _build_atlas():
     """纹理目录全部 png 拼 RGBA 图集；返回 (QImage, {纹理键: 槽索引})。
 
@@ -206,6 +249,11 @@ def _build_atlas():
     for i, name in enumerate(names, start=1):
         tile = QImage(os.path.join(TEX_DIR, name + ".png")).convertToFormat(
             QImage.Format.Format_RGBA8888)
+        if name in _TINTED_MATS:
+            tile = _tint_grayscale(tile, _TINT_GRASS)
+        f = _BRIGHTEN_MATS.get(name)
+        if f is not None:
+            tile = _brighten(tile, f)
         if tile.width() != _ATLAS_TEX or tile.height() != _ATLAS_TEX:
             tile = tile.scaled(_ATLAS_TEX, _ATLAS_TEX)
         cx = (i % _ATLAS_COLS) * _ATLAS_TEX

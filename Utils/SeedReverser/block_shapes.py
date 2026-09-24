@@ -910,7 +910,7 @@ def connect_arms(kind: str, nbs) -> tuple:
     if kind == "pane":
         a, b = 7 * _E, 9 * _E          # 中央 2/16 板（x/z 截面）
         tracks = ((0.0, 1.0),)         # 全高
-    el    if kind == "wall":
+    if kind == "wall":
         # 臂高矮两档（官方 template_wall_side / wall_side_tall）：
         # 邻居为整格实心（full）-> tall 满高 16/16；其余（墙/栅栏/
         # 面板/无）-> 矮 14/16（官方 wall 连接判定 isFull 同义）
@@ -927,9 +927,9 @@ def connect_arms(kind: str, nbs) -> tuple:
                 y1 = tall if nbs[i] == "full" else short
                 arms.append((x0, y0, z0, x1, y1, z1))
         return tuple(arms)
-    else:                        # post：双轨 y 6..9 / 12..15
-        a, b = 7 * _E, 9 * _E          # 2/16 截面（x/z）
-        tracks = ((12 * _E, 15 * _E), (6 * _E, 9 * _E))
+    # post：双轨 y 6..9 / 12..15（墙分支上方已独立 return）
+    a, b = 7 * _E, 9 * _E          # 2/16 截面（x/z）
+    tracks = ((12 * _E, 15 * _E), (6 * _E, 9 * _E))
     arms = []
     for (y0, y1) in tracks:
         if nbs[0] in (kind, "full"):
@@ -1085,6 +1085,9 @@ def shape_boxes(shape: str | None) -> tuple:
     if kind == "plant":
         # 农作物/花草：对角 X 非实体（build_mesh 专用 quad 路径），
         # 空 AABB = 不参与面剔除/邻居遮挡
+        return ()
+    if kind == "crop":
+        # 作物：四片竖直面（build_mesh 专用 quad 路径，同 plant）
         return ()
     if kind == "cross":
         # 落地告示牌：十字交叉板近似（AABB 无法表达斜板）

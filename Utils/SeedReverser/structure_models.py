@@ -2138,9 +2138,11 @@ _TRANSPARENT_MATS = frozenset({
 # 0<alpha<255 像素 -> 真混合管线，视口第二遍绘制）。集合由
 # .temp/scan_alpha_layers.py 按 26.2 NativeImage.computeTransparency
 # 规则离线扫描 TEX_DIR 全部贴图得出；redstone wire 按 26.2
-# 官方 force_translucent 语义并入。
+# 官方 force_translucent 语义并入。tripwire 贴图全部像素
+# alpha=107（0.42）：走主体桶会被 0.5 discard 阈值整条丢弃
+# （绊线不可见），26.2 官方同样自动判入 TRANSLUCENT 层。
 _TRANSLUCENT_MATS = frozenset({
-    "water", "ice", "nether portal",    "white stained glass", "orange stained glass",
+    "water", "ice", "nether portal", "tripwire",    "white stained glass", "orange stained glass",
     "yellow stained glass", "light gray stained glass",
     "black stained glass", "magenta_stained_glass",
     "redstone wire",
@@ -2269,6 +2271,14 @@ def _face_mat(mat: str, shape: str | None, normal: tuple,
     """
     if shape:
         kind, _, rest = shape.partition(":")
+        if kind == "twire" and mat == "tripwire":
+            # 26.2 官方绊线 = y1.5px 水平零厚面片（tripwire_n*.json
+            # 仅 up/down 两面）：薄盒的竖直侧面/端面官方不存在 ->
+            # SKIP。同时消除相邻绊线格界端面完全重合的共面互剔
+            # （否则每条臂的贴界端被吃掉，观感"只渲染一半"）。
+            if normal[1] == 0:
+                return (_SKIP_FACE, None)
+            return (None, None)
         if kind == "chest":
             if "chest" not in mat:
                 return (None, None)
@@ -2635,7 +2645,7 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
                 want[axis] = 1 if tc[axis] > bc[axis] else -1
                 if normal == tuple(want):
                     return ("redstone torch", None)
-                return _SKIP_FACE
+                return (_SKIP_FACE, None)
         if box is not None and box[1] <= 1e-9:
             if ny > 0:
                 return (None, None)               # 底板顶 = 基键
@@ -2916,13 +2926,43 @@ _NEIGHBOR_DIRS = ((0, 1, 0), (0, -1, 0), (1, 0, 0),
 # floor）回本格，且 chunk AABB 的 maxy/miny/maxz/minz 各有首
 # 角喂到。
 _PLANT_QUADS = (
-    # 面 A（x=z 对角平面）
-    (((1, 1, 1), (0, 1, 0), (0, 0, 0), (1, 0, 1)), (0, 0, 1)),
-    (((0, 0, 0), (0, 1, 0), (1, 1, 1), (1, 0, 1)), (0, 0, -1)),
+    # 面 A（x=z 对角平面，官方 cross.json 45° 旋转 + rescale 后
+    # 投影：端点 0.8/15.2 缩进，贴图整格映射）
+    (((0.95, 1, 0.95), (0.05, 1, 0.05),
+      (0.05, 0, 0.05), (0.95, 0, 0.95)), (0, 0, 1)),
+    (((0.05, 1, 0.05), (0.95, 1, 0.95),
+      (0.95, 0, 0.95), (0.05, 0, 0.05)), (0, 0, -1)),
     # 面 B（x+z=1 对角平面）
-    (((0, 1, 1), (0, 0, 1), (1, 0, 0), (1, 1, 0)), (0, 0, 1)),
-    (((1, 0, 0), (0, 0, 1), (0, 1, 1), (1, 1, 0)), (0, 0, -1)),
+    (((0.05, 1, 0.95), (0.05, 0, 0.95),
+      (0.95, 0, 0.05), (0.95, 1, 0.05)), (0, 0, 1)),
+    (((0.95, 1, 0.05), (0.95, 0, 0.05),
+      (0.05, 0, 0.95), (0.05, 1, 0.95)), (0, 0, -1)),
 )
+
+# 作物四片竖直面（26.2 crop.json：x=4/12、z=4/12；每片正反两
+# 面，法线归轴向。官方 from.y=-1 下探 1px 在此收为 y0..15：
+# 下探顶点会让 quad_pos 分桶跌入下方 chunk（遮挡域查空 -> 整片
+# 被误剔），而作物下方恒有耕地、底边共享无观感损失）。
+_CROP_QUADS = (
+    (((4 * _E16, 0.0, 0.0), (4 * _E16, 0.0, 1.0),
+      (4 * _E16, 15 * _E16, 1.0), (4 * _E16, 15 * _E16, 0.0)), (1, 0, 0)),
+    (((4 * _E16, 0.0, 1.0), (4 * _E16, 0.0, 0.0),
+      (4 * _E16, 15 * _E16, 0.0), (4 * _E16, 15 * _E16, 1.0)), (-1, 0, 0)),
+    (((12 * _E16, 0.0, 0.0), (12 * _E16, 0.0, 1.0),
+      (12 * _E16, 15 * _E16, 1.0), (12 * _E16, 15 * _E16, 0.0)), (1, 0, 0)),
+    (((12 * _E16, 0.0, 1.0), (12 * _E16, 0.0, 0.0),
+      (12 * _E16, 15 * _E16, 0.0), (12 * _E16, 15 * _E16, 1.0)), (-1, 0, 0)),
+    (((0.0, 0.0, 4 * _E16), (1.0, 0.0, 4 * _E16),
+      (1.0, 15 * _E16, 4 * _E16), (0.0, 15 * _E16, 4 * _E16)), (0, 0, 1)),
+    (((1.0, 0.0, 4 * _E16), (0.0, 0.0, 4 * _E16),
+      (0.0, 15 * _E16, 4 * _E16), (1.0, 15 * _E16, 4 * _E16)), (0, 0, -1)),
+    (((0.0, 0.0, 12 * _E16), (1.0, 0.0, 12 * _E16),
+      (1.0, 15 * _E16, 12 * _E16), (0.0, 15 * _E16, 12 * _E16)), (0, 0, 1)),
+    (((1.0, 0.0, 12 * _E16), (0.0, 0.0, 12 * _E16),
+      (0.0, 15 * _E16, 12 * _E16), (1.0, 15 * _E16, 12 * _E16)), (0, 0, -1)),
+)
+
+_FULL_UV = (0.0, 0.0, 1.0, 1.0)   # 整格 UV 窗（缩进对角片/作物片用）
 
 
 def _boxes_with_arms(vox: dict, pos: tuple, shape) -> list:
@@ -3151,10 +3191,17 @@ def build_mesh(vox: dict) -> dict:
             kind, _, shape_rest = shape.partition(":")
             if kind == "plant":
                 # 农作物/花草（SHAPE_PLANT）：对角 X 专用路径
-                # （_PLANT_QUADS 注释详述绕序/法线/UV/分桶语义），
-                # 不走 AABB 面循环
+                #（_PLANT_QUADS 注释详述绕序/法线/UV/分桶语义），
+                # 不走 AABB 面循环；顶点 0.8/15.2 缩进对齐官方
+                # cross.json 旋转投影，UV 走整格窗
                 for pq, pn in _PLANT_QUADS:
-                    _emit_quad(arr, idx, x, y, z, pq, pn)
+                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
+                continue
+            if kind == "crop":
+                # 作物（26.2 crop.json）：四片竖直面（x=4/12、
+                # z=4/12，下探 1px），8 quad，不走 AABB 面循环
+                for pq, pn in _CROP_QUADS:
+                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
                 continue
             if kind == "brewing" and shape_rest:
                 # 瓶位面片（26.2 brewing_stand_bottleN/emptyN
