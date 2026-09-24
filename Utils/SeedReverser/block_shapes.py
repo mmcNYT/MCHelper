@@ -66,11 +66,11 @@ SHAPE_PLATE = "plate"
 SHAPE_CARPET = "carpet"
 # 炼药锅/堆肥桶（四壁+底杯状）：cauldron
 SHAPE_CAULDRON = "cauldron"
-# 拉杆 lever:<贴边|up|down>（官方 lever.json：圆石底座 6x3x8 +
-# 2x10x2 杆未触发 -45° 斜置，4 段 45° 阶梯盒逼近；墙贴 = x90 家族
-# 旋转，up=floor 原始 / down=ceiling x180）
+# 拉杆 lever:<face>:<facing>:<pw>（face f=loor/w=all/c=eiling；
+# 官方 lever.json/lever_on.json：圆石底座 + 单根 ±45° 旋转杆，
+# 渲染面走 build_mesh 旋转 quad 路径，AABB 仅作剔除扫掠盒）
 SHAPE_BUTTON = "button:n"
-SHAPE_LEVER = "lever:up"
+SHAPE_LEVER = "lever:f:n:0"
 # 钟（bell:<att>）：几何与官方 1.21.11 全对齐。att =
 #   floor:x | floor:z   双柱+横梁（梁沿 x/z；官方 blockstate
 #                       floor n/s -> 梁沿 x、e/w -> 90°旋转沿 z；
@@ -701,9 +701,14 @@ def shape_from_props(name: str, props: dict) -> str | None:
         return f"button:{wall_panel_edge(facing)}"
 
     if name == "minecraft:lever":
-        if facing in ("n", "s", "e", "w"):
-            return f"lever:{wall_panel_edge(facing)}"
-        return f"lever:{facing or 'up'}"
+        # face=贴附面（floor/wall/ceiling）+ facing + powered 三段码：
+        # 杆为单根 ±45° 旋转盒（官方 lever.json/lever_on.json），
+        # 渲染面走 build_mesh 旋转 quad 路径，AABB 仅作剔除扫掠盒
+        face = {"floor": "f", "wall": "w",
+                "ceiling": "c"}.get(props.get("face", "floor"), "f")
+        f = facing if facing in ("n", "s", "e", "w") else "n"
+        pw = "1" if props.get("powered") == "true" else "0"
+        return f"lever:{face}:{f}:{pw}"
 
     if name == "minecraft:redstone_wire":
         # 连接状态官方值 none/side/up -> 段码 -/s/u
@@ -830,10 +835,11 @@ def shape_from_palette(name: str, props: dict | None) -> str | None:
 # 镜像换向表：kind -> 尾段中朝向字母的下标（0 起；不在表 = 无朝向
 # 语义不换向）。bar/col 为轴向、half/post/pane/wall/carpet 无朝向。
 _MIRROR_KIND_FACE = {
-    "torch": 0, "panel": 0, "wsign": 0, "button": 0, "lever": 0,
+    "torch": 0, "panel": 0, "wsign": 0, "button": 0,
     "stairs": 0, "fc": 0, "dhead": 0, "erod": 0, "chest": 0,
     "trapdoor": 0, "repeater": 0, "comparator": 0, "pist": 0,
     "pisth": 0, "thook": 0,
+    "lever": 1,     # lever:face:facing:pw（朝向在第 2 段）
     "bed": 1,       # bed:part:f
     "door": 2,      # door:part:op:f:hinge
 }
@@ -1011,8 +1017,12 @@ def shape_rotation(shape: str | None, rot: int) -> str | None:
         # 藤蔓多面段逐向映射（u 不随水平旋转）
         return "vine:" + "+".join(mp.get(d, d)
                                   for d in rest.split("+"))
+    if kind == "lever":
+        # 三段码：face 不随水平旋转，facing 过表，powered 原样
+        face, lf, pw = rest.split(":")
+        return f"lever:{face}:{mp.get(lf, lf)}:{pw}"
     if kind in ("stairs", "chest", "trapdoor", "panel", "button",
-                "lever", "torch", "dhead", "thook"):
+                "torch", "dhead", "thook"):
         f, _, tail = rest.partition(":")
         return f"{kind}:{mp.get(f, f)}" + (f":{tail}" if tail else "")
     return shape                                     # half/post/pane 等不变
@@ -1115,7 +1125,8 @@ def shape_boxes(shape: str | None) -> tuple:
             return ((1 - t, 5 * _E, 3 * _E, 1.0, 11 * _E, 13 * _E),)
         return ((0.0, 5 * _E, 3 * _E, t, 11 * _E, 13 * _E),)   # w
     if kind == "lever":
-        return _lever(rest)
+        face, f, pw = rest.split(":")
+        return _lever(face, f)
     if kind == "thook":
         return _tripwire_hook(rest)
     if kind == "twire":
@@ -1311,13 +1322,11 @@ def _piston_base(f: str) -> tuple:
 # ------------------------------------------------------------ 机关件
 
 
-def _lever(rest: str) -> tuple:
-    """拉杆（jar lever.json：圆石底座 (5,0,4)-(11,3,12) + 2x10x2
-    杆未触发绕 x -45° 斜置，AABB 以 4 段 45° 阶梯盒逼近斜杆）。
-
-    码语义：up = floor（原始几何）/ down = ceiling（x180）/
-    其余 = 墙贴（贴边 edge：官方 face=wall 家族 x90 旋转，f =
-    edge 反侧过 _rot_y）。"""
+def _lever(face: str, f: str) -> tuple:
+    """拉杆剔除盒（渲染面走 build_mesh 旋转 quad 路径，见
+    structure_models._lever_quads）：底座 + 斜杆 ±45° 扫掠保守盒
+    （覆盖触发/未触发两态）。码 lever:<face>:<facing>:<pw>
+    （face f=loor/w=all/c=eiling）；facing=n 基准经 _rot_y。"""
     def _x90(b):
         # (x,y,z)->(x,z,16-y)：AABB (x0,y0,z0,x1,y1,z1) 变换
         return (b[0], b[2], 1.0 - b[4], b[3], b[5], 1.0 - b[1])
@@ -1328,18 +1337,18 @@ def _lever(rest: str) -> tuple:
                 1.0 - b[2])
 
     base = (5 * _E, 0.0, 4 * _E, 11 * _E, 3 * _E, 12 * _E)
-    # 杆 45° 阶梯：底段贴底座（y 1..3、z 7..9）-> 顶段（y 7..9、
-    # z 1..3），北斜（floor/未触发朝 facing 倒）
-    segs = tuple(
-        (7 * _E, (1 + 2 * i) * _E, (7 - 2 * i) * _E,
-         9 * _E, (3 + 2 * i) * _E, (9 - 2 * i) * _E)
-        for i in range(4))
-    if rest == "up":
-        return (base,) + segs
-    if rest == "down":
-        return (_x180(base),) + tuple(_x180(b) for b in segs)
-    f = _OPPOSITE.get(rest, "s")       # 贴边 edge -> facing 反侧
-    return tuple(_rot_y(_x90(b), f) for b in (base,) + segs)
+    rod = (7 * _E, 1 * _E, 0.9 * _E, 9 * _E, 9.0 * _E, 15.1 * _E)
+    if face == "w":
+        # wall：底座竖贴墙面（y 4..12、贴 z 0），杆沿墙 ±45° 扫掠
+        base = _x90(base)
+        rod = (7 * _E, 0.9 * _E, 0.9 * _E,
+               9 * _E, 15.1 * _E, 8.1 * _E)
+    elif face == "c":
+        # ceiling：底座贴顶（y 13..16），杆 ±45° 下探扫掠
+        base = _x180(base)
+        rod = (7 * _E, 7.9 * _E, 0.9 * _E,
+               9 * _E, 15.1 * _E, 15.1 * _E)
+    return (_rot_y(base, f), _rot_y(rod, f))
 
 
 def _tripwire_hook(rest: str) -> tuple:

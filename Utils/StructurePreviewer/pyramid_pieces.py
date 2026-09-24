@@ -73,7 +73,7 @@ updateAverageGroundHeight 修正后 bb.minY 恰为 64；真实游戏 y 随
 - 绊线钩 thook:<贴边>:a（tripwire_hook_attached.json 多盒几何，
   hook/tripwire/oak planks 分区材质）；绊线 twire（0.5px 细线
   面片）；红石线 rswire（官方 multipart 几何）；拉杆
-  lever:<贴边>（lever.json 圆石底座 + 45° 阶梯斜杆）；粘性活塞
+  lever:<face>:<facing>:<pw>（圆石底座 + 45° 旋转斜杆）；粘性活塞
   pist:<f>:s；中继器 repeater:<f>；藤蔓 vine:<dir>（贴边薄面
   片）；发射器 fc:<f>（dispenser front 分面）。
 """
@@ -100,7 +100,7 @@ CHEST = ("chest", bs.SHAPE_CHEST_N)
 DISPENSER = "dispenser"           # fc:<f> 形状元组逐方块生成
 TRIPWIRE_HOOK = "tripwire hook"   # thook:<贴边>:a
 VINE = "vine"                     # vine:<dir>
-LEVER = "lever"                   # lever:<贴边>
+LEVER = "lever"                   # lever:<face>:<facing>:<pw>
 STICKY_PISTON = "sticky piston"   # pist:<f>:s
 REPEATER = "repeater"             # repeater:<f>
 TRIPWIRE = "tripwire"             # twire:<n>:<s>:<e>:<w>
@@ -109,8 +109,8 @@ REDSTONE_WIRE = "redstone wire"   # rswire:<n>:<s>:<e>:<w>（合成图：
 # N/S 臂 line0 原样 + E/W 臂 line1 官方 y270 旋转转置）
 CHISELED_STONE_BRICKS = "chiseled stone bricks"
 
-# 挂件贴边 = 局部 FACING 反侧（thook/lever 码 rest 语义，与
-# block_shapes.wall_panel_edge 同表）
+# 挂件贴边 = 局部 FACING 反侧（thook 码 rest 语义，与
+# block_shapes.wall_panel_edge 同表；lever 新码直接用伸出方向）
 _EDGE = {"n": "s", "s": "n", "e": "w", "w": "e"}
 
 # rswire/twire 段序 n:s:e:w -> 下标
@@ -666,9 +666,11 @@ def _sim_jungle(world_seed: int, ax: int, az: int, facing: int) -> _Sim:
     # L185-187：錾制石砖开关墙
     for dx in (8, 9, 10):
         s.place(dx, -2, 11, CHISELED_STONE_BRICKS)
-    # L188-191：拉杆（wall face，局部 FACING north -> 贴边 lever 码）
+    # L188-191：拉杆（wall face，局部 FACING north -> 世界伸出
+    # 方向即码 facing 段；powered=false）
     for dx in (8, 9, 10):
-        s.place(dx, -2, 12, (LEVER, "lever:" + _EDGE[s.facing_of("n")]))
+        s.place(dx, -2, 12,
+                (LEVER, "lever:w:" + s.facing_of("n") + ":0"))
     # L192-193：暗室侧壁
     s.fill_mossy(8, -3, 8, 8, -3, 10)
     s.fill_mossy(10, -3, 8, 10, -3, 10)

@@ -35,6 +35,7 @@ import random
 import struct
 import threading
 from collections import deque
+from functools import lru_cache
 
 import numpy as np
 
@@ -2965,6 +2966,258 @@ _CROP_QUADS = (
 _FULL_UV = (0.0, 0.0, 1.0, 1.0)   # 整格 UV 窗（缩进对角片/作物片用）
 
 
+# ----------------------------------------------------------------
+# 斜置件（官方 JSON rotation 语义）：墙上火把 / 拉杆 / 绊线钩。
+# 官方模型 = 元素盒绕 origin 单轴旋转 ±22.5°/±45°，而非 AABB 阶
+# 梯逼近——阶梯盒侧面看“一节一节”（火把 3 级 1px 台阶 / 拉杆 4
+# 段 45° 阶梯），旋转 quad 一次成型平滑斜杆。生成规则：基准（未
+# 旋转）面 4 角按 _emit_quad rect 分支同款轴配对插值 UV 窗，顶点
+# 随刚体旋转、UV 焊在面上（shader 1-v 翻转语义与 AABB 路径一致）；
+# 刚体变换保持 CCW 绕序（GL 背面剔除正确）。剔除：旋转件完全跳
+# 过 AABB 面循环（官方仅底座/背板 cullface 附着面，附着方向恒被
+# 贴附方块遮挡，直接不生成）；邻居遮挡语义仍走 shape_boxes 的保
+# 守扫掠盒（_lever/_torch wall/_tripwire_hook 保留为剔除盒）。
+# 分桶：出格面片（火把面片横跨 ±8px）无法由顶点推格，emit 时把
+# 方块格坐标注册进 rot_cells（build_mesh 局部表），quad_pos 回放
+# 优先查表。
+
+_C22 = math.cos(math.radians(22.5))
+_S22 = math.sin(math.radians(22.5))
+_C45 = _S45 = math.sqrt(0.5)
+_YK = {"n": 0, "e": 1, "s": 2, "w": 3}   # blockstate y 旋转次数
+
+
+def _rotx4(corners, oy, oz, c, s):
+    """5 元组角点绕 x 轴 origin(.,oy,oz) 旋转（右手，y->z 正向），
+    uv 两列原样随行（贴图焊面）。"""
+    return tuple((x, oy + (y - oy) * c - (z - oz) * s,
+                  oz + (y - oy) * s + (z - oz) * c, u, v)
+                 for (x, y, z, u, v) in corners)
+
+
+def _rotz4(corners, ox, oy, c, s):
+    """5 元组角点绕 z 轴 origin(ox,oy,.) 旋转。"""
+    return tuple((ox + (x - ox) * c - (y - oy) * s,
+                  oy + (x - ox) * s + (y - oy) * c, z, u, v)
+                 for (x, y, z, u, v) in corners)
+
+
+def _rotn_x(n, c, s):
+    return (n[0], n[1] * c - n[2] * s, n[1] * s + n[2] * c)
+
+
+def _rotn_z(n, c, s):
+    return (n[0] * c - n[1] * s, n[0] * s + n[1] * c, n[2])
+
+
+def _roty_q(cuv, nrm, k):
+    """quad/法线绕 y 轴 k×90°（blockstate y 语义：(x,z)->(1-z,x)）。"""
+    for _ in range(k & 3):
+        cuv = tuple((1.0 - z, y, x, u, v) for (x, y, z, u, v) in cuv)
+        nx, ny, nz = nrm
+        nrm = (-nz, ny, nx)
+    return cuv, nrm
+
+
+def _rx90_q(cuv, nrm):
+    """quad/法线绕格心 Rx+90°（blockstate x=90：floor->wall 面，
+    底座贴地面转贴 z=0 墙面）。"""
+    cuv = tuple((x, 1.0 - z, y, u, v) for (x, y, z, u, v) in cuv)
+    return cuv, (nrm[0], -nrm[2], nrm[1])
+
+
+def _rx180_q(cuv, nrm):
+    """quad/法线绕格心 Rx180°（floor->ceiling 面）。"""
+    cuv = tuple((x, 1.0 - y, 1.0 - z, u, v)
+                for (x, y, z, u, v) in cuv)
+    return cuv, (nrm[0], -nrm[1], -nrm[2])
+
+
+def _rot_element(b, faces, rot=None, drop=()):
+    """官方 JSON 元素 -> quad 列表（可旋转）。
+
+    b = AABB（格坐标）；faces = {face: (rect, mat)}；rot = None 或
+    ("x", oy, oz, c, s) / ("z", ox, oy, c, s)（角度带符号三角量）；
+    drop = 跳过面（cullface 附着面恒被贴附方块遮挡）。返回
+    [(cuv4, normal, mat)]，cuv4 = 4 角 (x,y,z,u,v)：UV 按未旋转
+    基准面轴配对（up/down pu 沿 x、pv 沿 z；x 面 (z,y)；z 面
+    (x,y)，与 _emit_quad rect 分支一致），旋转后焊在面上。"""
+    out = []
+    for face, (rect, mk) in faces.items():
+        if face in drop:
+            continue
+        normal = {"up": (0, 1, 0), "down": (0, -1, 0),
+                  "north": (0, 0, -1), "south": (0, 0, 1),
+                  "east": (1, 0, 0), "west": (-1, 0, 0)}[face]
+        corners = _box_face(b, normal)
+        nx, ny, nz = normal
+        if ny != 0:
+            ia, ib = 0, 2
+        elif nx != 0:
+            ia, ib = 2, 1
+        else:
+            ia, ib = 0, 1
+        a0 = min(c[ia] for c in corners)
+        a1 = max(c[ia] for c in corners)
+        b0 = min(c[ib] for c in corners)
+        b1 = max(c[ib] for c in corners)
+        u0, v0, u1, v1 = rect
+        cuv = [(c[0], c[1], c[2],
+                u0 + (u1 - u0) * ((c[ia] - a0) / (a1 - a0)
+                                  if a1 > a0 else 0.0),
+                v0 + (v1 - v0) * ((c[ib] - b0) / (b1 - b0)
+                                  if b1 > b0 else 0.0))
+               for c in corners]
+        if rot is not None:
+            ax, p, q, c_, s_ = rot
+            if ax == "x":
+                cuv = _rotx4(cuv, p, q, c_, s_)
+                normal = _rotn_x(normal, c_, s_)
+            else:
+                cuv = _rotz4(cuv, p, q, c_, s_)
+                normal = _rotn_z(normal, c_, s_)
+        out.append((tuple(cuv), normal, mk))
+    return out
+
+
+@lru_cache(maxsize=32)
+def _torch_wall_quads(edge: str, texkey: str) -> tuple:
+    """墙上火把（jar template_torch_wall，全部元素绕 (0,3.5,8)
+    z 轴 -22.5°）：贴图杆端面盒 + 两张正交整幅贴图大面片（官方
+    手法：斜杆观感 = 贴图面片平贴斜置，非细盒逼近）。原始几何 =
+    贴西墙杆朝东伸（edge=w）；edge -> y 次数 {w:0, n:1, e:2, s:3}。"""
+    rod = (-1 / 16, 3.5 / 16, 7 / 16, 1 / 16, 13.5 / 16, 9 / 16)
+    we = (-1 / 16, 3.5 / 16, 0.0, 1 / 16, 19.5 / 16, 1.0)
+    ns = (-8 / 16, 3.5 / 16, 7 / 16, 8 / 16, 19.5 / 16, 9 / 16)
+    rz = ("z", 0.0, 3.5 / 16, _C22, -_S22)
+    quads = _rot_element(rod, {"up": (_RU(7, 6, 9, 8), texkey),
+                               "down": (_RU(7, 13, 9, 15), texkey)},
+                         rz)
+    quads += _rot_element(we, {"west": (_FULL_UV, texkey),
+                               "east": (_FULL_UV, texkey)}, rz)
+    quads += _rot_element(ns, {"north": (_FULL_UV, texkey),
+                               "south": (_FULL_UV, texkey)}, rz)
+    out = []
+    for cuv, nrm, mk in quads:
+        cuv, nrm = _roty_q(cuv, nrm, {"w": 0, "n": 1, "e": 2,
+                                      "s": 3}[edge])
+        out.append((mk, cuv, nrm))
+    return tuple(out)
+
+
+@lru_cache(maxsize=64)
+def _lever_quads(face: str, f: str, pw: bool) -> tuple:
+    """拉杆（jar lever.json / lever_on.json）：圆石底座 (5,0,4)-
+    (11,3,12)（down cullface 附着面不生成）+ 2x10x2 杆绕 (8,1,8)
+    x ±45°（触发 -45 朝 facing 倒 / 未触发 +45 朝反侧）。基准 =
+    floor facing=north；wall = 绕格心 Rx90、ceiling = Rx180，再
+    y 朝向。杆贴 lever.png（侧窗 [7,6,9,16]、端窗 [7,6,9,8]）。"""
+    base = (5 / 16, -0.02 / 16, 4 / 16, 11 / 16, 2.98 / 16, 12 / 16)
+    rod = (7 / 16, 1 / 16, 7 / 16, 9 / 16, 11 / 16, 9 / 16)
+    quads = _rot_element(
+        base, {"up": (_RU(5, 4, 11, 12), "cobblestone"),
+               "north": (_RS(5, 0, 11, 3), "cobblestone"),
+               "south": (_RS(5, 0, 11, 3), "cobblestone"),
+               "west": (_RS(4, 0, 12, 3), "cobblestone"),
+               "east": (_RS(4, 0, 12, 3), "cobblestone")})
+    quads += _rot_element(
+        rod, {"up": (_RU(7, 6, 9, 8), "lever"),
+              "north": (_RS(7, 6, 9, 16), "lever"),
+              "south": (_RS(7, 6, 9, 16), "lever"),
+              "west": (_RS(7, 6, 9, 16), "lever"),
+              "east": (_RS(7, 6, 9, 16), "lever")},
+        ("x", 1 / 16, 8 / 16, _C45,
+         -_S45 if pw else _S45))
+    if face == "w":
+        quads = [(*_rx90_q(c, n), m) for (c, n, m) in quads]
+    elif face == "c":
+        quads = [(*_rx180_q(c, n), m) for (c, n, m) in quads]
+    out = []
+    for cuv, nrm, mk in quads:
+        cuv, nrm = _roty_q(cuv, nrm, _YK[f])
+        out.append((mk, cuv, nrm))
+    return tuple(out)
+
+
+@lru_cache(maxsize=64)
+def _thook_quads(edge: str, attached: bool) -> tuple:
+    """绊线钩（jar tripwire_hook[_attached].json）：oak 背板
+    (6,1,14)-(10,9,16)（south cullface 附着面不生成）+ 横臂 +
+    钩件。未附着：横臂 +45° 绕 (8,6,14)、钩件 -45° 绕 (8,6,5.2)；
+    attached：横臂平置、钩件 -22.5° 绕 (8,4.2,6.7)、绊线伸出段
+    -22.5° 绕 (8,0,0)（官方 rescale 忽略，0.5px 细线无感）。原
+    始几何 = 贴南墙（edge=s）；edge -> y 次数 {s:0,w:1,n:2,e:3}。
+    贴图：wood=oak planks、hook=tripwire hook、线=tripwire。"""
+    wood = "oak planks"
+    hook = "tripwire hook"
+    back = (6 / 16, 1 / 16, 14 / 16, 10 / 16, 9 / 16, 1.0)
+    arm = (7.4 / 16, 5.2 / 16, 10 / 16, 8.8 / 16, 6.8 / 16, 14 / 16)
+    arm_uv = {"down": (_RS(7, 9, 9, 14), wood),
+              "up": (_RU(7, 2, 9, 7), wood),
+              "north": (_RS(7, 9, 9, 11), wood),
+              "south": (_RS(7, 9, 9, 11), wood),
+              "west": (_RS(2, 9, 7, 11), wood),
+              "east": (_RS(9, 9, 14, 11), wood)}
+    hook_uv = {"down": (_RS(5, 3, 11, 9), hook),
+               "up": (_RU(5, 3, 11, 9), hook),
+               "north": (_RS(5, 3, 11, 4), hook),
+               "south": (_RS(5, 8, 11, 9), hook),
+               "west": (_RS(5, 8, 11, 9), hook),
+               "east": (_RS(5, 3, 11, 4), hook)}
+    back_uv = {"down": (_RS(6, 14, 10, 16), wood),
+               "up": (_RU(6, 0, 10, 2), wood),
+               "north": (_RS(6, 7, 10, 15), wood),
+               "west": (_RS(0, 7, 2, 15), wood),
+               "east": (_RS(14, 7, 16, 15), wood)}
+    if attached:
+        hkb = (6.2 / 16, 4.2 / 16, 6.7 / 16,
+               9.8 / 16, 5 / 16, 10.3 / 16)
+        wire = (7.75 / 16, 1.5 / 16, 0.0,
+                8.25 / 16, 1.5 / 16, 6.7 / 16)
+        wire_uv = {"up": (_RU(0, 6, 16, 8), "tripwire"),
+                   "down": (_RS(0, 6, 16, 8), "tripwire")}
+        quads = (_rot_element(back, back_uv, drop=("south",))
+                 + _rot_element(arm, arm_uv, drop=("south",))
+                 + _rot_element(hkb, hook_uv,
+                                ("x", 4.2 / 16, 6.7 / 16,
+                                 _C22, -_S22))
+                 + _rot_element(wire, wire_uv,
+                                ("x", 0.0, 0.0, _C22, -_S22)))
+    else:
+        hkb = (6.2 / 16, 3.8 / 16, 7.9 / 16,
+               9.8 / 16, 4.6 / 16, 11.5 / 16)
+        quads = (_rot_element(back, back_uv, drop=("south",))
+                 + _rot_element(arm, arm_uv,
+                                ("x", 6 / 16, 14 / 16, _C45, _S45))
+                 + _rot_element(hkb, hook_uv,
+                                ("x", 6 / 16, 5.2 / 16,
+                                 _C45, -_S45)))
+    out = []
+    for cuv, nrm, mk in quads:
+        cuv, nrm = _roty_q(cuv, nrm, {"s": 0, "w": 1, "n": 2,
+                                      "e": 3}[edge])
+        out.append((mk, cuv, nrm))
+    return tuple(out)
+
+
+def _emit_rot_quads(slot_verts, slot_index, rot_cells, pos, quads):
+    """旋转 quad 入槽（材质键按 quad 自带，可异于方块默认键，如
+    拉杆底座 cobblestone / 杆 lever 异槽）；每 quad 注册方块格坐
+    标到 rot_cells（键 = (材质, 字节偏移)），出格面片的 quad_pos
+    由回放查表回本格。"""
+    x, y, z = pos
+    for mk, cuv, nrm in quads:
+        arr = slot_verts.setdefault(mk, [])
+        idx = slot_index.setdefault(mk, [])
+        base = len(arr)
+        v0 = base // 8
+        for (cx, cy, cz, u, v) in cuv:
+            arr.extend((x + cx, y + cy, z + cz, u, v,
+                        nrm[0], nrm[1], nrm[2]))
+        idx.extend((v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3))
+        rot_cells[(mk, base)] = pos
+
+
 def _boxes_with_arms(vox: dict, pos: tuple, shape) -> list:
     """某位置形状的完整 AABB 列表（post/pane/wall 含连通臂）。
 
@@ -3149,6 +3402,7 @@ def build_mesh(vox: dict) -> dict:
     """
     slot_verts: dict = {}
     slot_index: dict = {}
+    rot_cells: dict = {}   # (材质, 字节偏移) -> 方块格（旋转 quad 分桶）
     # 体素值级缓存（键 = 体素值，str 或 (mat, shape) 元组，均可哈希）
     v_ms: dict = {}        # v -> (mat, shape)                （_mat_shape）
     v_boxes: dict = {}     # v -> 基础 AABB 元组（不含连通臂）（shape_boxes）
@@ -3202,6 +3456,27 @@ def build_mesh(vox: dict) -> dict:
                 # z=4/12，下探 1px），8 quad，不走 AABB 面循环
                 for pq, pn in _CROP_QUADS:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
+                continue
+            if kind == "torch" and shape_rest in ("n", "s", "e", "w"):
+                # 墙上火把（官方 template_torch_wall 旋转面片，
+                # 不走 AABB 面循环；阶梯盒仅作剔除/遮挡）
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z),
+                                _torch_wall_quads(shape_rest, mat))
+                continue
+            if kind == "lever" and shape_rest.count(":") == 2:
+                # 拉杆：单根 ±45° 旋转杆（lever.json/lever_on.json）
+                face, lf, pw = shape_rest.split(":")
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z),
+                                _lever_quads(face, lf, pw == "1"))
+                continue
+            if kind == "thook":
+                # 绊线钩：官方斜置钩件/横臂/绊线段（旋转 quad）
+                edge, _, att = shape_rest.partition(":")
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z),
+                                _thook_quads(edge, att == "a"))
                 continue
             if kind == "brewing" and shape_rest:
                 # 瓶位面片（26.2 brewing_stand_bottleN/emptyN
@@ -3350,6 +3625,12 @@ def build_mesh(vox: dict) -> dict:
     for qi, mat in enumerate(slot_mat):
         vv = slot_verts[mat]
         for k in range(0, len(vv), 32):      # 32 浮点 = 1 quad
+            cell = rot_cells.get((mat, k))
+            if cell is not None:
+                # 旋转 quad：格坐标 emit 时注册（火把面片出格 ±8px，
+                # 顶点推格会落到邻格 chunk）
+                quad_pos.append(cell)
+                continue
             nxv, nyv, nzv = vv[k + 5], vv[k + 6], vv[k + 7]
             gx = math.floor(min(vv[k], vv[k + 8], vv[k + 16],
                                 vv[k + 24]))
