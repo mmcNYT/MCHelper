@@ -927,9 +927,12 @@ def connect_arms(kind: str, nbs) -> tuple:
                 y1 = tall if nbs[i] == "full" else short
                 arms.append((x0, y0, z0, x1, y1, z1))
         return tuple(arms)
-    # post：双轨 y 6..9 / 12..15（墙分支上方已独立 return）
-    a, b = 7 * _E, 9 * _E          # 2/16 截面（x/z）
-    tracks = ((12 * _E, 15 * _E), (6 * _E, 9 * _E))
+    # post：双轨 y 6..9 / 12..15（墙分支上方已独立 return；pane 分支
+    # 已设全高 tracks，勿覆盖——7f5b52e 曾因无条件重赋值把玻璃板臂
+    # 压成栅栏双轨，观感"只剩边框碎片"，此处条件保护修复）
+    if kind != "pane":
+        a, b = 7 * _E, 9 * _E          # 2/16 截面（x/z）
+        tracks = ((12 * _E, 15 * _E), (6 * _E, 9 * _E))
     arms = []
     for (y0, y1) in tracks:
         if nbs[0] in (kind, "full"):
