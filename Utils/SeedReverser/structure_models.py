@@ -3052,6 +3052,18 @@ def _rotn_z(n, c, s):
     return (n[0] * c - n[1] * s, n[0] * s + n[1] * c, n[2])
 
 
+def _roty4(corners, ox, oz, c, s):
+    """5 元组角点绕 y 轴 origin(ox,.,oz) 旋转（俯视顺时针，与
+    _roty_q 的 90° 语义同向：c=0,s=1 时 (x,z)->(1-z,x)）。"""
+    return tuple((ox + (x - ox) * c - (z - oz) * s,
+                  y, oz + (x - ox) * s + (z - oz) * c, u, v)
+                 for (x, y, z, u, v) in corners)
+
+
+def _rotn_y(n, c, s):
+    return (n[0] * c - n[2] * s, n[1], n[0] * s + n[2] * c)
+
+
 def _roty_q(cuv, nrm, k):
     """quad/法线绕 y 轴 k×90°（blockstate y 语义：(x,z)->(1-z,x)）。"""
     for _ in range(k & 3):
@@ -3079,11 +3091,12 @@ def _rot_element(b, faces, rot=None, drop=()):
     """官方 JSON 元素 -> quad 列表（可旋转）。
 
     b = AABB（格坐标）；faces = {face: (rect, mat)}；rot = None 或
-    ("x", oy, oz, c, s) / ("z", ox, oy, c, s)（角度带符号三角量）；
-    drop = 跳过面（cullface 附着面恒被贴附方块遮挡）。返回
-    [(cuv4, normal, mat)]，cuv4 = 4 角 (x,y,z,u,v)：UV 按未旋转
-    基准面轴配对（up/down pu 沿 x、pv 沿 z；x 面 (z,y)；z 面
-    (x,y)，与 _emit_quad rect 分支一致），旋转后焊在面上。"""
+    ("x", oy, oz, c, s) / ("z", ox, oy, c, s) / ("y", ox, oz, c, s)
+    （角度带符号三角量）；drop = 跳过面（cullface 附着面恒被贴附
+    方块遮挡）。返回 [(cuv4, normal, mat)]，cuv4 = 4 角 (x,y,z,u,v)：
+    UV 按未旋转基准面轴配对（up/down pu 沿 x、pv 沿 z；x 面
+    (z,y)；z 面 (x,y)，与 _emit_quad rect 分支一致），旋转后焊在
+    面上。"""
     out = []
     for face, (rect, mk) in faces.items():
         if face in drop:
@@ -3115,6 +3128,9 @@ def _rot_element(b, faces, rot=None, drop=()):
             if ax == "x":
                 cuv = _rotx4(cuv, p, q, c_, s_)
                 normal = _rotn_x(normal, c_, s_)
+            elif ax == "y":
+                cuv = _roty4(cuv, p, q, c_, s_)
+                normal = _rotn_y(normal, c_, s_)
             else:
                 cuv = _rotz4(cuv, p, q, c_, s_)
                 normal = _rotn_z(normal, c_, s_)
@@ -3240,6 +3256,32 @@ def _thook_quads(edge: str, attached: bool) -> tuple:
                                       "e": 3}[edge])
         out.append((mk, cuv, nrm))
     return tuple(out)
+
+
+@lru_cache(maxsize=8)
+def _hchain_quads(mat: str, hang: bool) -> tuple:
+    """灯笼链节（官方 template_lantern / template_hanging_lantern
+    元素3/4：两片绕 (8,8,8) y+45° 斜置零厚片，贴 #lantern 链环
+    窗；站立 y9..11 横置小环，挂起 y10..16 竖置贴格顶）。
+    官方 FaceInfo 顶点配对下 north/east 反序 uv 与 south/west 归
+    一为同一 rect（元素 min 角 ↔ maxU；shader v = 1-贴图y/16）。"""
+    if hang:
+        rect_a = (11 / 16, 1 - 5 / 16, 14 / 16, 1 - 1 / 16)
+        rect_b = (14 / 16, 1 - 12 / 16, 11 / 16, 1 - 6 / 16)
+        pa = (6.5 / 16, 11 / 16, 8 / 16, 9.5 / 16, 15 / 16, 8 / 16)
+        pb = (8 / 16, 10 / 16, 6.5 / 16, 8 / 16, 1.0, 9.5 / 16)
+    else:
+        rect_a = (11 / 16, 1 - 3 / 16, 14 / 16, 1 - 1 / 16)
+        rect_b = (14 / 16, 1 - 12 / 16, 11 / 16, 1 - 10 / 16)
+        pa = (6.5 / 16, 9 / 16, 8 / 16, 9.5 / 16, 11 / 16, 8 / 16)
+        pb = (8 / 16, 9 / 16, 6.5 / 16, 8 / 16, 11 / 16, 9.5 / 16)
+    quads = _rot_element(
+        pa, {"north": (rect_a, mat), "south": (rect_a, mat)},
+        ("y", 0.5, 0.5, _C45, _S45))
+    quads += _rot_element(
+        pb, {"west": (rect_b, mat), "east": (rect_b, mat)},
+        ("y", 0.5, 0.5, _C45, _S45))
+    return tuple((mk, cuv, nrm) for (cuv, nrm, mk) in quads)
 
 
 @lru_cache(maxsize=8)
@@ -3578,6 +3620,16 @@ def build_mesh(vox: dict) -> dict:
                     else:
                         r = _BREW_BOTTLE_R_EMPTY
                     _emit_quad(arr, idx, x, y, z, pq, pn, r)
+            if kind == "lantern" and shape_rest == "h":
+                # 挂起灯笼链节（官方 template_hanging_lantern 元
+                # 素3/4：两片 y45° 斜置链环贴格顶；主体/顶盖仍
+                # 走下方 AABB 面循环）
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z), _hchain_quads(mat, True))
+            elif kind == "lantern" and not shape_rest:
+                # 站立灯笼顶链节（官方 template_lantern 元素3/4）
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z), _hchain_quads(mat, False))
             if kind in ("post", "pane", "wall"):
                 # 连通臂随四向邻居变化：逐位现算（基础 AABB 复用缓存）
                 boxes = list(base_boxes)
