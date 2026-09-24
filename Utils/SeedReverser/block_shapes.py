@@ -513,12 +513,14 @@ def _piston_head(facing: str):
 
 
 def _lectern():
-    """讲台。官方 lectern.json：底座 16x2x16 + 立柱 8x13x8 +
-    顶板（官方斜置 -22.5°，AABB 近似为水平薄板 16x4x13 y12..16
-    贴柱顶前伸）。"""
+    """讲台剔除盒（渲染面走 build_mesh 旋转 quad 路径，见
+    structure_models._lectern_quads）：官方 lectern.json 三元素，
+    顶板绕 (8,8,8) x -22.5° 斜置——盒为其旋转后包围盒（后缘翘出
+    格顶至 18.45px、前缘降至 9.79px、z 收至 0.32..13.86px）。"""
     return ((0.0, 0.0, 0.0, 1.0, 2 * _E, 1.0),       # 底座
             (4 * _E, 2 * _E, 4 * _E, 12 * _E, 15 * _E, 12 * _E),  # 柱
-            (0.0, 12 * _E, 3 * _E, 1.0, 16 * _E, 16 * _E))  # 顶板
+            (0.0, 9.79 * _E, 0.32 * _E,
+             1.0, 18.45 * _E, 13.86 * _E))           # 斜板包围盒
 
 
 # ---------------------------------------------------------------- 解析
@@ -814,7 +816,9 @@ def shape_from_props(name: str, props: dict) -> str | None:
                                 else "")
 
     if name == "minecraft:lectern":
-        return SHAPE_LECTERN
+        # facing 段供 _face_mat/_lectern_quads 分流正面（n 基准）
+        f = facing if facing in ("n", "s", "e", "w") else "n"
+        return f"lectern:{f}"
 
     return None
 
@@ -838,7 +842,7 @@ _MIRROR_KIND_FACE = {
     "torch": 0, "panel": 0, "wsign": 0, "button": 0,
     "stairs": 0, "fc": 0, "dhead": 0, "erod": 0, "chest": 0,
     "trapdoor": 0, "repeater": 0, "comparator": 0, "pist": 0,
-    "pisth": 0, "thook": 0,
+    "pisth": 0, "thook": 0, "lectern": 0,
     "lever": 1,     # lever:face:facing:pw（朝向在第 2 段）
     "bed": 1,       # bed:part:f
     "door": 2,      # door:part:op:f:hinge
@@ -997,7 +1001,7 @@ def shape_rotation(shape: str | None, rot: int) -> str | None:
         if f in ("u", "d"):
             return shape                                 # 竖直朝向不随 R 旋转
         return f"fc:{mp.get(f, f)}" + (f":{lit}" if lit else "")
-    if kind in ("repeater", "comparator", "pist", "pisth"):
+    if kind in ("repeater", "comparator", "pist", "pisth", "lectern"):
         f, _, tail = rest.partition(":")
         if f in ("u", "d"):
             return shape                     # 竖直朝向不随 R 旋转
@@ -1262,23 +1266,18 @@ def _diode(rest: str, comparator: bool) -> tuple:
     if comparator:
         boxes.append((4 * _E, 2 * _E, 11 * _E, 6 * _E, 7 * _E, 13 * _E))
         boxes.append((10 * _E, 2 * _E, 11 * _E, 12 * _E, 7 * _E, 13 * _E))
-        boxes.append((7 * _E, 2 * _E, 2 * _E, 9 * _E, 5 * _E, 4 * _E))
+        # 输出矮火把（官方 y 2..4，侧窗 [7,6,9,8]）；减法模式由
+        # 下方 3 光圈薄片替换（comparator_subtract.json）
+        boxes.append((7 * _E, 2 * _E, 2 * _E, 9 * _E, 4 * _E, 4 * _E))
         if len(parts) > 1 and parts[1] == "t":
-            # 减法光圈 6 薄片（facing=n 基准）：底 y2.5、顶 y5.5、
-            # 北 z1.5、南 z4.5、西 x6.5、东 x9.5（可见面 = 靠火把侧）
-            t = _DUST_T
-            boxes.append((6.5 * _E, 2.5 * _E - t, 1.5 * _E,
-                          9.5 * _E, 2.5 * _E, 4.5 * _E))
-            boxes.append((6.5 * _E, 5.5 * _E, 1.5 * _E,
-                          9.5 * _E, 5.5 * _E + t, 4.5 * _E))
-            boxes.append((6.5 * _E, 2.5 * _E, 1.5 * _E - t,
-                          9.5 * _E, 5.5 * _E, 1.5 * _E))
-            boxes.append((6.5 * _E, 2.5 * _E, 4.5 * _E,
-                          9.5 * _E, 5.5 * _E, 4.5 * _E + t))
-            boxes.append((6.5 * _E - t, 2.5 * _E, 1.5 * _E,
-                          6.5 * _E, 5.5 * _E, 4.5 * _E))
-            boxes.append((9.5 * _E, 2.5 * _E, 1.5 * _E,
-                          9.5 * _E + t, 5.5 * _E, 4.5 * _E))
+            # 减法光圈（官方 comparator_subtract.json：3 元素替换
+            # 输出火把柱，#lit 贴图窗 [6,5,10,9]）：
+            #   顶片 (7,5,2)-(9,5,4) 仅 up [7,6,9,8]
+            #   x 片 (7,2,1)-(9,6,5) 仅 w/e
+            #   z 片 (6,2,2)-(10,6,4) 仅 n/s
+            boxes.append((7 * _E, 5 * _E, 2 * _E, 9 * _E, 5 * _E, 4 * _E))
+            boxes.append((7 * _E, 2 * _E, 1 * _E, 9 * _E, 6 * _E, 5 * _E))
+            boxes.append((6 * _E, 2 * _E, 2 * _E, 10 * _E, 6 * _E, 4 * _E))
     else:
         try:
             delay = int(parts[1]) if len(parts) > 1 else 1

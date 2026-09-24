@@ -286,7 +286,7 @@ _MAT_MAP = {
     "minecraft:carved_pumpkin": "carved pumpkin",
     "minecraft:bookshelf": "bookshelf",
     "minecraft:chiseled_bookshelf": "oak planks",
-    "minecraft:lectern": "oak planks",
+    "minecraft:lectern": "lectern base",
     "minecraft:composter": "composter side",
     "minecraft:loom": "oak planks",
     # -- 功能方块 --
@@ -2631,28 +2631,41 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
         powered = len(parts) > 2 and parts[2] == "1"
         if kind == "comparator" and box is not None \
                 and len(parts) > 1 and parts[1] == "t":
-            dims = (box[3] - box[0], box[4] - box[1], box[5] - box[2])
-            if min(dims) <= bs._DUST_T + 1e-9:
-                # 光圈薄片：可见面朝输出火把中心（基准 (8,3.5,3)/16
-                # 经同一 _rot_y 转 facing）
-                axis = dims.index(min(dims))
-                tb = bs._rot_y((7 * _E16, 2 * _E16, 2 * _E16,
-                                9 * _E16, 5 * _E16, 4 * _E16), f)
-                tc = ((tb[0] + tb[3]) / 2, (tb[1] + tb[4]) / 2,
-                      (tb[2] + tb[5]) / 2)
-                bc = ((box[0] + box[3]) / 2, (box[1] + box[4]) / 2,
-                      (box[2] + box[5]) / 2)
-                want = [0, 0, 0]
-                want[axis] = 1 if tc[axis] > bc[axis] else -1
-                if normal == tuple(want):
-                    return ("redstone torch", None)
-                return (_SKIP_FACE, None)
+            # 减法光圈三薄片（官方 comparator_subtract.json：facing=n
+            # 基准盒经 _rot_y 转向；仅可见面出图 #lit，其余 SKIP）：
+            #   顶片 (7,5,2)-(9,5,4) up [7,6,9,8]
+            #   x 片 (7,2,1)-(9,6,5) w/e [6,5,10,9]
+            #   z 片 (6,2,2)-(10,6,4) n/s [6,5,10,9]
+            for ref, wn, rect in (
+                    ((7, 5, 2, 9, 5, 4), (0, 1, 0), _RU(7, 6, 9, 8)),
+                    ((7, 2, 1, 9, 6, 5), (1, 0, 0), _RS(6, 5, 10, 9)),
+                    ((7, 2, 1, 9, 6, 5), (-1, 0, 0), _RS(6, 5, 10, 9)),
+                    ((6, 2, 2, 10, 6, 4), (0, 0, 1), _RS(6, 5, 10, 9)),
+                    ((6, 2, 2, 10, 6, 4), (0, 0, -1), _RS(6, 5, 10, 9))):
+                rb = bs._rot_y(tuple(v * _E16 for v in ref), f)
+                if all(abs(box[i] - rb[i]) < 1e-6
+                       for i in range(6)) and normal == wn:
+                    return ("redstone torch", rect)
+            return (_SKIP_FACE, None)
         if box is not None and box[1] <= 1e-9:
+            # 底板：up = 基键（#top 全幅）；down = #slab 全幅（贴
+            # 附面主循环剔）；侧 = #slab 底部 2px 条窗
             if ny > 0:
-                return (None, None)               # 底板顶 = 基键
-            return ("smooth stone", None)         # 底板侧/底
-        return ("redstone torch" if powered
-                else "redstone torch off", None)  # 火把柱
+                return (None, None)
+            if ny < 0:
+                return ("smooth stone", None)
+            return ("smooth stone", _RS(0, 14, 16, 16))
+        # 火把柱：#unlit/#lit（powered 亮/灭，窗相同）；侧窗高柱
+        # [7,6,9,11] / 比较器输出矮柱（y1=4px）[7,6,9,8]；顶
+        # [7,6,9,8]、底（贴底板恒剔）[7,13,9,15]
+        mk = "redstone torch" if powered else "redstone torch off"
+        if ny > 0:
+            return (mk, _RU(7, 6, 9, 8))
+        if ny < 0:
+            return (mk, _RS(7, 13, 9, 15))
+        if box is not None and box[4] <= 4 * _E16 + 1e-9:
+            return (mk, _RS(7, 6, 9, 8))
+        return (mk, _RS(7, 6, 9, 11))
     if kind == "sculk":
         # sculk_sensor.json：底座 #side/#top/#bottom + 触须 #tendrils
         if box is not None and box[1] <= 1e-9 \
@@ -2877,7 +2890,8 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
             return (_SKIP_FACE, None)
         return ("piston_side", _RS(16, 4, 0, 0))
     if kind == "lectern":
-        # 讲台用橡木板近似：全面基键（mat = oak planks）
+        # 讲台底板/立柱已全部走旋转 quad 路径（材质自带），本分
+        # 支仅为旧码 "lectern"（无 facing 段）兕底，不应到达
         return (None, None)
     return (None, None)
 
@@ -3200,6 +3214,45 @@ def _thook_quads(edge: str, attached: bool) -> tuple:
     return tuple(out)
 
 
+@lru_cache(maxsize=8)
+def _lectern_quads(f: str) -> tuple:
+    """讲台（jar lectern.json）：底板 (0,0,0)-(16,2,16)（down
+    cullface 附着面不生成；#base 侧面分窗）+ 立柱 (4,2,4)-
+    (12,15,12)（#front 前后半窗、#sides 侧窗；官方柱无 up/down
+    面）+ 顶板 (0,12,3)-(16,16,16) 绕 (8,8,8) x -22.5°（#top 顶
+    面、#sides 侧面、#bottom 底面；官方 0.0125px 防共面缩进忽
+    略）。基准 facing=n；柱侧窗官方 rotation 90 在噪点木纹下忽
+    略。"""
+    base = (0.0, 0.0, 0.0, 1.0, 2 / 16, 1.0)
+    col = (4 / 16, 2 / 16, 4 / 16, 12 / 16, 15 / 16, 12 / 16)
+    top = (0.0, 12 / 16, 3 / 16, 1.0, 1.0, 1.0)
+    quads = _rot_element(
+        base, {"up": (_RU(0, 0, 16, 16), "lectern base"),
+               "north": (_RS(0, 14, 16, 16), "lectern base"),
+               "south": (_RS(0, 6, 16, 8), "lectern base"),
+               "west": (_RS(0, 6, 16, 8), "lectern base"),
+               "east": (_RS(0, 6, 16, 8), "lectern base")},
+        drop=("down",))
+    quads += _rot_element(
+        col, {"north": (_RS(0, 0, 8, 13), "lectern front"),
+              "south": (_RS(8, 3, 16, 16), "lectern front"),
+              "east": (_RS(2, 8, 15, 16), "lectern sides"),
+              "west": (_RS(2, 8, 15, 16), "lectern sides")})
+    quads += _rot_element(
+        top, {"north": (_RS(0, 0, 16, 4), "lectern sides"),
+              "east": (_RS(0, 4, 13, 8), "lectern sides"),
+              "south": (_RS(0, 4, 16, 8), "lectern sides"),
+              "west": (_RS(0, 4, 13, 8), "lectern sides"),
+              "up": (_RU(0, 1, 16, 14), "lectern top"),
+              "down": (_RS(0, 0, 16, 13), "oak planks")},
+        ("x", 8 / 16, 8 / 16, _C22, -_S22))
+    out = []
+    for cuv, nrm, mk in quads:
+        cuv, nrm = _roty_q(cuv, nrm, _YK[f])
+        out.append((mk, cuv, nrm))
+    return tuple(out)
+
+
 def _emit_rot_quads(slot_verts, slot_index, rot_cells, pos, quads):
     """旋转 quad 入槽（材质键按 quad 自带，可异于方块默认键，如
     拉杆底座 cobblestone / 杆 lever 异槽）；每 quad 注册方块格坐
@@ -3456,6 +3509,14 @@ def build_mesh(vox: dict) -> dict:
                 # z=4/12，下探 1px），8 quad，不走 AABB 面循环
                 for pq, pn in _CROP_QUADS:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
+                continue
+            if kind == "lectern":
+                # 讲台（官方 lectern.json 三元素全走旋转 quad：底
+                # 板/立柱轴对齐 + 顶板 -22.5° 斜置）
+                lf = shape_rest if shape_rest in ("n", "s", "e", "w") \
+                    else "n"
+                _emit_rot_quads(slot_verts, slot_index, rot_cells,
+                                (x, y, z), _lectern_quads(lf))
                 continue
             if kind == "torch" and shape_rest in ("n", "s", "e", "w"):
                 # 墙上火把（官方 template_torch_wall 旋转面片，
