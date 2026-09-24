@@ -535,12 +535,15 @@ def shape_from_props(name: str, props: dict) -> str | None:
     half = props.get("half", "")
     typ = props.get("type", "")
 
-    # 作物/小花/细茎/枯灌木/蕨/蘑菇/海泡菜（村庄农田与草皮装饰、
-    # bastion 灵魂沙田、trial 苔藓角落；透明十字，FS discard 镂空；
-    # tall_grass/large_fern 上下半同形）
-    if name.endswith(("_sapling", "_stem")) or name in (
+    # 作物（官方 crop.json 四片竖直面 x=4/12、z=4/12，下探 1px）
+    # 与花草（cross 对角片）分流：crop 走 build_mesh 专用四片路径
+    if name.endswith("_stem") or name in (
             "minecraft:wheat", "minecraft:carrots", "minecraft:potatoes",
-            "minecraft:beetroots", "minecraft:nether_wart",
+            "minecraft:beetroots"):
+        return "crop"
+
+    if name.endswith("_sapling") or name in (
+            "minecraft:nether_wart",
             "minecraft:red_mushroom", "minecraft:brown_mushroom",
             "minecraft:sea_pickle",
             "minecraft:poppy", "minecraft:dandelion",
@@ -713,11 +716,22 @@ def shape_from_props(name: str, props: dict) -> str | None:
 
     if name == "minecraft:repeater":
         f = facing if facing in ("n", "s", "e", "w") else "n"
-        return f"repeater:{f}"
+        # delay 1..4：官方 repeater_Ntick.json 后火把柱 z=4+2*delay；
+        # powered 仅火把纹理差异（亮/灭）
+        try:
+            delay = max(1, min(4, int(props.get("delay", "1") or 1)))
+        except ValueError:
+            delay = 1
+        pw = ":1" if props.get("powered") == "true" else ":0"
+        return f"repeater:{f}:{delay}{pw}"
 
     if name == "minecraft:comparator":
         f = facing if facing in ("n", "s", "e", "w") else "n"
-        return f"comparator:{f}"
+        # mode：官方 comparator_subtract.json 附加输出火把光圈 6 薄片
+        #（几何差异）；powered 亮/灭纹理
+        mode = "t" if props.get("mode") == "subtract" else "c"
+        pw = "1" if props.get("powered") == "true" else "0"
+        return f"comparator:{f}:{mode}:{pw}"
 
     if name == "minecraft:sculk_sensor":
         # 无朝向属性（sculk_sensor_phase 只影响纹理）
@@ -763,7 +777,13 @@ def shape_from_props(name: str, props: dict) -> str | None:
         return SHAPE_CANDLE
 
     if name == "minecraft:brewing_stand":
-        return SHAPE_BREWING
+        # brewing:<b0><b1><b2>：三瓶位 has_bottle_N（26.2 官方
+        # multipart：主模型 + bottleN/emptyN 条件叠加；N=0 东直片、
+        # 1 西南斜片、2 西北斜片；1=满瓶左半图 0=空瓶右半图）
+        bottles = "".join(
+            "1" if props.get(f"has_bottle_{i}") == "true" else "0"
+            for i in range(3))
+        return f"brewing:{bottles}"
 
     if name.startswith("minecraft:potted_"):
         return SHAPE_FLOWERPOT
@@ -890,9 +910,23 @@ def connect_arms(kind: str, nbs) -> tuple:
     if kind == "pane":
         a, b = 7 * _E, 9 * _E          # 中央 2/16 板（x/z 截面）
         tracks = ((0.0, 1.0),)         # 全高
-    elif kind == "wall":
+    el    if kind == "wall":
+        # 臂高矮两档（官方 template_wall_side / wall_side_tall）：
+        # 邻居为整格实心（full）-> tall 满高 16/16；其余（墙/栅栏/
+        # 面板/无）-> 矮 14/16（官方 wall 连接判定 isFull 同义）
         a, b = 5 * _E, 11 * _E         # 6/16 宽（x/z 截面）
-        tracks = ((0.0, 14 * _E),)     # 高 14/16
+        tall = 1.0
+        short = 14 * _E
+        arms = []
+        for i, (x0, y0, z0, x1, y1, z1) in enumerate((
+                (a, 0.0, 0.0, b, short, a),
+                (a, 0.0, b, b, short, 1.0),
+                (b, 0.0, a, 1.0, short, b),
+                (0.0, 0.0, a, a, short, b))):
+            if nbs[i] in (kind, "full"):
+                y1 = tall if nbs[i] == "full" else short
+                arms.append((x0, y0, z0, x1, y1, z1))
+        return tuple(arms)
     else:                        # post：双轨 y 6..9 / 12..15
         a, b = 7 * _E, 9 * _E          # 2/16 截面（x/z）
         tracks = ((12 * _E, 15 * _E), (6 * _E, 9 * _E))
@@ -1040,8 +1074,6 @@ def shape_boxes(shape: str | None) -> tuple:
         return _chest(typ, f)
     if kind == "barrel":
         return _barrel()
-    if kind == "bed":
-        return ((0.0, 0.0, 0.0, 1.0, 9 * _E, 1.0),)
     if kind == "layer":
         return ((0.0, 0.0, 0.0, 1.0, 13 * _E, 1.0),)
     if kind == "plate":
@@ -1098,8 +1130,20 @@ def shape_boxes(shape: str | None) -> tuple:
         f, _, w = rest.partition(":")
         return _dragon_head(w == "w", f if f in ("n", "s", "e", "w") else "n")
     if kind == "bed":
-        # 分半床：几何同整床 9/16 高（顶面纹理 rect 分枕头/毯区）
-        return ((0.0, 0.0, 0.0, 1.0, 9 * _E, 1.0),)
+        # 分半床（26.2 template_bed_foot/head.json）：床板 y3..9 悬空
+        # + 两腿 y0..3（head 在床头端 z0..3 两角、foot 在床尾端
+        # z13..16 两角；facing=n 基准=床头朝北，_rot_y 转 facing）。
+        # 顶面 rect 分枕/毯区照旧（_decor_face_mat bed 分支）。
+        part, _, f = rest.partition(":")
+        E3 = 3 * _E
+        if part == "head":
+            legs = ((0.0, 0.0, 0.0, E3, E3, E3),
+                    (1.0 - E3, 0.0, 0.0, 1.0, E3, E3))
+        else:
+            legs = ((0.0, 0.0, 1.0 - E3, E3, E3, 1.0),
+                    (1.0 - E3, 0.0, 1.0 - E3, 1.0, E3, 1.0))
+        return tuple(_rot_y(b, f) for b in
+                     ((0.0, E3, 0.0, 1.0, 9 * _E, 1.0),) + legs)
     if kind == "wsign":
         return _wall_sign(rest)
     if kind == "pisth":
@@ -1185,19 +1229,46 @@ def _redstone_wire(rest: str) -> tuple:
     return tuple(boxes)
 
 
-def _diode(f: str, comparator: bool) -> tuple:
-    """中继器/比较器（官方 repeater_1tick / comparator.json）。
+def _diode(rest: str, comparator: bool) -> tuple:
+    """中继器/比较器（官方 repeater_Ntick / comparator[_subtract].json）。
 
-    平滑石底板 2/16 + 火把柱；原始朝向 facing=n（输出朝北）：
-    repeater 双火把 z 2..8（输出半区），comparator 背面双火把
-    z 11..13 + 输出端小火把 z 2..4。powered/mode 纯纹理差异。"""
+    平滑石底板 2/16 + 火把柱；原始朝向 facing=n（输出朝北）。
+    rest = "<f>:<delay>[:<pw>]"（repeater，delay 1..4 后火把柱
+    z=4+2*delay，与官方 repeater_1tick..4tick 逐档一致）或
+    "<f>:<c|t>:<pw>"（comparator，t=减法：附加输出火把光圈 6 薄片
+    ——官方 comparator_subtract.json 附加元素，3x3 片环绕火把，
+    可见面贴火把外缘，薄片厚 1/64，非可见面由 _decor_face_mat
+    SKIP）。"""
+    parts = rest.split(":")
+    f = parts[0] if parts and parts[0] in ("n", "s", "e", "w") else "n"
     boxes = [(0.0, 0.0, 0.0, 1.0, 2 * _E, 1.0)]
     if comparator:
         boxes.append((4 * _E, 2 * _E, 11 * _E, 6 * _E, 7 * _E, 13 * _E))
         boxes.append((10 * _E, 2 * _E, 11 * _E, 12 * _E, 7 * _E, 13 * _E))
         boxes.append((7 * _E, 2 * _E, 2 * _E, 9 * _E, 5 * _E, 4 * _E))
+        if len(parts) > 1 and parts[1] == "t":
+            # 减法光圈 6 薄片（facing=n 基准）：底 y2.5、顶 y5.5、
+            # 北 z1.5、南 z4.5、西 x6.5、东 x9.5（可见面 = 靠火把侧）
+            t = _DUST_T
+            boxes.append((6.5 * _E, 2.5 * _E - t, 1.5 * _E,
+                          9.5 * _E, 2.5 * _E, 4.5 * _E))
+            boxes.append((6.5 * _E, 5.5 * _E, 1.5 * _E,
+                          9.5 * _E, 5.5 * _E + t, 4.5 * _E))
+            boxes.append((6.5 * _E, 2.5 * _E, 1.5 * _E - t,
+                          9.5 * _E, 5.5 * _E, 1.5 * _E))
+            boxes.append((6.5 * _E, 2.5 * _E, 4.5 * _E,
+                          9.5 * _E, 5.5 * _E, 4.5 * _E + t))
+            boxes.append((6.5 * _E - t, 2.5 * _E, 1.5 * _E,
+                          6.5 * _E, 5.5 * _E, 4.5 * _E))
+            boxes.append((9.5 * _E, 2.5 * _E, 1.5 * _E,
+                          9.5 * _E + t, 5.5 * _E, 4.5 * _E))
     else:
-        boxes.append((7 * _E, 2 * _E, 6 * _E, 9 * _E, 7 * _E, 8 * _E))
+        try:
+            delay = int(parts[1]) if len(parts) > 1 else 1
+        except ValueError:
+            delay = 1
+        zt = (4 + 2 * max(1, min(4, delay))) * _E
+        boxes.append((7 * _E, 2 * _E, zt, 9 * _E, 7 * _E, zt + 2 * _E))
         boxes.append((7 * _E, 2 * _E, 2 * _E, 9 * _E, 7 * _E, 4 * _E))
     return tuple(_rot_y(bx, f) for bx in boxes)
 

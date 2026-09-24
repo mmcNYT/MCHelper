@@ -2110,6 +2110,17 @@ def tex_keys_used(model: dict) -> list:
 # ---------------------------------------------------------------------------
 # 网格化：可见面剔除 + 同材质聚合槽
 # ---------------------------------------------------------------------------
+# 树叶族（26.2 LeavesBlock.fancy 模式对齐）：树叶 canOcclude=false
+# -> occlusion shape 为空 -> 相邻树叶的面不剔除（树冠实心外壳带
+# 孔观感，透过孔洞可见后方树叶而非内部空腔）；树叶贴实心整格
+# 仍按共面覆盖剔除（官方 shouldRenderFace 第一步）
+_LEAF_MATS = frozenset({
+    "oak leaves", "spruce leaves", "birch leaves", "jungle leaves",
+    "acacia leaves", "dark oak leaves", "mangrove leaves",
+    "cherry leaves", "pale oak leaves", "azalea leaves",
+    "flowering azalea leaves",
+})
+
 # 透明材质：面剔除按“异材保留、同材合并”处理；水在视口半透明绘制
 # ladder：梯子/横幅贴墙板纹理大部分镂空（FS discard），作为邻居
 # 时不得剔墙面——否则所贴方块整面消失、梯子看似悬空（官方
@@ -2129,8 +2140,7 @@ _TRANSPARENT_MATS = frozenset({
 # 规则离线扫描 TEX_DIR 全部贴图得出；redstone wire 按 26.2
 # 官方 force_translucent 语义并入。
 _TRANSLUCENT_MATS = frozenset({
-    "water", "ice", "nether portal",
-    "white stained glass", "orange stained glass",
+    "water", "ice", "nether portal",    "white stained glass", "orange stained glass",
     "yellow stained glass", "light gray stained glass",
     "black stained glass", "magenta_stained_glass",
     "redstone wire",
@@ -2465,6 +2475,39 @@ _BREW_R = {
 # 花盆壁侧横带（flower_pot.json 侧 uv v 10..16 行，u 全列）。
 _FPOT_S = _RS(0, 10, 16, 16)
 
+# 酝造台瓶位面片（26.2 brewing_stand_bottle0/1/2.json，multipart
+# has_bottle_N 叠加）：bottle0 东直片 z=8/16 x8..16；bottle1/2 官方
+# 45° 斜片（元素 (-0.41,0,8)-(7.59,16,8) 绕 (8,8,8) ∓45°）旋转后
+# 对角顶点 (2.05,*,2.05)-(7.71,*,7.71) / (2.05,*,13.95)-(7.71,*,8.29)。
+# 每片两面 quad（绕序仿 _PLANT_QUADS：正面 CCW）；法线按官方
+# FaceBakery.findClosestDirection 归最近轴向。UV = brewing stand
+# 图左半 x0..8（满瓶 _RS(0,0,8,16)）/ 右半（空瓶 emptyN）。
+_BREW_BOTTLE_R_FULL = _RS(0, 0, 8, 16)
+_BREW_BOTTLE_R_EMPTY = _RS(8, 0, 16, 16)
+_BREW_BOTTLE_QUADS = (
+    # bottle0：东直片（z=8/16，x 8..16）
+    (((8 * _E16, 0.0, 8 * _E16), (16 * _E16, 0.0, 8 * _E16),
+      (16 * _E16, 1.0, 8 * _E16), (8 * _E16, 1.0, 8 * _E16)),
+     (0, 0, 1)),
+    (((16 * _E16, 0.0, 8 * _E16), (8 * _E16, 0.0, 8 * _E16),
+      (8 * _E16, 1.0, 8 * _E16), (16 * _E16, 1.0, 8 * _E16)),
+     (0, 0, -1)),
+    # bottle1：西南对角斜片（+z 面为正面）
+    (((2.05 * _E16, 0.0, 2.05 * _E16), (7.71 * _E16, 0.0, 7.71 * _E16),
+      (7.71 * _E16, 1.0, 7.71 * _E16), (2.05 * _E16, 1.0, 2.05 * _E16)),
+     (0, 0, 1)),
+    (((7.71 * _E16, 0.0, 7.71 * _E16), (2.05 * _E16, 0.0, 2.05 * _E16),
+      (2.05 * _E16, 1.0, 2.05 * _E16), (7.71 * _E16, 1.0, 7.71 * _E16)),
+     (0, 0, -1)),
+    # bottle2：西北对角斜片
+    (((2.05 * _E16, 0.0, 13.95 * _E16), (7.71 * _E16, 0.0, 8.29 * _E16),
+      (7.71 * _E16, 1.0, 8.29 * _E16), (2.05 * _E16, 1.0, 13.95 * _E16)),
+     (0, 0, 1)),
+    (((7.71 * _E16, 0.0, 8.29 * _E16), (2.05 * _E16, 0.0, 13.95 * _E16),
+      (2.05 * _E16, 1.0, 13.95 * _E16), (7.71 * _E16, 1.0, 8.29 * _E16)),
+     (0, 0, -1)),
+)
+
 
 # 钟体 rect（BellRenderer 实体两段盒，键图 bell body.png =
 # 官方 entity/bell/bell_body.png 32x32 原图，图集入槽最近邻缩
@@ -2567,14 +2610,38 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
             return (None, None)                   # 未 attached 钩件
         return (None, None)
     if kind in ("repeater", "comparator"):
-        # 官方 repeater_1tick/comparator.json：底板 #slab=smooth_stone、
-        # 顶面 #top=repeater/comparator（基键）；火把柱 #unlit=
-        # redstone_torch_off（灭态；powered 仅火把纹理差异）
+        # 官方 repeater_Ntick / comparator[_subtract].json：底板
+        # #slab=smooth_stone、顶面 #top=repeater/comparator（基键）；
+        # 火把柱 #unlit/#lit（powered 亮/灭）；减法模式光圈薄片
+        # #lit（可见面朝火把，其余面官方无 faces -> SKIP）
+        parts = rest.split(":")
+        f = parts[0] if parts and parts[0] in ("n", "s", "e", "w") \
+            else "n"
+        powered = len(parts) > 2 and parts[2] == "1"
+        if kind == "comparator" and box is not None \
+                and len(parts) > 1 and parts[1] == "t":
+            dims = (box[3] - box[0], box[4] - box[1], box[5] - box[2])
+            if min(dims) <= bs._DUST_T + 1e-9:
+                # 光圈薄片：可见面朝输出火把中心（基准 (8,3.5,3)/16
+                # 经同一 _rot_y 转 facing）
+                axis = dims.index(min(dims))
+                tb = bs._rot_y((7 * _E16, 2 * _E16, 2 * _E16,
+                                9 * _E16, 5 * _E16, 4 * _E16), f)
+                tc = ((tb[0] + tb[3]) / 2, (tb[1] + tb[4]) / 2,
+                      (tb[2] + tb[5]) / 2)
+                bc = ((box[0] + box[3]) / 2, (box[1] + box[4]) / 2,
+                      (box[2] + box[5]) / 2)
+                want = [0, 0, 0]
+                want[axis] = 1 if tc[axis] > bc[axis] else -1
+                if normal == tuple(want):
+                    return ("redstone torch", None)
+                return _SKIP_FACE
         if box is not None and box[1] <= 1e-9:
             if ny > 0:
                 return (None, None)               # 底板顶 = 基键
             return ("smooth stone", None)         # 底板侧/底
-        return ("redstone torch off", None)       # 火把柱
+        return ("redstone torch" if powered
+                else "redstone torch off", None)  # 火把柱
     if kind == "sculk":
         # sculk_sensor.json：底座 #side/#top/#bottom + 触须 #tendrils
         if box is not None and box[1] <= 1e-9 \
@@ -2895,7 +2962,10 @@ def build_occlusion(vox: dict) -> dict:
     xs = ys = zs = None
     for (x, y, z), v in vox.items():
         mat, shape = _mat_shape(v)
-        if not shape and mat not in _TRANSPARENT_MATS:
+        # 实心整格非透明且非树叶 -> opaque（26.2 树叶
+        # isSolidRender=false：canOcclude=false，不标阻挡）
+        if not shape and mat not in _TRANSPARENT_MATS \
+                and mat not in _LEAF_MATS:
             blocked.add((x, y, z))
         if xs is None:
             xs = (x, x)
@@ -3078,7 +3148,7 @@ def build_mesh(vox: dict) -> dict:
             base_boxes = v_boxes[v] = bs.shape_boxes(shape)
         boxes = base_boxes
         if shape:
-            kind = shape.partition(":")[0]
+            kind, _, shape_rest = shape.partition(":")
             if kind == "plant":
                 # 农作物/花草（SHAPE_PLANT）：对角 X 专用路径
                 # （_PLANT_QUADS 注释详述绕序/法线/UV/分桶语义），
@@ -3086,6 +3156,17 @@ def build_mesh(vox: dict) -> dict:
                 for pq, pn in _PLANT_QUADS:
                     _emit_quad(arr, idx, x, y, z, pq, pn)
                 continue
+            if kind == "brewing" and shape_rest:
+                # 瓶位面片（26.2 brewing_stand_bottleN/emptyN
+                # multipart 条件叠加；码段 = has_bottle_0/1/2，
+                # 1=满瓶贴图左半、0=空瓶右半）：主模型 4 盒照常
+                # 走下方 AABB 面循环，瓶位为附加 quad
+                for bi, (pq, pn) in enumerate(_BREW_BOTTLE_QUADS):
+                    if shape_rest[bi // 2] == "1":
+                        r = _BREW_BOTTLE_R_FULL
+                    else:
+                        r = _BREW_BOTTLE_R_EMPTY
+                    _emit_quad(arr, idx, x, y, z, pq, pn, r)
             if kind in ("post", "pane", "wall"):
                 # 连通臂随四向邻居变化：逐位现算（基础 AABB 复用缓存）
                 boxes = list(base_boxes)
@@ -3106,7 +3187,10 @@ def build_mesh(vox: dict) -> dict:
                 if nb_info is None:
                     nb_info = v_ms[nb_v] = _mat_shape(nb_v)
                 nb_mat, nb_shape = nb_info
-                if not (nb_mat in _TRANSPARENT_MATS and mat != nb_mat):
+                if nb_mat in _LEAF_MATS:
+                    pass                    # 树叶无遮挡（occlusion 空）
+                elif not (nb_mat in _TRANSPARENT_MATS
+                          and mat != nb_mat):
                     nb_key = (nb_v, axis, pos_sign)
                     nb_rects = v_nb.get(nb_key)
                     if nb_rects is None:
