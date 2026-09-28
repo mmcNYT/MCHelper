@@ -68,9 +68,10 @@ class Ui_seedReverser(object):
         self.structList.setObjectName(u"structList")
         sizePolicy1 = QSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Expanding)
         sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setVerticalStretch(5)
         sizePolicy1.setHeightForWidth(self.structList.sizePolicy().hasHeightForWidth())
         self.structList.setSizePolicy(sizePolicy1)
+        self.structList.setMinimumSize(QSize(0, 150))
 
         self.gridLayout.addWidget(self.structList, 2, 0, 3, 9)
 
@@ -248,6 +249,9 @@ class Ui_seedReverser(object):
 
         self.gridLayout.addWidget(self.anchorPreviewLabel, 6, 6, 2, 4)
 
+        self.gridLayout.setRowStretch(2, 2)
+        self.gridLayout.setRowStretch(3, 2)
+        self.gridLayout.setRowStretch(4, 2)
 
         self.retranslateUi(seedReverser)
 

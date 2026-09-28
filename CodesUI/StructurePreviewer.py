@@ -123,16 +123,6 @@ class Ui_structurePreviewer(object):
 
         self.gridLayout.addWidget(self.coordXEdit, 1, 1, 1, 2)
 
-        self.btnPreview = QPushButton(self.layoutWidget)
-        self.btnPreview.setObjectName(u"btnPreview")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        sizePolicy2.setHorizontalStretch(0)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.btnPreview.sizePolicy().hasHeightForWidth())
-        self.btnPreview.setSizePolicy(sizePolicy2)
-
-        self.gridLayout.addWidget(self.btnPreview, 1, 7, 1, 1)
-
         self.pasteBtn = QPushButton(self.layoutWidget)
         self.pasteBtn.setObjectName(u"pasteBtn")
 
@@ -160,6 +150,21 @@ class Ui_structurePreviewer(object):
         self.lensSensitivityLabel.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout.addWidget(self.lensSensitivityLabel, 1, 8, 1, 1)
+
+        self.btnPreview = QPushButton(self.layoutWidget)
+        self.btnPreview.setObjectName(u"btnPreview")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.btnPreview.sizePolicy().hasHeightForWidth())
+        self.btnPreview.setSizePolicy(sizePolicy2)
+
+        self.gridLayout.addWidget(self.btnPreview, 1, 6, 1, 1)
+
+        self.findItemBtn = QPushButton(self.layoutWidget)
+        self.findItemBtn.setObjectName(u"findItemBtn")
+
+        self.gridLayout.addWidget(self.findItemBtn, 1, 7, 1, 1)
 
         self.gridLayout.setRowStretch(1, 1)
         self.gridLayout.setRowStretch(2, 1)
@@ -194,9 +199,10 @@ class Ui_structurePreviewer(object):
         self.snapshotLabel.setText("")
         self.viewportPlaceholder.setText("")
         self.coordXEdit.setPlaceholderText(QCoreApplication.translate("structurePreviewer", u"X", None))
-        self.btnPreview.setText(QCoreApplication.translate("structurePreviewer", u"\u9884\u89c8", None))
         self.pasteBtn.setText(QCoreApplication.translate("structurePreviewer", u"\u7c98\u8d34F3+C", None))
         self.hintLabel.setText("")
         self.lensSensitivityLabel.setText(QCoreApplication.translate("structurePreviewer", u"\u955c\u5934\u7075\u654f\u5ea6", None))
+        self.btnPreview.setText(QCoreApplication.translate("structurePreviewer", u"\u9884\u89c8", None))
+        self.findItemBtn.setText(QCoreApplication.translate("structurePreviewer", u"\u67e5\u627e\u7269\u54c1", None))
     # retranslateUi
 

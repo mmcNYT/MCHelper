@@ -1417,6 +1417,8 @@ class Structure3DView(QOpenGLWidget):
         self._anchor_vbo.create()
         self._chunk_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         self._chunk_vbo.create()
+        self._chest_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._chest_vbo.create()
         # 纹理图集
         atlas_img, self._atlas_slots = _build_atlas()
         self._qtex = QOpenGLTexture(atlas_img)
@@ -1513,7 +1515,7 @@ class Structure3DView(QOpenGLWidget):
         # 每次上传销毁重建缓冲：同一 buffer 重复 allocate/重指定
         # 属性指针在 NVIDIA 驱动下触发 0xC0000409（事件日志定位）
         for obj in (self._vao, self._vbo, self._ibo, self._anchor_vbo,
-                    self._chunk_vbo):
+                    self._chunk_vbo, self._chest_vbo):
             if obj is not None and obj.isCreated():
                 obj.destroy()
         self._vao = QOpenGLVertexArrayObject()
@@ -1526,6 +1528,8 @@ class Structure3DView(QOpenGLWidget):
         self._anchor_vbo.create()
         self._chunk_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         self._chunk_vbo.create()
+        self._chest_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._chest_vbo.create()
         self._vao.bind()
         self._vbo.bind()
         # build_mesh 已输出 numpy 数组：tobytes() 一次成型直传

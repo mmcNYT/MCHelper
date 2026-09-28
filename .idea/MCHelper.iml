@@ -11,6 +11,23 @@
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_fjm" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_procs" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/rp_wire" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/ancient_city" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/blocks" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/decomp" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/iso_new" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/loot_extract" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mansion" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mc1211_classes" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mc262_classes" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mc262_decomp" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mc262_probe" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/model_ref" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/modelref" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/oceanruin" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/outpost" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/pylibs" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/pyramid_models" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/village_extract" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

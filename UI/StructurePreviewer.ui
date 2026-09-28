@@ -167,19 +167,6 @@
       </property>
      </widget>
     </item>
-    <item row="1" column="7">
-     <widget class="QPushButton" name="btnPreview">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="text">
-       <string>预览</string>
-      </property>
-     </widget>
-    </item>
     <item row="1" column="5">
      <widget class="QPushButton" name="pasteBtn">
       <property name="text">
@@ -215,6 +202,26 @@
       </property>
       <property name="alignment">
        <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="6">
+     <widget class="QPushButton" name="btnPreview">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="text">
+       <string>预览</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="7">
+     <widget class="QPushButton" name="findItemBtn">
+      <property name="text">
+       <string>查找物品</string>
       </property>
      </widget>
     </item>

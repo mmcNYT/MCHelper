@@ -56,6 +56,7 @@ from Utils.Public import structure_params
 from Utils.SeedReverser import structure_3dview
 from Utils.Public.biome_names import biome_label
 from Utils.StructurePreviewer import composition, loot_engine, loot_rng
+from Utils.ItemLocator.target_item_dialog import ChooseItemDialog
 
 # 会话持久化（本页输入状态重启不丢）：配置目录 JSON 文件
 _SESSION_FILE = "structure_previewer_session.json"
@@ -1180,6 +1181,13 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
                 self.structCombo.addItem(name, key)
         self.structCombo.setCurrentIndex(0)
 
+        # 查找物品：打开定位弹窗（复用本页种子/版本；导入回填本页预览）
+        self.findItemBtn.setToolTip(
+            "选择物品与（可选）结构，查找最近的命中结构实例并导入预览")
+        self.findItemBtn.clicked.connect(self._open_item_locate)
+        # 定位弹窗引用（非模态 show 持有，防 GC；重开先关旧）
+        self._item_dlg: "ChooseItemDialog | None" = None
+
         # 信息/箱子/实例三个区域文本初始化
         self.infoLabel.setText(
             "输入种子后点「附近的实例」查找，或「粘贴F3+C」填入坐标")
@@ -1901,6 +1909,63 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
         marks = self._model["chests"] if self._model else None
         if marks and idx < len(marks):
             self._view.set_chest_highlights([marks[idx]])
+
+    # ---------- 查找物品（定位弹窗 + 导入预览） ----------
+    def _open_item_locate(self) -> None:
+        """打开「定位物品」弹窗（非模态，复用本页种子/版本）。"""
+        dlg = ChooseItemDialog(self, self)
+        dlg.setModal(False)
+        old = self._item_dlg
+        self._item_dlg = dlg
+        if old is not None:
+            old.close()
+            old.deleteLater()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _struct_index(self, ui_key: str) -> int:
+        """UI 结构键 -> structCombo 下标（找不到返回 -1）。"""
+        for i in range(self.structCombo.count()):
+            if self.structCombo.itemData(i) == ui_key:
+                return i
+        return -1
+
+    def apply_item_preview(self, res: dict) -> None:
+        """把物品定位命中结果导入本页：置结构/坐标、加载预览、高亮命中箱子。
+
+        res 来自 ItemLocator.search.find_nearest：含 struct_key/x/z/hits
+        （hits[].index 为 comp.chests 序号，对应 _fill_chests 的顶层箱子行）。
+        """
+        key = res["struct_key"]
+        x, z = res["x"], res["z"]
+        idx = self._struct_index(key)
+        if idx >= 0:
+            self.structCombo.setCurrentIndex(idx)
+        # 先置已加载标记与坐标，再走统一预览入口（坐标匹配按钮呈「预览」态）
+        self._loaded_pos = (str(x), str(z))
+        self.coordXEdit.setText(str(x))
+        self.coordZEdit.setText(str(z))
+        self._on_preview_clicked()
+        if self._model is None:
+            self.infoLabel.setText("导入预览失败：实例未能加载")
+            return
+        marks = self._model.get("chests", [])
+        idxs = [h["index"] for h in res["hits"] if h["index"] < len(marks)]
+        if not idxs:
+            self.infoLabel.setText("已导入预览，但命中箱子未映射到模型坐标")
+            return
+        # 命中箱子行琥珀强调（其余复位），视口琥珀描边高亮
+        amber = QBrush(_HIGHLIGHT_AMBER)
+        for i in range(self.chestList.topLevelItemCount()):
+            it = self.chestList.topLevelItem(i)
+            it.setForeground(0, amber if i in idxs else QBrush())
+        self._selected_chest = idxs[0]
+        self._view.set_chest_highlights([marks[i] for i in idxs])
+        self.chestList.expandAll()
+        self.infoLabel.setText(
+            f"已导入 {res['struct_name']} 预览，命中高亮："
+            + "、".join(f"箱{i + 1}" for i in sorted(idxs)))
 
     # ---------- 渲染错误 ----------
     def _on_render_error(self, msg: str) -> None:
