@@ -236,6 +236,23 @@ def assemble_trial_chambers(level_seed: int, chunk_x: int, chunk_z: int,
         # Placer 传入的 pool_id 已剥命名空间；先过 alias 再加载
         return _load_pool_resolved(alias.get(pool_id, pool_id))
 
+    # ---- C++ 引擎加速路径（已对拍，见 .temp/_m3_bridge.py；失败回退）----
+    try:
+        from Utils.SeedReverser import cpp_bridge as _cb
+        return _cb.assemble(
+            level_seed, chunk_x, chunk_z,
+            start_pool_id=START_POOL_ID,
+            max_depth=TRIAL_MAX_DEPTH,
+            start_y=y,
+            start_y_is_offset=False,
+            max_dist=TRIAL_MAX_DIST,
+            pad_bottom=0, pad_top=0,
+            skip_y_bound=TRIAL_START_SPAN,
+            load_pool_fn=load_pool_fn,
+            load_template_fn=load_template)
+    except Exception:
+        pass  # C++ 不可用/异常 -> 回退 Python 引擎
+
     return JA.assemble_jigsaw(
         level_seed, chunk_x, chunk_z,
         start_pool_id=START_POOL_ID,
