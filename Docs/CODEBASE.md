@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '232fb458-957f-4ebe-b23e-e927e6f9af3e'
-  PropagateID: '232fb458-957f-4ebe-b23e-e927e6f9af3e'
-  ReservedCode1: 'fb289307-5b88-47b1-a4aa-b940087af7c9'
-  ReservedCode2: 'fb289307-5b88-47b1-a4aa-b940087af7c9'
----
-
 # MCHelper 代码库手册
 
 > 版本：2026-09-23（Utils/Public 与 assets/Public 结构整理后）。覆盖全部 60 份 Python 源文件与全部资源：每份文件含功能（含计算流程）、类与函数、接口、关键变量四节；接口引用关系均经全项目 grep 实证。

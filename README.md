@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '82061085-0d9a-4605-a0e2-0c327fb93e24'
-  PropagateID: '82061085-0d9a-4605-a0e2-0c327fb93e24'
-  ReservedCode1: '7155ecaf-269e-47e7-9161-5ff823e7844c'
-  ReservedCode2: '7155ecaf-269e-47e7-9161-5ff823e7844c'
----
-
 # MCHelper
 
 Minecraft Java 版玩家工具合集（PySide6 桌面应用）。单窗口、Tab 切换多工具，围绕**种子逆推、结构预览、地图预览、战利品预测**等玩法场景提供本地化支持：
