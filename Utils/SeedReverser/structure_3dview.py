@@ -1896,8 +1896,12 @@ class Structure3DView(QOpenGLWidget):
             self._plain.disableAttributeArray(0)
             self._anchor_vbo.release()
             self._plain.release()
-        # ---- 箱子高亮琥珀描边（模型主体之上，最上层） ----
+        # ---- 箱子高亮琥珀描边（关闭深度测试：透过墙体可见） ----
+        # 定位命中/手动点选箱子时，即使箱体被结构墙体包裹，描边也
+        # 应在最上层显示（线框穿透），故画高亮前临时关 GL_DEPTH_TEST，
+        # 画完恢复（区块/锚点线保持深度裁剪的既有语义）。
         if self._chest_verts:
+            glf.glDisable(0x0B71)          # GL_DEPTH_TEST 关闭：描边穿透
             self._plain.bind()
             self._plain.setUniformValue(self._pu["uMVP"], mvp)
             self._plain.setUniformValue(self._pu["uColor"], _CHEST_AMBER)
@@ -1917,6 +1921,7 @@ class Structure3DView(QOpenGLWidget):
             self._plain.disableAttributeArray(0)
             self._chest_vbo.release()
             self._plain.release()
+            glf.glEnable(0x0B71)           # GL_DEPTH_TEST 恢复
 
     def _draw_translucent(self, mvp: QMatrix4x4) -> None:
         """半透明第二遍（水/冰/染色玻璃/传送门/红石线）：

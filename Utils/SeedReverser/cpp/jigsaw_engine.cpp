@@ -403,7 +403,14 @@ static PyObject* py_assemble(PyObject*, PyObject* args){
     Box outer={cxm-max_dist, std::max(start_y-max_dist,BEARD_MIN+pad_bottom), czm-max_dist, cxm+max_dist+1, std::min(start_y+max_dist+1,BEARD_MAX-pad_top), czm+max_dist+1};
     Domain free; free.bounds=outer; free.holes.push_back(box);
     eng.rng=rng;
-    std::vector<Piece*> pieces; eng.run(startp,&free,pieces);
+    std::vector<Piece*> pieces;
+    // run() 为纯 C++ 拼装计算（不访问 Python API / g_tpl_cache），
+    // 释放 GIL 让多线程并行真正生效。parse_* 阶段仍持 GIL（写
+    // g_tpl_cache 由 GIL 串行化，安全）。注意：g_events trace 调试
+    // 与多线程并行互斥（并行时保持 g_trace=false，勿同时开 trace）。
+    Py_BEGIN_ALLOW_THREADS
+    eng.run(startp,&free,pieces);
+    Py_END_ALLOW_THREADS
     // build result
     PyObject* plist=PyList_New((Py_ssize_t)pieces.size());
     for(size_t i=0;i<pieces.size();++i){

@@ -190,7 +190,9 @@ def structures_for_item(item_full: str) -> tuple[str, ...]:
 def all_items() -> list[tuple[str, str]]:
     """全部可搜索物品 -> [(显示名, 物品全名), ...]（按显示名排序）。
 
-    显示名 = 「中文名（短名）」，无中文名则只用短名。
+    显示名 = 中文名（无中文名回退短名）。舍弃英文短名后缀，避免
+    物品下拉图标旁显示英文与中文混杂、观感冲突；英文短名仍可
+    作为输入匹配键（target_item_dialog._resolve_item 支持）。
     """
     seen: set = set()
     for key, tables in _STRUCT_TABLES.items():
@@ -200,6 +202,6 @@ def all_items() -> list[tuple[str, str]]:
     for item in sorted(seen):
         short = item.split(":", 1)[-1]
         cn = ITEM_CN.get(short)
-        label = f"{cn}（{short}）" if cn else short
+        label = cn if cn else short
         items.append((label, item))
     return items
