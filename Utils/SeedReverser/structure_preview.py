@@ -232,7 +232,7 @@ def _draw_top_view(p: QPainter, bp: dict, rect: QRectF, dpr: float) -> None:
                 if t is not None and cell > 0:
                     s = t.scaled(int(round(cell * dpr)), int(round(cell * dpr)),
                                  Qt.AspectRatioMode.IgnoreAspectRatio,
-                                 Qt.TransformationMode.SmoothTransformation)
+                                 Qt.TransformationMode.FastTransformation)
                     if not s.isNull():
                         s.setDevicePixelRatio(dpr if dpr > 0 else 1.0)
                         t = s

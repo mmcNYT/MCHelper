@@ -255,7 +255,17 @@ def _build_atlas():
         if f is not None:
             tile = _brighten(tile, f)
         if tile.width() != _ATLAS_TEX or tile.height() != _ATLAS_TEX:
-            tile = tile.scaled(_ATLAS_TEX, _ATLAS_TEX)
+            if tile.width() == _ATLAS_TEX and tile.height() % _ATLAS_TEX == 0:
+                # 垂直多帧纹理（如 prismarine 16x64 / sea_lantern 16x80 /
+                # stonecutter_saw 16x48）：整条压扁会丢失内容、显得糊，
+                # 直接取顶部第一个 16x16 帧（静态展示用单帧，最清晰）
+                tile = tile.copy(0, 0, _ATLAS_TEX, _ATLAS_TEX)
+            else:
+                # 其余非 16x16 源（end_portal 256x256 等）：最近邻缩放
+                # 保持像素风硬边（QImage.scaled 默认双线性平滑会插值糊化）
+                tile = tile.scaled(_ATLAS_TEX, _ATLAS_TEX,
+                                   Qt.AspectRatioMode.IgnoreAspectRatio,
+                                   Qt.TransformationMode.FastTransformation)
         cx = (i % _ATLAS_COLS) * _ATLAS_TEX
         cy = (i // _ATLAS_COLS) * _ATLAS_TEX
         p = QPainter(img)

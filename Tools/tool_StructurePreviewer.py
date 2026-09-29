@@ -281,8 +281,23 @@ _PANEL_W, _PANEL_H = 176, 78
 _PANEL_TOP_H = 71                  # 上段：标题区 + 3 行槽 + 槽底白线
 _PANEL_STRIP_Y, _PANEL_STRIP_H = 215, 7   # 下段：图集底部边框条
 
-# 槽位图标绘制比例（用户需求：图标缩小 20% -> 0.8 倍槽内区）
+# 槽位图标绘制比例（普通物品：0.8 原版缩小 20%；仅方块类物品放大）
 _ICON_SLOT_RATIO = 0.8
+# 方块类物品槽位图标：在放大版 1.42 基础上缩小 10% -> 1.278。
+# 仅方块放大显示（图片画布可略超出槽位，透明部分被控件裁剪，
+# 等距立方体主体居中）；其它物品保持 0.8 原版大小。
+_BLOCK_SLOT_RATIO = 1.278
+# 方块类物品键（等距立方体渲染的 37 个，放大显示）
+_BLOCK_ICON_KEYS = frozenset({
+    "acacia_planks", "bamboo_planks", "black_wool", "blue_ice",
+    "brown_wool", "crying_obsidian", "diamond_block", "emerald_block",
+    "gilded_blackstone", "gold_block", "gray_wool", "iron_block",
+    "light_gray_wool", "moss_block", "obsidian", "packed_ice", "sand",
+    "sculk", "smooth_stone", "snow_block", "stone", "stone_bricks",
+    "tuff", "white_wool", "ancient_debris", "barrel", "bone_block",
+    "cactus", "cake", "dark_oak_log", "furnace", "lodestone",
+    "pumpkin", "sculk_catalyst", "sculk_sensor", "spruce_log", "tnt",
+})
 
 # 子行自定义角色：UserRole = 物品短名（图标键），UserRole+1 = 有附魔
 _ENCHANTED_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -495,25 +510,48 @@ def _merge_stacks(items: list["loot_engine.ItemStack"]) -> list:
     return out
 
 
-def _load_item_pixmap(key: str) -> tuple | None:
-    """加载物品纹理（16x16 原版尺寸）与不透明区 QRegion（含缓存）。
+_item_source_cache: dict = {}
 
-    返回 (QPixmap, QRegion|None)；文件缺失返回 None（行无图标）。
-    QRegion 用于流光绘制剪裁到物品不透明像素（不外溢背景）。
+def _load_item_source(key: str):
+    """加载磁盘原图（可能是 16x16 或高分方块图，缓存）。
+
+    高分源（等距方块）保留其原始分辨率，供放大显示时使用。
     """
-    if key in _item_pix_cache:
-        return _item_pix_cache[key]
+    if key in _item_source_cache:
+        return _item_source_cache[key]
     result = None
     path = os.path.join(_ICON_DIR, f"{key}.png")
     if os.path.exists(path):
         pix = QPixmap(path)
         if not pix.isNull():
-            region = None
-            if _GLINT_OK:
-                mask = pix.createMaskFromColor(Qt.transparent,
-                                               Qt.MaskInColor)
-                region = QRegion(mask)
-            result = (pix, region)
+            result = pix
+    _item_source_cache[key] = result
+    return result
+
+
+def _load_item_pixmap(key: str) -> tuple | None:
+    """加载物品纹理（列表统一缩放到 16x16）与不透明区 QRegion（含缓存）。
+
+    返回 (QPixmap, QRegion|None)；文件缺失返回 None（行无图标）。
+    高分源（等距方块）用 FastTransformation 最近邻缩回 16，保持像素风；
+    QRegion 用于流光绘制剪裁到物品不透明像素（不外溢背景）。
+    """
+    if key in _item_pix_cache:
+        return _item_pix_cache[key]
+    result = None
+    src = _load_item_source(key)
+    if src is not None:
+        pix = src
+        if src.width() != 16 or src.height() != 16:
+            pix = src.scaled(16, 16,
+                             Qt.AspectRatioMode.IgnoreAspectRatio,
+                             Qt.TransformationMode.FastTransformation)
+        region = None
+        if _GLINT_OK:
+            mask = pix.createMaskFromColor(Qt.transparent,
+                                           Qt.MaskInColor)
+            region = QRegion(mask)
+        result = (pix, region)
     _item_pix_cache[key] = result
     return result
 
@@ -521,25 +559,29 @@ def _load_item_pixmap(key: str) -> tuple | None:
 def _load_item_scaled(key: str, scale: int) -> tuple | None:
     """按 scale 返回预缩放 (图标 QPixmap, 不透明区 QRegion)（缓存）。
 
-    - 图标：16x16 原版纹理最近邻放大到 round(16*scale*0.8)（用户
-      需求缩小 20%，_ICON_SLOT_RATIO 对所有 scale 一致；
-      FastTransformation 像素风不插值，硬边保留，非整数倍时像素
-      块宽度略有不均，属最近邻采样的固有表现）；
+    - 图标：从磁盘原图（16x16 或高分方块源）最近邻缩放到
+      round(16*scale*0.8)（用户需求缩小 20%，_ICON_SLOT_RATIO 对
+      所有 scale 一致；FastTransformation 像素风不插值，硬边保留，
+      非整数倍时像素块宽度略有不均，属最近邻采样的固有表现）；
+      高分源放大后保留等距立方体细节，避免糊成一坨；
     - 剪裁区：缩放图 createMaskFromColor(透明, MaskInColor) 同 1x
       配方（探针实证：MaskInColor+透明色 → QRegion 覆盖不透明区，
       out_probe_glint.txt scale=1 changed_at_opqA=True）；QBitmap
       返回后必须先包 QRegion 再 translated（QBitmap 无 translated，
-      在 QPainter.updateClipRegion 内部调它会崩）；剪裁区从缩小后
+      在 QPainter.updateClipRegion 内部调它会崩）；剪裁区从缩放后
       的图生成，随图标尺寸自动同步。
     """
     ck = (key, scale)
     if ck in _item_scaled_cache:
         return _item_scaled_cache[ck]
-    base = _load_item_pixmap(key)
     result = None
-    if base is not None:
-        size = max(1, round(16 * scale * _ICON_SLOT_RATIO))
-        big = base[0].scaled(
+    src = _load_item_source(key)
+    if src is not None:
+        # 方块类放大显示，其它物品保持原版 0.8
+        ratio = (_BLOCK_SLOT_RATIO if key in _BLOCK_ICON_KEYS
+                 else _ICON_SLOT_RATIO)
+        size = max(1, round(16 * scale * ratio))
+        big = src.scaled(
             size, size,
             Qt.AspectRatioMode.IgnoreAspectRatio,
             Qt.TransformationMode.FastTransformation)
@@ -717,7 +759,7 @@ class _GlintItemDelegate(QStyledItemDelegate):
             return
         pix, region = loaded
 
-        # 1) 背景与选中态用原实现绘制（含 hover/选中高亮/琥珀前景）
+        # 1) 背景与选中态用原实现绘制（含 hover/高亮/琥珀前景）
         opt = option
         self.initStyleOption(opt, index)
         opt.text = ""
