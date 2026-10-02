@@ -603,37 +603,28 @@ class Structure3DView(QOpenGLWidget):
             self._spectator_grab_mouse()
         self._sp_resume_grab = False
 
-    def set_spectator_input_locked(self, on: bool) -> None:
-        """旁观者输入总闸：开箱 GUI 显示期间锁死 FP 飞行输入。
+    def changeEvent(self, event) -> None:
+        """窗口激活状态变化：失焦时释放鼠标锁定，聚焦时按需恢复。
 
-        True：清按键集、停飞行 tick、呼出鼠标（若锁定转视角中）；
-        之后键盘/鼠标点击/滚轮事件全部吞掉，视口不可移动/转视角。
-        False：恢复控制；若开箱前处于锁定态（_sp_resume_grab），
-        按既有语义恢复鼠标捕获继续飞行。
-        与 set_spectator_mode 正交：仅锁输入，不切相机/不重置位置。
+        修复：Alt+Tab 切到其它窗口时，钉扎定时器仍把光标强制居中
+        到视口中心，干扰其它程序。失焦时若处于锁定转视角态，释放
+        鼠标（停钉扎、恢复光标）；重新激活本窗口时恢复锁定继续飞行。
         """
-        on = bool(on)
-        if on == self._sp_input_locked:
-            return
-        self._sp_input_locked = on
-        if on:
-            self._sp_keys.clear()
-            self._sp_tick.stop()
-            if self._sp_grabbed:
+        if event.type() == QEvent.Type.ActivationChange:
+            if self.isActiveWindow():
+                if self._sp_resume_grab and self._sp_mode and self.isVisible():
+                    self._sp_resume_grab = False
+                    self._spectator_grab_mouse()
+            elif self._sp_grabbed:
+                self._sp_resume_grab = True
                 self._spectator_release_mouse()
-        else:
-            self.note_chest_gui_closed()
-        self.update()
-
-    def spectator_input_locked(self) -> bool:
-        """输入总闸当前状态（测试/诊断用）。"""
-        return self._sp_input_locked
+        super().changeEvent(event)
 
     def set_spectator_input_locked(self, on: bool) -> None:
         """旁观者输入总闸：开箱 GUI 显示期间锁死 FP 飞行输入。
 
-        True：清按键集、停飞行 tick、呼出鼠标（若锁定转视角中）；
-        之后键盘/鼠标/滚轮事件全部吞掉，视口不可移动/转视角。
+        True：清按键集、停 tick、呼出鼠标（若锁定转视角中）；
+        之后键盘/鼠标点击/滚轮事件全部吞掉，视口不可移动/转视角。
         False：恢复控制；若开箱前处于锁定态（_sp_resume_grab），
         按既有语义恢复鼠标捕获继续飞行。
         与 set_spectator_mode 正交：仅锁输入，不切相机/不重置位置。

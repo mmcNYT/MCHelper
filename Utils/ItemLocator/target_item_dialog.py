@@ -77,7 +77,8 @@ class _FindThread(QThread):
                 self._seed, self._version, self._struct, self._item,
                 self._cx, self._cz, radius=_RADIUS,
                 on_progress=lambda d, t, s: self.progress.emit(d, t, s),
-                cancel=lambda: self._cancel)
+                cancel=lambda: self._cancel,
+                first_hit=True)
             if not self._cancel:
                 self.done.emit(res)
         except search.FindCancelled:
@@ -109,7 +110,7 @@ class ChooseItemDialog(QDialog, Ui_previewBtn):
             self._on_item_text_edited)
         self.targetItemCombo.lineEdit().editingFinished.connect(
             self._on_item_editing_finished)
-        self.doFindBtn.clicked.connect(self._on_find)
+        self.doFindBtn.clicked.connect(self._on_find_click)
         self.importPreviewBtn.clicked.connect(self._on_import)
         self.cancelBtn.clicked.connect(self.reject)
 
@@ -173,9 +174,17 @@ class ChooseItemDialog(QDialog, Ui_previewBtn):
         combo.blockSignals(False)
 
     # ---------- 查找 ----------
-    def _on_find(self) -> None:
-        if self._thread is not None and self._thread.isRunning():
+    def _on_find_click(self) -> None:
+        """按钮统一入口：查找中则停止，否则开始查找。"""
+        th = self._thread
+        if th is not None and th.isRunning():
+            th.request_cancel()
+            self.doFindBtn.setEnabled(False)
+            self.informationBrowser.setPlainText("正在停止查找…")
             return
+        self._on_find()
+
+    def _on_find(self) -> None:
         pv = self._previewer
         if pv is None:
             return
@@ -201,13 +210,20 @@ class ChooseItemDialog(QDialog, Ui_previewBtn):
         self._result = None
         self.importPreviewBtn.setEnabled(False)
         self.informationBrowser.setPlainText("正在查找最近命中实例…")
+        self.doFindBtn.setText("停止查找")
         self._thread = _FindThread(seed, version, struct, item, cx, cz,
                                    parent=self)
         self._thread.progress.connect(self._on_progress)
         self._thread.done.connect(self._on_done)
         self._thread.failed.connect(self._on_fail)
         self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(self._on_thread_finished)
         self._thread.start()
+
+    def _on_thread_finished(self) -> None:
+        """查找线程结束（含取消）：按钮恢复为「开始查找」。"""
+        self.doFindBtn.setText("开始查找")
+        self.doFindBtn.setEnabled(True)
 
     def _on_progress(self, done: int, total: int, stage: str) -> None:
         self.informationBrowser.setPlainText(

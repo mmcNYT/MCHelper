@@ -18,7 +18,7 @@
 
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from Utils.Public import structure_params
 from Utils.Public.structure_map import enumerate_structures
@@ -85,8 +85,9 @@ def _probe_instance(ui_key, enum_k, seed, x, z, biome, version, era,
 
 def find_nearest(seed: int, version: str, struct_key: str | None,
                  item_full: str, cx: int, cz: int,
-                 radius: int = DEFAULT_RADIUS,
-                 on_progress=None, cancel=None) -> dict | None:
+radius: int = DEFAULT_RADIUS,
+                 on_progress=None, cancel=None,
+                 first_hit: bool = False) -> dict | None:
     """搜索离 (cx,cz) 最近、且箱子真实产出目标物品的结构实例。
 
     Args:
@@ -98,6 +99,7 @@ def find_nearest(seed: int, version: str, struct_key: str | None,
         radius: 枚举半径。
         on_progress: on_progress(done, total, 阶段文案)。
         cancel: cancel() -> bool；为 True 时中止（抛 FindCancelled）。
+        first_hit: True 时找到第一个命中立即返回（不追求最近，更快）。
     """
     if struct_key:
         candidates = [struct_key]
@@ -136,7 +138,6 @@ def find_nearest(seed: int, version: str, struct_key: str | None,
         if best is not None and first_d2 > best["_d2"]:
             continue
 
-        done: list = []
         with ThreadPoolExecutor(max_workers=workers) as ex:
             fut_to_it = {}
             for it in instances:
@@ -147,33 +148,59 @@ def find_nearest(seed: int, version: str, struct_key: str | None,
                     _probe_instance, ui_key, enum_k, seed, x, z,
                     int(it.get("biome", -1)), version, era, item_full)
                 fut_to_it[fut] = it
-            for fut in fut_to_it:
-                it = fut_to_it[fut]
-                try:
-                    comp, hits = fut.result()
-                except Exception:
-                    continue
-                done.append((it, comp, hits))
+            if first_hit:
+                # 找到第一个命中立即返回（不追求最近，更快）
+                for fut in as_completed(fut_to_it):
+                    if cancel is not None and cancel():
+                        raise FindCancelled()
+                    it = fut_to_it[fut]
+                    try:
+                        comp, hits = fut.result()
+                    except Exception:
+                        continue
+                    if not hits:
+                        continue
+                    x, z = it["x"], it["z"]
+                    d2 = (x - cx) ** 2 + (z - cz) ** 2
+                    return {
+                        "struct_key": ui_key,
+                        "struct_name": catalog.struct_name(ui_key),
+                        "anchor": (x, z),
+                        "x": x, "z": z,
+                        "biome": int(it.get("biome", -1)),
+                        "variant": comp.variant_name,
+                        "distance": d2,
+                        "hits": hits,
+                    }
+            else:
+                done: list = []
+                for fut in fut_to_it:
+                    it = fut_to_it[fut]
+                    try:
+                        comp, hits = fut.result()
+                    except Exception:
+                        continue
+                    done.append((it, comp, hits))
 
-        # 结构内取最近命中
-        for it, comp, hits in done:
-            if not hits:
-                continue
-            x, z = it["x"], it["z"]
-            d2 = (x - cx) ** 2 + (z - cz) ** 2
-            if best is not None and d2 > best["_d2"]:
-                continue
-            best = {
-                "struct_key": ui_key,
-                "struct_name": catalog.struct_name(ui_key),
-                "anchor": (x, z),
-                "x": x, "z": z,
-                "biome": int(it.get("biome", -1)),
-                "variant": comp.variant_name,
-                "distance": d2,
-                "_d2": d2,
-                "hits": hits,
-            }
+                # 结构内取最近命中
+                for it, comp, hits in done:
+                    if not hits:
+                        continue
+                    x, z = it["x"], it["z"]
+                    d2 = (x - cx) ** 2 + (z - cz) ** 2
+                    if best is not None and d2 > best["_d2"]:
+                        continue
+                    best = {
+                        "struct_key": ui_key,
+                        "struct_name": catalog.struct_name(ui_key),
+                        "anchor": (x, z),
+                        "x": x, "z": z,
+                        "biome": int(it.get("biome", -1)),
+                        "variant": comp.variant_name,
+                        "distance": d2,
+                        "_d2": d2,
+                        "hits": hits,
+                    }
 
     if best is None:
         return None
