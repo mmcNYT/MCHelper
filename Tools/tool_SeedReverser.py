@@ -391,6 +391,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：信息区伸展、文本框固定
+        self._adapt_layout()
 
         # 观测数据：与 structList 行一一对应，字段见 _on_add_clicked
         self._observations: list[dict] = []
@@ -427,6 +429,25 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     @classmethod
     def tool_name(cls) -> str:
         return "SeedReverser"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——信息区伸展，文本框固定。"""
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.coordXEdit, self.coordZEdit,
+                    self.candidateSeedEdit, self.biomeXEdit,
+                    self.biomeZEdit, self.biomeYEdit):
+            box.setSizePolicy(fixed)
+        # 主信息区伸展：信息浏览器(行7)、精化组(行8起)
+        self.gridLayout.setRowStretch(7, 1)
+        self.gridLayout.setRowStretch(8, 5)
+        # 精化组内部：生物群系列表(行2-3)、种子详情浏览器(行6)伸展
+        self.gridLayout_2.setRowStretch(2, 2)
+        self.gridLayout_2.setRowStretch(6, 2)
 
     # ---------- 初始化 ----------
     def _init_ui(self) -> None:

@@ -22,6 +22,9 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         self.is_start_on_boot = False   #是否开机自启动
         self.is_quitting = False        #是否正在退出
         self._chrome_hint = None        #最近一次测得的合理窗口装饰开销 (宽, 高)
+        self._tool_sizes: dict = {}   # 各工具独立窗口尺寸 {tool_name: (宽, 高)}
+        self._startup_adapt_done = False  # 首次 tab 适配完成前不记录尺寸
+        self._restore_window_geometry()
 
         # 替换为支持拖拽重排的 TabBar（tab 顺序拖拽调整 + 自动保存）
         self._setup_draggable_tab_bar()
@@ -73,6 +76,91 @@ class MainWindow(QMainWindow,Ui_MCHelper):
     def _tab_order_config_path(self) -> str:
         """tab 顺序配置文件路径（与 settings_config.json 同目录）"""
         return MainWindow.tab_order_config_path_static()
+
+    def _window_config_path(self) -> str:
+        """窗口尺寸配置文件路径（与 tab 顺序同目录）"""
+        config_dir = QStandardPaths.writableLocation(
+            QStandardPaths.AppConfigLocation)
+        if not config_dir:
+            config_dir = os.path.dirname(os.path.abspath(__file__))
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "window_config.json")
+
+    def _save_window_geometry(self) -> None:
+        """把各工具独立的窗口尺寸 + 窗口位置写入配置（关闭程序时调用）。"""
+        self._remember_current_size()
+        sizes = {name: {"width": int(sz[0]), "height": int(sz[1])}
+                 for name, sz in self._tool_sizes.items()}
+        data = {"sizes": sizes, "x": self.x(), "y": self.y()}
+        try:
+            with open(self._window_config_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            print(f"保存窗口尺寸配置失败: {e}")
+
+    def _restore_window_geometry(self) -> None:
+        """启动时加载各工具独立窗口尺寸与窗口位置。"""
+        path = self._window_config_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                sizes = data.get("sizes")
+                if isinstance(sizes, dict):
+                    for name, sz in sizes.items():
+                        if isinstance(sz, dict) and "width" in sz \
+                                and "height" in sz:
+                            self._tool_sizes[name] = (
+                                max(120, int(sz["width"])),
+                                max(100, int(sz["height"])))
+                if isinstance(data.get("x"), int) \
+                        and isinstance(data.get("y"), int):
+                    self.move(int(data["x"]), int(data["y"]))
+        except (OSError, ValueError, TypeError) as e:
+            print(f"加载窗口尺寸配置失败: {e}")
+
+    def _remember_current_size(self) -> None:
+        """记录当前激活工具的窗口尺寸到 _tool_sizes（非最大化/最小化时）。"""
+        if self.isMaximized() or self.isMinimized():
+            return
+        w = self.tabWidget.currentWidget()
+        if w is not None and hasattr(w, "tool_name"):
+            self._tool_sizes[w.tool_name()] = (self.width(), self.height())
+
+    def resizeEvent(self, ev):  # noqa: N802
+        """窗口尺寸变化时记录当前工具的尺寸（首次 tab 适配完成后才记录）。"""
+        super().resizeEvent(ev)
+        if getattr(self, "_startup_adapt_done", False):
+            self._remember_current_size()
+
+    def _resize_into_screen(self, target_w: int, target_h: int) -> None:
+        """按目标尺寸 resize，并钳制到当前屏幕可用区域内（含位置回拉）。"""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            frame_w = self.frameGeometry().width() - self.width()
+            frame_h = self.frameGeometry().height() - self.height()
+            target_w = min(target_w, max(available.width() - frame_w, 100))
+            target_h = min(target_h, max(available.height() - frame_h, 100))
+        self.resize(target_w, target_h)
+        if screen is not None:
+            available = screen.availableGeometry()
+            f = self.frameGeometry()
+            off_x = f.left() - self.x()
+            off_y = f.top() - self.y()
+            left, top = f.left(), f.top()
+            if f.right() > available.right():
+                left = available.right() - f.width() + 1
+            if f.bottom() > available.bottom():
+                top = available.bottom() - f.height() + 1
+            if left < available.left():
+                left = available.left()
+            if top < available.top():
+                top = available.top()
+            if (left, top) != (f.left(), f.top()):
+                self.move(left - off_x, top - off_y)
 
     def _load_tab_order(self) -> list | None:
         """读取保存的工具顺序（工具名列表）；无文件/损坏时返回 None"""
@@ -143,79 +231,43 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         return ordered if ordered else default
 
     def adapt_window_to_tool(self, index: int):
-        """切换 tab 时窗口自适应当前工具的期望尺寸，并钳制在屏幕可用区域内。
+        """切换 tab 时窗口自适应当前工具的独立尺寸，并钳制在屏幕可用区域内。
 
-        工具通过类属性 preferred_size = (宽, 高) 声明内容区期望尺寸：
-        - 声明了：窗口 resize 到 期望尺寸 + 窗口装饰差值（边框/标题栏/菜单栏/tab 栏，动态计算）
-        - 未声明（None）：保持当前窗口大小不动
-        - 窗口最大化/最小化/全屏时不干预
-        - 目标尺寸/位置超出当前屏幕可用区域（排除任务栏）时钳制到屏内
-          （小屏 / 高 DPI 缩放笔记本上 preferred 可能放不下）
+        每个工具各自记录一份窗口尺寸（_tool_sizes，切换时保存、启动时恢复）：
+        - 该工具有记录 → 恢复到该工具的尺寸；
+        - 无记录 → 用该工具 preferred_size（内容 + 窗口装饰）。
         """
         if index < 0:
             return
         widget = self.tabWidget.widget(index)
         if widget is None:
             return
-        preferred = getattr(widget, 'preferred_size', None)
-        if not preferred:
-            return
         # 最大化/最小化/全屏状态不干预用户当前窗口状态
         if self.isMaximized() or self.isMinimized() or self.isFullScreen():
+            return
+        name = widget.tool_name() if hasattr(widget, "tool_name") else None
+        stored = self._tool_sizes.get(name) if name else None
+        if stored:
+            self._resize_into_screen(max(120, int(stored[0])),
+                                     max(100, int(stored[1])))
+            self._startup_adapt_done = True
+            return
+        preferred = getattr(widget, 'preferred_size', None)
+        if not preferred:
             return
 
         # 客户区尺寸相对工具 widget 的固定开销 =
         #   菜单栏 + central widget 布局边距 + tab 栏 + tab 页边框
-        # 这些开销不随窗口大小变化，用当前尺寸差直接补偿即可。
-        # 注意 resize() 设置的是客户区尺寸，不能用 frameGeometry()（含原生边框）。
-        # 有效性校验：仅当页面能铺满窗口（窗口 ≥ 页面最小尺寸）时差值才可信；
-        # 窗口被钳制得比页面最小尺寸还小时页面被托住，差值会变负数——
-        # 此时改用最近一次测得的合理缓存值，避免把窗口 resize 到垃圾尺寸。
         chrome_w = self.width() - widget.width()
         chrome_h = self.height() - widget.height()
         if chrome_w >= 0 and chrome_h >= 0:
             self._chrome_hint = (chrome_w, chrome_h)
         else:
             chrome_w, chrome_h = self._chrome_hint or (0, 0)
-
-        target_content_w, target_content_h = preferred
-        target_w = target_content_w + chrome_w
-        target_h = target_content_h + chrome_h
-
-        # 尺寸适配：目标窗口超出当前所在屏幕的可用区域（排除任务栏）时，
-        # 压缩到可用区域内。原生边框/标题栏开销一并扣除，保证整个窗口
-        # （含装饰）完整落在屏幕内；内容区被压缩后由各工具自身布局消化。
-        # 下限保护：可用区域异常小时不至于得到负数/极小窗。
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            # frameGeometry - geometry = 左右+上下原生边框（含标题栏）
-            frame_w = self.frameGeometry().width() - self.width()
-            frame_h = self.frameGeometry().height() - self.height()
-            target_w = min(target_w, max(available.width() - frame_w, 100))
-            target_h = min(target_h, max(available.height() - frame_h, 100))
-        self.resize(target_w, target_h)
-
-        # 位置适配：右/下边缘超出屏幕时向左/上移回屏内；再检查左/上
-        # 边缘（缩小后遗留的屏外位置、或窗口比屏幕还大的极端情况），
-        # 保证左上角至少在屏内（窗口管理器标准行为：标题栏/左上内容优先可见）。
-        # 不动用户本来就摆得好好的位置，只拉回越界部分。
-        if screen is not None:
-            available = screen.availableGeometry()
-            f = self.frameGeometry()
-            off_x = f.left() - self.x()   # move() 定位客户区左上角，
-            off_y = f.top() - self.y()    # 先算出边框相对客户区的偏移
-            left, top = f.left(), f.top()
-            if f.right() > available.right():
-                left = available.right() - f.width() + 1
-            if f.bottom() > available.bottom():
-                top = available.bottom() - f.height() + 1
-            if left < available.left():
-                left = available.left()
-            if top < available.top():
-                top = available.top()
-            if (left, top) != (f.left(), f.top()):
-                self.move(left - off_x, top - off_y)
+        target_w = preferred[0] + chrome_w
+        target_h = preferred[1] + chrome_h
+        self._resize_into_screen(target_w, target_h)
+        self._startup_adapt_done = True
 
     def closeEvent(self, event):
         """
@@ -243,7 +295,9 @@ class MainWindow(QMainWindow,Ui_MCHelper):
             event.accept()
             return
         if self.tray_icon and self.tray_icon.isVisible():
-            # 隐藏窗口到系统托盘
+            # 隐藏窗口到系统托盘；窗口尺寸仍须保存（否则点 X 关闭后
+            # 重开不会恢复本次调整的大小）
+            self._save_window_geometry()
             self.hide()
             event.ignore()  # 忽略关闭事件，程序继续运行
         else:
@@ -261,6 +315,8 @@ class MainWindow(QMainWindow,Ui_MCHelper):
                     print(f"保存工具 {widget.tool_name()} 配置失败: {e}")
         # 退出时同步保存 tab 顺序（拖拽后已即时保存过，这里双保险）
         self._save_tab_order()
+        # 保存窗口尺寸
+        self._save_window_geometry()
 
     def creat_tray_icon(self):
         # 创建托盘图标

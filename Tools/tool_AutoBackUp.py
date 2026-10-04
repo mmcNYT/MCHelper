@@ -53,6 +53,9 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
         # 2. 执行 UI 的 setup，创建所有界面控件和布局
         self.setupUi(self)
 
+        # 布局适配：随窗口伸缩——信息显示区伸展，按钮/文本框固定
+        self._adapt_layout()
+
         # 2.5 存档列表接入委托：MC 存档文件夹（内含 icon.png）的封面图标固定显示在行最右侧
         self._save_icon_delegate = RightIconDelegate(icon_size=32, parent=self.targetDirList)
         self.targetDirList.setItemDelegate(self._save_icon_delegate)
@@ -127,6 +130,27 @@ class AutoBackUpWidget(BaseToolWidget, Ui_AutoBackUp):
 
     # 4. 实现基类要求的类方法 —— 提供 Tab 标题
     # ==================== 工具元信息区 ====================
+
+    def _adapt_layout(self):
+        """布局适配：让工具随窗口伸缩。
+
+        原 UI 用 layoutWidget.setGeometry 绝对定位（固定尺寸，不随窗口
+        伸缩）。这里把 layoutWidget 包进主布局填满窗口；信息显示区
+        （存档列表/信息浏览器）伸展，文本框/按钮/进度条保持固定大小。
+        """
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        # 1) layoutWidget 填满整个工具页，随窗口伸缩
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        # 2) 文本框固定高度、宽度不随窗口拉伸
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.targetDirPath, self.targetDesPath, self.processName):
+            box.setSizePolicy(fixed)
+        # 3) 信息显示区伸展：存档列表(行1)与检查浏览器(行5)
+        self.gridLayout.setRowStretch(1, 5)
+        self.gridLayout.setRowStretch(5, 4)
 
     @classmethod
     def tool_name(cls) -> str:

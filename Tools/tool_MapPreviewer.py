@@ -193,6 +193,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：地图视图伸展、文本框/下拉固定
+        self._adapt_layout()
 
         # 后台渲染线程（None 表示空闲）
         self._thread = None
@@ -288,6 +290,19 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
     @classmethod
     def tool_name(cls) -> str:
         return "MapPreviewer"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——地图视图伸展，文本框固定。"""
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.editSeed, self.xEdit, self.zEdit):
+            box.setSizePolicy(fixed)
+        # 地图视图(行3)伸展
+        self.gridLayout.setRowStretch(3, 1)
 
     # ---------- 初始化 ----------
     def _init_ui(self) -> None:
