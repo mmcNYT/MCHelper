@@ -1153,6 +1153,8 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：3D 视口随窗口伸展，文本框固定
+        self._adapt_layout()
 
         # 3D 视口替换占位（与 SeedReverser 同款接入）；本工具
         # 默认旁观者相机（WASD+鼠标 FP 飞行），切结构不退出模式
@@ -1194,6 +1196,18 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
     @classmethod
     def tool_name(cls) -> str:
         return "StructurePreviewer"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——3D 视口/信息区伸展，文本框固定。"""
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.seedEdit, self.coordXEdit, self.coordZEdit):
+            box.setSizePolicy(fixed)
+        # 3D 视口(行2-4, 列0-8)已由 grid row/column stretch 保证伸展
 
     # ---------- 初始化 ----------
     def _init_ui(self) -> None:

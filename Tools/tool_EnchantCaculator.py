@@ -17,6 +17,8 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：信息区伸展、按钮/下拉固定
+        self._adapt_layout()
 
         self.addItems.clicked.connect(self.do_choose_items)
 
@@ -104,6 +106,16 @@ class EnchantCalculatorWidget(BaseToolWidget, Ui_EnchantCaculator):
     @classmethod
     def tool_name(cls) -> str:
         return "EnchantCaculator"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——信息区伸展，按钮/下拉固定。"""
+        from PySide6.QtWidgets import QVBoxLayout
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        # 信息显示区：物品卡片列表(行1)、步骤树(行8)伸展
+        self.gridLayout.setRowStretch(1, 1)
+        self.gridLayout.setRowStretch(8, 3)
 
     def do_choose_items(self):
         """打开物品选择窗口，确认后把物品卡片添加到展示列表

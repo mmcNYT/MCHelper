@@ -391,6 +391,8 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：信息区伸展、文本框固定
+        self._adapt_layout()
 
         # 观测数据：与 structList 行一一对应，字段见 _on_add_clicked
         self._observations: list[dict] = []
@@ -427,6 +429,26 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
     @classmethod
     def tool_name(cls) -> str:
         return "SeedReverser"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——信息区伸展，文本框固定。"""
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.coordXEdit, self.coordZEdit,
+                    self.candidateSeedEdit, self.biomeXEdit,
+                    self.biomeZEdit, self.biomeYEdit):
+            box.setSizePolicy(fixed)
+        # 群系模式默认关闭：信息浏览器(行7)与 3D 预览向下顶满窗口，
+        # 精化组(行8)行高释放为 0；勾选群系模式时由开关逻辑改回伸展比例
+        self.gridLayout.setRowStretch(7, 6)
+        self.gridLayout.setRowStretch(8, 0)
+        # 精化组内部：生物群系列表(行2-3)、种子详情浏览器(行6)伸展
+        self.gridLayout_2.setRowStretch(2, 2)
+        self.gridLayout_2.setRowStretch(6, 2)
 
     # ---------- 初始化 ----------
     def _init_ui(self) -> None:
@@ -1273,13 +1295,16 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
         self.informationBrowser.append(f"[3D 视口] {msg}")
 
     def _on_biome_mode_toggled(self, checked: bool) -> None:
-        """群系模式开关：显隐精化面板与结构 3D 视口。
+        """群系模式开关：显隐精化面板与结构 3D 视口，并切换行伸展比例。
 
         群系模式只采群系观测，结构模型预览无用武之地——隐藏右侧
         3D 视口把空间让给精化面板；关闭时恢复显示（模型仍跟随
-        结构下拉，重显即原样）。informationBrowser 为垂直 Expanding：
-        隐藏 refineGroupBox 时自动吃掉让出的空间（结果区加高）；
-        显示时布局把空间还给 groupbox（结果区缩短），无需手动干预。
+        结构下拉，重显即原样）。
+
+        行伸展随开关联动：
+        - 开启：信息框(行7)让出空间给精化面板(行8)，行伸缩 1/5；
+        - 关闭：释放精化行(行8=0)，信息显示框与 3D 预览(行7=6)
+          向下伸展，顶满窗口剩余高度。
         """
         # 3D 视口与精化面板互斥显隐（群系模式=纯群系观测，无结构预览）
         self._anchor_view.setHidden(checked)
@@ -1288,9 +1313,15 @@ class SeedReverserWidget(BaseToolWidget, Ui_seedReverser):
                 self.refineGroupBox.setVisible(True)
             self.refineGroupBox.setEnabled(True)
             self.refineInfoLabel.setText(self._refine_idle_hint())
+            # 精化面板占满下方：信息/预览行收窄，精化组(行8)放开
+            self.gridLayout.setRowStretch(7, 1)
+            self.gridLayout.setRowStretch(8, 5)
         else:
             self.refineGroupBox.setVisible(False)
             self.refineGroupBox.setEnabled(False)
+            # 关闭群系：释放精化行(行8=0)，信息框与 3D 预览向下顶满窗口
+            self.gridLayout.setRowStretch(8, 0)
+            self.gridLayout.setRowStretch(7, 6)
         self._update_refine_buttons()
         self._save_session()
 

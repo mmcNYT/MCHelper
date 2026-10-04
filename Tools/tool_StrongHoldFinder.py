@@ -62,6 +62,8 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        # 布局适配：信息区伸展、文本框/按钮固定
+        self._adapt_layout()
         # 防抖状态：上次自动填入坐标一的时刻与位置（None 表示尚无记录）
         self._last_auto_fill_time: float | None = None
         self._last_auto_fill_pos: tuple[float, float] | None = None
@@ -115,6 +117,19 @@ class StrongHoldFinderWidget(BaseToolWidget, Ui_strongHoldFinder):
     @classmethod
     def tool_name(cls) -> str:
         return "StrongHoldFinder"
+
+    def _adapt_layout(self):
+        """布局适配：随窗口伸缩——信息浏览器伸展，文本框/按钮固定。"""
+        from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+        ml = QVBoxLayout(self)
+        ml.setContentsMargins(9, 9, 9, 9)
+        ml.addWidget(self.layoutWidget, 1)
+        fixed = QSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Fixed)
+        for box in (self.coordinate1Edit, self.coordinate2Edit):
+            box.setSizePolicy(fixed)
+        # 信息浏览器(行3)伸展
+        self.gridLayout.setRowStretch(3, 1)
 
     # ---------- 槽函数 ----------
     def _is_active_tab_page(self) -> bool:
