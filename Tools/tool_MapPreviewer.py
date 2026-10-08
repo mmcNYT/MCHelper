@@ -40,10 +40,11 @@ import os
 
 from collections import OrderedDict
 
-from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainter,
-                           QPainterPath, QPen, QPixmap, QPolygonF)
-from PySide6.QtCore import (QEvent, QPointF, QRectF, QStandardPaths, Qt,
-                            QTimer)
+from PySide6.QtGui import (QBrush, QColor, QFont, QIcon, QImage, QPainter,
+                           QPainterPath, QPen, QPixmap, QPolygonF,
+                           QStandardItem, QStandardItemModel)
+from PySide6.QtCore import (QEvent, QPointF, QRectF, QSortFilterProxyModel,
+                            QStandardPaths, Qt, QTimer)
 from PySide6.QtWidgets import (QApplication, QComboBox, QCompleter,
                                QGraphicsItem, QGraphicsLineItem,
                                QGraphicsPixmapItem, QGraphicsScene,
@@ -111,6 +112,21 @@ _CACHE_W_BLOCK = 6
 # 单批瓦片数上限：每批 <1s 上屏（距视口中心近的优先），完成后
 # batch_done 零延迟续批直至视口补齐（渐进铺满）
 _TILE_BATCH_MAX = 8
+# 结构标记单帧上屏上限：增量扫描一次性返回大量结构时，分帧分批
+# add_marker，避免主线程一次性创建上百个标记项造成卡顿（渐进显示）
+_MARKER_BATCH = 40
+# 右下角 labelInfo 的「当前任务」实时状态文案（拖动/缩放地图触发
+# 的增量瓦片渲染/结构扫描/结构上屏的阶段提示）
+_TASK_RENDER_MAP = "渲染地图…"
+_TASK_COMPUTE_STRUCT = "计算结构…"
+_TASK_RENDER_STRUCT = "渲染结构…"
+_TASK_DONE = "完成"
+# 群系下拉项图标：统一缩放尺寸与缓存（同图标只缩放一次）
+_BIOME_ICON_SIZE = 18
+_BIOME_ICON_CACHE: dict[str, QIcon] = {}
+# 结构图标浮板合成结果缓存：{icon_file 路径: 合成 QPixmap}。
+# 同一种结构（同图标）只合成一次，避免批量上屏时重复 _compose_plate_icon。
+_ICON_PLATE_CACHE: dict = {}
 # 续批轮次上限（兜底：防极端视口/缓存互柜导致无限补渲染）。
 # 实时淘汰已限制为只逐视口外瓦片（见 _evict_tiles），续批不会
 # 自吞刚渲染的瓦片，轮次只受视口容量/单批大小约束，300 足够
@@ -204,6 +220,9 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._scan_retired: list = []   # 已放弃但在跑的扫描线程（防析构崩溃）
         self._scan_epoch = 0   # 结构扫描批序号（递增；迟到结果丢弃）
         self._scan_covered = None   # 已覆盖结构扫描的世界矩形 (bx0,bz0,bx1,bz1)
+        # 结构标记刷新线程（选择集变化后只重扫结构、不重渲染地形）
+        self._refresh_thread = None
+        self._refresh_epoch = 0   # 结构刷新批序号（递增；迟到结果丢弃）
         # 已知结构去重表：(struct, x, z) → 结果 dict（初始+增量扫描合并）
         self._structs_seen: dict = {}
         self._has_map = False   # 是否已有生成过的地图（决定按钮文案）
@@ -336,8 +355,22 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         # 结构增量扫描调度（拖动/缩放停顿后触发，与瓦片补渲染同节奏）
         self._scan_timer = QTimer(self)
         self._scan_timer.setSingleShot(True)
-        self._scan_timer.setInterval(180)
+        self._scan_timer.setInterval(200)   # 停止移动 0.2s 后才开始显示结构
         self._scan_timer.timeout.connect(self._ensure_structure_scan)
+
+        # 结构标记分帧上屏：增量扫描一次性返回大量结构时，待上屏队列
+        # 按帧分批 add_marker，避免主线程一次性创建过多标记项导致卡顿
+        self._pending_markers: list = []   # 待上屏结构（_add_marker 前缓存）
+        self._marker_timer = QTimer(self)
+        self._marker_timer.setSingleShot(True)
+        self._marker_timer.setInterval(16)   # 每帧 ~16ms 处理一批
+        self._marker_timer.timeout.connect(self._on_marker_tick)
+        # 右下角 labelInfo 的实时任务状态：拖动/缩放引发的增量任务期间
+        # 显示「渲染地图/计算结构/渲染结构」，全部空闲后显示「完成」。
+        # _task_text 用于去重（同文案不重复 setText），_task_active 标记
+        # 当前 label 是否正被任务状态占用（空闲则恢复其他 labelInfo 语义）
+        self._task_active = False
+        self._task_text: str | None = None
 
         # 版本下拉：收敛为 26.2/1.21.11/1.21（.ui 内旧占位项运行时清空；
         # 会话恢复可覆盖）
@@ -357,10 +390,25 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self.biomeLocateList.setEditable(True)
         self.biomeLocateList.setInsertPolicy(
             QComboBox.InsertPolicy.NoInsert)
-        comp = self.biomeLocateList.completer()
-        if comp is not None:
-            comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            comp.setFilterMode(Qt.MatchFlag.MatchContains)
+        # 补全参照 SeedReverser 的群系名下拉：独立代理模型 + UnfilteredPopup
+        # 弹窗（始终显示完整候选列表 + 输入子串实时过滤），比 combo 自带
+        # 的前缀式补全对带空格的中英混合标签更可用（候选在 _update_biome_menu 填充）
+        self._biome_filter_model = QStandardItemModel(self.biomeLocateList)
+        self._biome_filter_proxy = QSortFilterProxyModel(
+            self.biomeLocateList)
+        self._biome_filter_proxy.setSourceModel(self._biome_filter_model)
+        self._biome_filter_proxy.setFilterCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive)
+        self._biome_filter_proxy.setFilterKeyColumn(0)
+        self._biome_completer = QCompleter(
+            self._biome_filter_proxy, self.biomeLocateList)
+        self._biome_completer.setCompletionMode(
+            QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self._biome_completer.setCaseSensitivity(
+            Qt.CaseSensitivity.CaseInsensitive)
+        self.biomeLocateList.setCompleter(self._biome_completer)
+        self.biomeLocateList.lineEdit().textEdited.connect(
+            self._biome_filter_proxy.setFilterFixedString)
         self.biomeLocateList.setToolTip(
             "输入或选择一个群系，自动查找离坐标输入最近（默认 0,0）的"
             "出现位置；换回首项撤销定位")
@@ -445,6 +493,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._reset_locate_state()
         self.progressRender.setValue(0)
         self.labelHover.setText("悬停地图查看坐标与群系")
+        self._task_active = False
+        self._task_text = None
         self.labelInfo.setText(
             "已切换到"
             + DIMENSION_NAMES.get(self._active_dimension, "主世界")
@@ -483,6 +533,10 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._selected = win.get_selected()
         self._update_struct_menu()
         self._persist()
+        # 已有地图：选择集变化后只刷新结构标记（重扫结构+重建标记），
+        # 不重采样地形（保留已渲染瓦片）
+        if self._has_map and not self._running:
+            self._refresh_structures_only()
 
     # ---------- 渲染状态机 ----------
     def _on_render_clicked(self) -> None:
@@ -558,6 +612,42 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         for w in (self.comboVersion, self.editSeed, self.comboRadius,
                   self.btnStructures, self.worldCombo):
             w.setEnabled(not running)
+
+    def _set_task_status(self, text: str) -> None:
+        """把右下角 labelInfo 置为实时任务阶段文案（同文案去重）。"""
+        if text == self._task_text:
+            return
+        self._task_text = text
+        self._task_active = True
+        self.labelInfo.setText(text)
+
+    def _finish_task_status(self) -> None:
+        """实时任务全部空闲：结束任务状态，显示「完成」就绪态。"""
+        if not self._task_active:
+            return
+        self._task_active = False
+        self._task_text = _TASK_DONE
+        self.labelInfo.setText(_TASK_DONE)
+
+    def _update_task_status(self) -> None:
+        """按当前实时活动刷新右下角「当前任务」显示。
+
+        优先级从高到低：结构上屏中 > 结构扫描/刷新中 > 地形瓦片
+        渲染中 > 全部空闲（显示「完成」）。仅在有地图且非全量渲染
+        时生效（全量渲染走 _on_progress/_on_finished 的 labelInfo）。
+        """
+        if self._running or self._last is None:
+            return
+        if self._pending_markers or self._marker_timer.isActive():
+            self._set_task_status(_TASK_RENDER_STRUCT)
+            return
+        if self._scan_thread is not None or self._refresh_thread is not None:
+            self._set_task_status(_TASK_COMPUTE_STRUCT)
+            return
+        if self._tile_thread is not None or not self._viewport_tiles_ready():
+            self._set_task_status(_TASK_RENDER_MAP)
+            return
+        self._finish_task_status()
 
     @staticmethod
     def _parse_seed(text: str) -> int:
@@ -936,16 +1026,30 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             for label, _key in biome_names.BIOME_CHOICES:
                 bid = biome_names.resolve_biome(label)
                 if bid is not None:
+                    idx = box.count()
                     box.addItem(label, int(bid))
+                    box.setItemIcon(
+                        idx, self._biome_icon_for_key(
+                            self._biome_key_map.get(int(bid))))
         else:
             for label, bid in DIM_BIOME_TABLES.get(
-                    self._current_dimension(), ()): 
+                    self._current_dimension(), ()):
+                idx = box.count()
                 box.addItem(str(label), int(bid))
+                box.setItemIcon(
+                    idx, self._biome_icon_for_key(
+                        self._biome_key_map.get(int(bid))))
         if keep is not None:
             i = box.findData(keep)
             if i >= 0:
                 box.setCurrentIndex(i)
         box.blockSignals(False)
+        # 同步补全候选：与 combo 项一致（跳过首项「选择群系」占位），
+        # 维度切换重建时模型跟着刷新，保证 UnfilteredPopup 列表不过时
+        self._biome_filter_model.clear()
+        for i in range(1, box.count()):
+            self._biome_filter_model.appendRow(
+                QStandardItem(box.itemText(i)))
 
     def _biome_key_by_id(self) -> dict:
         """当前维度群系 id → 内部键（画群系图标用；下界/末地标签
@@ -960,6 +1064,30 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         return {int(bid): str(label).split(" ")[-1]
                 for label, bid in DIM_BIOME_TABLES.get(
                     self._current_dimension(), ())}
+
+    @staticmethod
+    def _biome_icon_for_key(key) -> QIcon:
+        """按群系内部键取缩放后图标（缓存复用；无图/加载失败回退空）。
+
+        与 _draw_locate 同一图标源（biome_names.icon_path），统一缩放
+        到 _BIOME_ICON_SIZE 供下拉项左侧显示。
+        """
+        if not key:
+            return QIcon()
+        icon = _BIOME_ICON_CACHE.get(key)
+        if icon is not None:
+            return icon
+        icon = QIcon()
+        path = biome_names.icon_path(str(key))
+        if path:
+            pm = QPixmap(path)
+            if not pm.isNull():
+                icon = QIcon(pm.scaled(
+                    _BIOME_ICON_SIZE, _BIOME_ICON_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+        _BIOME_ICON_CACHE[key] = icon
+        return icon
 
     def _biome_display(self, bid: int) -> str:
         """群系显示名：下拉标签的中文前缀；未知 id 回退 biome_label。"""
@@ -1327,6 +1455,9 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         lod="cell" 时 1 像素 = 4x4 方块），切成瓦片入场景，
         瓦片坐标系 = 世界方块坐标（1 场景单位 = 1 方块）。
         """
+        # 新地图接管 labelInfo（_on_finished 会设 summary）：复位任务状态
+        self._task_active = False
+        self._task_text = None
         rgb = result["rgb"]
         h, w = rgb.shape[:2]
         origin_bx = int(result["origin_bx"])
@@ -1342,6 +1473,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._scene.clear()
         self._grid_item = None
         self._markers = []
+        self._pending_markers.clear()   # 新地图作废在途分帧上屏
+        self._marker_timer.stop()
         self._hover_tip_item = None   # 旧项已随 scene.clear() 销毁
         self._locate_items = []       # 旧定位项（含群系图标）已随
                                       # scene.clear() 销毁
@@ -1577,6 +1710,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         th.finished.connect(th.deleteLater)
         self._tile_thread = th
         th.start()
+        self._update_task_status()   # 增量瓦片渲染进行中 → 显示任务状态
 
     def _on_tile_done(self, payload: dict, epoch: int) -> None:
         """瓦片渲染完成：过期批次丢弃；否则替换场景像素项并做加权
@@ -1656,7 +1790,12 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         if epoch != self._tile_epoch:
             return    # 旧批次：线程已在作废时入 retired，不碰新线程
         self._cancel_tile_thread()   # 线程已结束，仅回收引用
-        self._schedule_timer.start()   # 防抖间隔后续批，渐进铺满
+        self._ensure_viewport_tiles()   # 直接续批：不再等被 move 重置的 180ms 防抖，
+        # 拖动中也能边拖边补，实现实时加载
+        # 视口瓦片已补齐（地形完好）：启动结构扫描（配合停止 0.2s 防抖）
+        if self._viewport_tiles_ready() and self._scan_thread is None:
+            self._scan_timer.start()
+        self._update_task_status()   # 刷新当前任务（可能续批渲染/转结构）
 
     def _on_tile_error(self, msg: str) -> None:
         self._cancel_tile_thread()   # 线程已结束，仅回收引用
@@ -1890,9 +2029,15 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             # 拖出新区域后延迟补渲染（停顿 180ms 才调度，拖动中不卡）；
             # 用户主动拖动重置续批轮次，重新铺满
             self._fill_rounds = 0
-            self._schedule_timer.start()
-            self._scan_timer.start()   # 拖动后视野变化，结构增量扫描跟进
+            # 拖动中实时补视口瓦片：有在途批次时 _ensure 内部自守，
+            # 无在途则立即按当前视口补帧，实现“随鼠标移动边拖边加载”
+            self._ensure_viewport_tiles()
+            self._schedule_timer.start()   # 停顿 180ms 再补一轮兜底
+            # 结构防抖：停止移动 0.2s 后才开始显示结构（拖动中持续 move
+            # 会重置计时器，一停顿即触发扫描；地图本身拖动中实时生成）
+            self._scan_timer.start()
             self._rebuild_grid()
+            self._update_task_status()   # 拖动中实时反馈当前任务
             return True
         # 2) 悬停查询：视图坐标 → 场景（方块）坐标 → 群系
         self._update_hover(pos)
@@ -1903,6 +2048,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         if was_pan:
             self._pan_start = None
             self.viewMap.setCursor(Qt.CursorShape.ArrowCursor)
+            # 停止拖动后再扫结构（结构在停止后显示，拖动中只生成地形）
+            self._scan_timer.start()
         if ev.button() == Qt.MouseButton.LeftButton and not was_pan:
             pos = ev.position().toPoint() if hasattr(ev, "position") \
                 else ev.pos()
@@ -2061,6 +2208,9 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                 pass    # scene.clear() 后旧项 C++ 对象已析构
         self._markers = []
         self._structs_seen = {}
+        # 重建即全量重画，作废在途的分帧上屏队列，避免与重建重复/冲突
+        self._pending_markers.clear()
+        self._marker_timer.stop()
         for st in structs:
             self._add_marker(st)
 
@@ -2078,9 +2228,12 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         if icon_file:
             pm = QPixmap(icon_file)
             if not pm.isNull():
-                # 浮板式合成：灰板+图标+右下柔和暗影
-                # （就近缩放像素风清晰，锚点命中走 data(1) 距离）
-                pm = _compose_plate_icon(pm)
+                # 浮板式合成：灰板+图标+右下柔和暗影（复用缓存，避免
+                # 批量上屏时对同图标重复合成）
+                pm = _ICON_PLATE_CACHE.get(icon_file)
+                if pm is None:
+                    pm = _compose_plate_icon(QPixmap(icon_file))
+                    _ICON_PLATE_CACHE[icon_file] = pm
                 item = QGraphicsPixmapItem(pm)
                 item.setOffset(-_MARK_PIX_SIZE / 2.0,
                                -_MARK_PIX_SIZE / 2.0)
@@ -2110,6 +2263,22 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._markers.append(item)
         return item
 
+    def _viewport_tiles_ready(self) -> bool:
+        """当前视口内的地形瓦片是否已全部生成（无缺失）。"""
+        if self._last is None:
+            return True
+        bx0, bz0, bx1, bz1 = self._visible_world_rect()
+        bx0, bz0 = max(bx0, -_WORLD_LIMIT), max(bz0, -_WORLD_LIMIT)
+        bx1, bz1 = min(bx1, _WORLD_LIMIT), min(bz1, _WORLD_LIMIT)
+        if bx1 <= bx0 or bz1 <= bz0:
+            return True
+        for tz in range(bz0 // _TILE_BLOCKS, (bz1 - 1) // _TILE_BLOCKS + 1):
+            for tx in range(bx0 // _TILE_BLOCKS,
+                            (bx1 - 1) // _TILE_BLOCKS + 1):
+                if (tx, tz) not in self._tiles:
+                    return False
+        return True
+
     def _ensure_structure_scan(self) -> None:
         """视口超出已扫描范围时提交一次结构增量扫描（防抖后调用）。
 
@@ -2121,6 +2290,11 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             return
         if self._scan_thread is not None:
             return    # 在途：完成后 _on_scan_done 会再调度一轮自愈
+        # 等视口地形瓦片补齐全才显示结构：结构不先于地形出现（拖动中
+        # 地图逐瓦片补齐，瓦片没齐时先不扫，齐了再触发）
+        if not self._viewport_tiles_ready():
+            self._scan_timer.start()   # 瓦片仍在补齐：稍后重试
+            return
         keys = sorted(self._selected or set())
         if not keys:
             return
@@ -2157,6 +2331,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         th.finished.connect(th.deleteLater)
         self._scan_thread = th
         th.start()
+        self._update_task_status()   # 结构扫描进行中 → 计算结构
 
     def _cancel_scan_thread(self) -> None:
         """放弃在途结构扫描：置取消标志并转入 retired 保引用。
@@ -2188,6 +2363,63 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         except ValueError:
             pass
 
+    def _refresh_structures_only(self) -> None:
+        """选择集变化后：只重扫已覆盖范围并按新选择集重建结构标记，
+        不重采样地形（保留已渲染瓦片）。"""
+        if self._last is None or self._running:
+            return
+        if self._refresh_thread is not None:
+            self._cancel_refresh_thread()
+        keys = sorted(self._selected or set())
+        if not keys:
+            self._render_markers([])   # 一个都没勾：清空结构标记
+            return
+        seed = int(self._last["seed"])
+        version = str(self._last["version"])
+        view = self._scan_covered if self._scan_covered is not None \
+            else self._world_rect()
+        self._refresh_epoch += 1
+        epoch = self._refresh_epoch
+        th = StructureScanThread(seed, version, view, keys, parent=self,
+                                 dimension=str(self._last.get(
+                                     "dimension", "overworld")))
+        th.structures_done.connect(
+            lambda p, e=epoch: self._on_struct_refresh_done(p, e))
+        th.error.connect(self._on_refresh_error)
+        th.finished.connect(lambda t=th: self._reap_scan_thread(t))
+        th.finished.connect(th.deleteLater)
+        self._refresh_thread = th
+        th.start()
+        self._update_task_status()   # 结构刷新进行中 → 计算结构
+
+    def _cancel_refresh_thread(self) -> None:
+        """放弃在途的结构刷新：置取消标志并转入 retired 保引用。"""
+        th = self._refresh_thread
+        self._refresh_thread = None
+        if th is None:
+            return
+        self._refresh_epoch += 1
+        th.request_cancel()
+        if th not in self._scan_retired:
+            self._scan_retired.append(th)
+
+    def _on_struct_refresh_done(self, payload: dict, epoch: int) -> None:
+        """结构刷新完成：按新选择集重建全部结构标记（保留地形瓦片）。"""
+        self._refresh_thread = None
+        if epoch != self._refresh_epoch or self._last is None \
+                or self._running:
+            return
+        self._render_markers(payload.get("structures", []))
+        # 结构定位激活时：强制图标若未被新选择集覆盖，补回
+        if self._locate_struct_key is not None:
+            self._ensure_locate_icon()
+
+    def _on_refresh_error(self, msg: str) -> None:
+        """结构刷新线程异常：回收引用并提示（不打断地图使用）。"""
+        self._refresh_thread = None
+        if not self._running:
+            self.labelInfo.setText("结构刷新失败（可点「更新结构」重试）")
+
     def _on_scan_done(self, payload: dict, epoch: int) -> None:
         """扫描完成：并入覆盖矩形与新发现结构（去重），再防抖自检一轮。
 
@@ -2204,12 +2436,34 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                                   max(view[2], cx1), max(view[3], cz1))
         else:
             self._scan_covered = view
+        # 新结构入待上屏队列，分帧 add_marker（避免一次性创建大量标记项）
         for st in payload.get("structures", []):
             k = (st["struct"], int(st["x"]), int(st["z"]))
             if k not in self._structs_seen:
-                self._add_marker(st)   # 只增不删：拖回旧区域标记仍在
+                self._pending_markers.append(st)
+        self._marker_timer.start()
         # 视口可能又动了：防抖后再检查一轮（拖动连续时的自愈）
         self._scan_timer.start()
+        self._update_task_status()   # 有结构待上屏 → 渲染结构
+
+    def _on_marker_tick(self) -> None:
+        """结构标记分帧上屏：每帧处理一批待上屏结构，直到队列清空。
+
+        拖动/扫描返回大量结构时，把一次性 add_marker 摊到多帧执行，
+        避免主线程一次性创建过多标记项造成卡顿。地图重渲染时队列
+        会在 _apply_result 清空，本函数随后自然停止。
+        """
+        if self._last is None or self._running:
+            self._pending_markers.clear()
+            return
+        batch = self._pending_markers[:_MARKER_BATCH]
+        del self._pending_markers[:len(batch)]
+        for st in batch:
+            self._add_marker(st)
+        if self._pending_markers:
+            self._marker_timer.start()   # 还有剩余：下一帧继续
+        # 队列清空则计时器保持停止
+        self._update_task_status()   # 上屏批次推进：刷新当前任务（剩/清空）
 
     def _on_scan_error(self, msg: str) -> None:
         """扫描线程异常：回收引用并提示（不打断地图使用）。
