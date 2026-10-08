@@ -20,7 +20,6 @@ MCHelper/
 │  ├─ Public/               跨工具公共模块（通知、图标、结构参数表、结构枚举引擎等）
 │  ├─ MainWindow/           可拖拽 Tab 栏组件
 │  ├─ Settings/             设置信号总线
-│  ├─ AutoBackUp/           备份通知 / 进程监测组件
 │  ├─ EnchantCaculator/     附魔计算核心（优化算法 / 步骤树 / 卡片控件）
 │  ├─ MapPreviewer/         地图采样与配色（含 _native 原生扩展）
 │  ├─ SeedReverser/         种子逆推核心算法库（RNG / 噪声 / NBT 模型 / 3D 视图）
@@ -37,17 +36,6 @@ MCHelper/
 > 每个工具在 `CodesUI/` 下还有同名的 Qt Designer 界面骨架（`setupUi` 纯布局，无业务逻辑），下文模块清单只列业务模块。
 
 ## 工具一览
-
-### 自动备份（AutoBackUp）
-
-按配置把指定文件/文件夹压缩备份到目标目录，线程池并发执行、逐任务进度反馈；内置进程监测，被监测程序启动时弹窗提醒；完成/失败通过桌面气泡通知反馈。
-
-**模块构成**：
-- `Threads/task_AutoBackUp` —— 备份压缩任务（QRunnable）：单文件/目录打包 zip，8KB 分块上报字节级进度
-- `Utils/AutoBackUp/signals_AutoBackUp` —— 全局信号总线 `backup_bus`：任务开始/进度/完成三信号，负责子线程→主线程通信
-- `Utils/AutoBackUp/process_monitor` —— 进程监测：定时轮询系统进程列表，发现被监测程序（默认 `java.exe`）启动即发信号
-- `Utils/AutoBackUp/right_icon_delegate` —— 备份列表行尾图标绘制委托
-- `Utils/Public/notification` —— 右下角可堆叠气泡通知（公共模块，4 个工具共用）
 
 ### 附魔计算器（EnchantCaculator）
 

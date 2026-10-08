@@ -16,7 +16,6 @@ class NotificationWidget(QWidget):
       （不传则用默认值，窗口随字体/内边距自适应变大）
 
     使用场景（已接入）：
-    - AutoBackUpWidget：备份完成/部分完成、监测进程启动时弹出
     - StrongHoldFinderWidget：要塞定位完成时弹出（大字号）
     """
     _instances = []  # 类级列表：记录当前所有存活的通知实例（用于多通知堆叠排布）

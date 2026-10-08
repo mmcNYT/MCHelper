@@ -18,3 +18,10 @@ venv/
 *.log
 /.temp/
 /.temp/
+
+# PyInstaller 构建产物与打包配置
+build/
+dist/
+versions/
+MCHelper.spec
+version_info.txt

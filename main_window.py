@@ -37,6 +37,13 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         super().__init__()
         self.setupUi(self)
 
+        # 窗口标题与图标（UI 默认 title 是 "MainWindow"，改成应用名；图标用自带的 .ico）
+        self.setWindowTitle("MCHelper")
+        _icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "assets", "Public", "MCHelper.ico")
+        if os.path.exists(_icon_path):
+            self.setWindowIcon(QIcon(_icon_path))
+
         #初始化状态量
         self.is_system_tray, self.is_start_on_boot = \
             self._load_saved_runtime_settings()
@@ -360,9 +367,9 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         用户点击窗口关闭按钮时：
         - 如果托盘图标可见，则隐藏窗口（最小化到托盘）并忽略关闭事件。
         - 如果正在退出程序，则正常关闭。
-        - 关闭前询问各工具：备份进行中时提示用户并阻止关闭（避免留下不完整的备份文件）。
+        - 关闭前询问各工具：有关键操作进行中时提示用户并阻止关闭。
         """
-        # 逐个工具检查是否允许关闭（如 AutoBackUp 备份进行中返回 False）
+        # 逐个工具检查是否允许关闭（工具实现 can_close 返回 False 时阻止）
         for i in range(self.tabWidget.count()):
             widget = self.tabWidget.widget(i)
             if hasattr(widget, 'can_close') and callable(widget.can_close):
@@ -370,8 +377,8 @@ class MainWindow(QMainWindow,Ui_MCHelper):
                     # 有工具正在进行关键操作：提示用户，本次阻止关闭
                     QMessageBox.warning(
                         self, "无法关闭",
-                        "工具正在执行备份任务，关闭程序会产生不完整的备份文件。\n"
-                        "请等待备份完成后再关闭。")
+                        "工具正在进行关键操作，立即关闭可能导致数据不完整。\n"
+                        "请等待操作完成后再关闭。")
                     event.ignore()
                     return
 
@@ -467,6 +474,13 @@ class MainWindow(QMainWindow,Ui_MCHelper):
         if index == 0:          #打开设置
             settings_win = SettingsWindow(self)
             settings_win.exec()
+        elif index == 1:        #关于
+            self.show_about_dialog()
+
+    def show_about_dialog(self):
+        """弹出「使用说明」窗口：分工具的使用方法手册，左侧导航。"""
+        from Utils.Public.tool_about import AboutDialog
+        AboutDialog(self).exec()
 
     def system_tray_controller(self,statu):
         self.is_system_tray = statu

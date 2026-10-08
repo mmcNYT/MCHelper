@@ -2,7 +2,7 @@
 """Public 公共模块包：存放被多个工具（Tools/tool_*.py）共用的模块。
 
 当前收录（按共用工具数排序）：
-- notification.py            桌面气泡通知（AutoBackUp/MapPreviewer/SeedReverser/StrongHoldFinder 共用）
+- notification.py            桌面气泡通知（MapPreviewer/SeedReverser/StrongHoldFinder 共用）
 - structure_icons.py         Wiki EnvSprite 结构图标加载（MapPreviewer/SeedReverser/StructurePreviewer 共用）
 - biome_names.py             群系 id/中文名/图标路径（MapPreviewer/SeedReverser/StructurePreviewer 共用）
 - structure_params.py        结构参数总表（MapPreviewer/SeedReverser/StructurePreviewer 共用）

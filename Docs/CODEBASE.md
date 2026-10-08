@@ -18,11 +18,9 @@
   - [`Utils/Public/structure_map.py`](#utilspublicstructure_mappy)
 - [3. 工具控制层与后台线程（Tools / Threads）](#3-工具控制层与后台线程tools--threads)
   - [`Tools/tool_base.py`](#toolstool_basepy)
-  - [`Tools/tool_AutoBackUp.py`](#toolstool_autobackuppy)
   - [`Tools/tool_Settings.py`](#toolstool_settingspy)
   - [`Tools/tool_StrongHoldFinder.py`](#toolstool_strongholdfinderpy)
   - [`Tools/tool_EnchantCaculator.py`](#toolstool_enchantcaculatorpy)
-  - [`Threads/task_AutoBackUp.py`](#threadstask_autobackuppy)
   - [`Threads/task_StrongHoldFinder.py`](#threadstask_strongholdfinderpy)
   - [`Threads/task_WorldSeedRefine.py`](#threadstask_worldseedrefinepy)
   - [`Tools/tool_MapPreviewer.py`](#toolstool_mappreviewerpy)
@@ -40,10 +38,7 @@
   - [`Utils/EnchantCaculator/conflict_resolver.py`](#utilsenchantcaculatorconflict_resolverpy)
   - [`Utils/EnchantCaculator/drop_list_widget.py`](#utilsenchantcaculatordrop_list_widgetpy)
   - [`Utils/EnchantCaculator/enchant_list_widget.py`](#utilsenchantcaculatorenchant_list_widgetpy)
-- [5. 备份组件与主窗口部件（AutoBackUp / Settings / MainWindow）](#5-备份组件与主窗口部件autobackup--settings--mainwindow)
-  - [`Utils/AutoBackUp/signals_AutoBackUp.py`](#utilsautobackupsignals_autobackuppy)
-  - [`Utils/AutoBackUp/process_monitor.py`](#utilsautobackupprocess_monitorpy)
-  - [`Utils/AutoBackUp/right_icon_delegate.py`](#utilsautobackupright_icon_delegatepy)
+- [5. 主窗口与设置组件（Settings / MainWindow）](#5-主窗口与设置组件settings--mainwindow)
   - [`Utils/Settings/signals_Settings.py`](#utilssettingssignals_settingspy)
   - [`Utils/MainWindow/draggable_tab_bar.py`](#utilsmainwindowdraggable_tab_barpy)
 - [6. 地图预览器逻辑层（Utils/MapPreviewer）](#6-地图预览器逻辑层utilsmappreviewer)
@@ -87,7 +82,6 @@
   - [`Utils/StructurePreviewer/__init__.py`](#utilsstructurepreviewer__init__py)
 - [10. 界面骨架层（CodesUI）](#10-界面骨架层codesui)
   - [`CodesUI/__init__.py`](#codesui__init__py)
-  - [`CodesUI/AutoBackUp.py`](#codesuiautobackuppy)
   - [`CodesUI/ChooseEnchantedItems.py`](#codesuichooseenchanteditemspy)
   - [`CodesUI/ChooseStructureWin.py`](#codesuichoosestructurewinpy)
   - [`CodesUI/EnchantCaculator.py`](#codesuienchantcaculatorpy)
@@ -103,7 +97,7 @@
 
 ## 0.1 项目定位
 
-MCHelper 是一个面向 Minecraft Java 版玩家的桌面工具合集（PySide6 单窗口、Tab 切换多工具），覆盖种子逆推、结构预览、地图预览、要塞定位、附魔计算、自动备份、设置管理等场景。数据全部本地处理，不依赖网络（除 Wiki 图标等静态资产已预先下载入库）。
+MCHelper 是一个面向 Minecraft Java 版玩家的桌面工具合集（PySide6 单窗口、Tab 切换多工具），覆盖种子逆推、结构预览、地图预览、要塞定位、附魔计算、设置管理等场景。数据全部本地处理，不依赖网络（除 Wiki 图标等静态资产已预先下载入库）。
 
 **技术栈**：Python 3 + PySide6（UI 与 OpenGL 视图）+ numpy（向量化 RNG/采样）+ pybind11（cubiomes 群系噪声原生扩展，MSVC 编译）+ ctypes（3D 视图直接调用原生 glDrawElements / cubiomes 函数）。
 
@@ -138,7 +132,6 @@ MCHelper/
 │  ├─ Public/                    ★ 公共模块（7 个，见 0.4）
 │  ├─ MainWindow/                可拖拽 Tab 栏（主窗口专用）
 │  ├─ Settings/                  设置信号总线
-│  ├─ AutoBackUp/                备份通知/进程监测/图标委托/信号总线
 │  ├─ EnchantCaculator/          附魔计算器 9 个模块
 │  ├─ MapPreviewer/              地图采样与配色 6 个模块 + _native 原生构建
 │  ├─ SeedReverser/              种子逆推核心库 14 个模块 + _native 原生构建
@@ -161,7 +154,7 @@ MCHelper/
 
 | 模块 | 职责 | 共用工具 |
 |---|---|---|
-| notification.py | 屏幕右下角可堆叠气泡通知（NotificationWidget.Show） | AutoBackUp、MapPreviewer、SeedReverser、StrongHoldFinder |
+| notification.py | 屏幕右下角可堆叠气泡通知（NotificationWidget.Show） | MapPreviewer、SeedReverser、StrongHoldFinder |
 | structure_icons.py | Wiki EnvSprite 结构图标加载（结构键+群系→PNG 路径） | MapPreviewer、SeedReverser、StructurePreviewer |
 | biome_names.py | 群系 id↔内部键↔中文名表 + 群系图标路径 | MapPreviewer、SeedReverser、StructurePreviewer |
 | structure_params.py | 结构参数总表（salt/区域尺寸/间距/版本/维度/可逆性） | MapPreviewer、SeedReverser、StructurePreviewer |
@@ -175,7 +168,6 @@ MCHelper/
 
 | 原位置 | 新位置 |
 |---|---|
-| Utils/AutoBackUp/notification.py | Utils/Public/notification.py |
 | Utils/MapPreviewer/structure_icons.py | Utils/Public/structure_icons.py |
 | Utils/MapPreviewer/structure_map.py | Utils/Public/structure_map.py |
 | Utils/SeedReverser/biome_names.py | Utils/Public/biome_names.py |
@@ -252,7 +244,7 @@ MCHelper/
 
 **工具注册机制**（核心流程）：
 
-- **注册表**：所有工具类集中放在 `Tools/__init__.py` 的 `TOOL_CLASSES` 列表中（当前 6 个：AutoBackUp、EnchantCalculator、StrongHoldFinder、SeedReverser、MapPreviewer、StructurePreviewer）。新增工具只需把类追加到该列表。
+- **注册表**：所有工具类集中放在 `Tools/__init__.py` 的 `TOOL_CLASSES` 列表中（当前 5 个：EnchantCalculator、StrongHoldFinder、SeedReverser、MapPreviewer、StructurePreviewer）。新增工具只需把类追加到该列表。
 - **工具元信息协议**：工具类继承 `BaseToolWidget` 并实现 `@classmethod tool_name()` 返回工具显示名（Tab 标题）。关键点：`load_tools` 里**先用 classmethod 拿名字、再实例化**——`tool_name()` 调用不创建对象，`tool_widget = tool_cls(self)` 这一行才真正实例化，随后 `addTab(tool_widget, tool_name)` 加入页签。
 - **顺序恢复**（`_order_tool_classes`）：读取 `tab_order.json`（工具名列表），按"保存的顺序里能对上注册表的名字优先、其余按注册表默认顺序追加"合成最终顺序。兼容规则（源码注释原文）：保存顺序包含全部工具 → 按保存顺序；新增了工具（保存记录里没有）→ 新工具按注册顺序追加在后面；保存记录里有已不存在的工具名 → 忽略（防止下次又存回去）；无记录/文件损坏/格式不合法（非字符串列表）→ 返回默认顺序 `list(TOOL_CLASSES)`。
 - **配置路径回退**（`tab_order_config_path_static`）：优先 `QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)`；返回空（异常环境）则回退到本文件所在目录；目录不存在时 `os.makedirs(..., exist_ok=True)` 自动创建；最终文件名为 `tab_order.json`（与 `settings_config.json` 同目录）。提供 staticmethod 版本是为了"不实例化主窗口即可获取，供测试等外部代码使用"，实例方法 `_tab_order_config_path` 只是转发。
@@ -268,7 +260,7 @@ MCHelper/
 
 **关闭与退出流程**（`closeEvent(event)`）：
 
-1. **逐工具关闭许可**：遍历所有 tab 页，部件若有可调用的 `can_close` 且返回 `False`（如 AutoBackUp 备份进行中），弹 `QMessageBox.warning`（"无法关闭：工具正在执行备份任务……"），`event.ignore()` 后直接 return，本次关闭被阻止。
+1. **逐工具关闭许可**：遍历所有 tab 页，部件若有可调用的 `can_close` 且返回 `False`（如某工具正有关键操作），弹 `QMessageBox.warning`（"无法关闭：工具正在执行备份任务……"），`event.ignore()` 后直接 return，本次关闭被阻止。
 2. 若 `is_quitting` 为 True（托盘菜单"关闭程序"已置位）**或** 未启用最小化到托盘（`is_system_tray == False`）：调用 `save_all_tools_config()` 保存全部工具配置，`event.accept()` 正常关闭。
 3. 若托盘图标存在且可见：`self.hide()` 隐藏窗口到托盘，`event.ignore()`（程序继续在托盘运行）。
 4. 托盘不可见（兜底）：保存配置后 `event.accept()`。
@@ -362,7 +354,6 @@ MCHelper/
 | `Show` | `@staticmethod Show(title, message, duration=3000, title_size=13, message_size=12, padding=(15,12,15,12))` | 快捷入口：创建实例并 `show()`，返回实例引用（便于外部跟踪/主动关闭）。必须在主线程调用，子线程需经信号转发。 |
 
 **接口**：被以下模块 import（`from Utils.Public.notification import NotificationWidget`）：
-- `Tools/tool_AutoBackUp.py:13`（备份完成/部分完成、监测进程启动时弹出）；
 - `Tools/tool_StrongHoldFinder.py:37`（要塞定位完成弹出，大字号）；
 - `Tools/tool_SeedReverser.py:63`；
 - `Tools/tool_MapPreviewer.py:65`。
@@ -739,7 +730,7 @@ MCHelper/
 
 | 公共模块 | 引用方（grep 确认） |
 |---|---|
-| `notification.py` | tool_AutoBackUp、tool_StrongHoldFinder、tool_SeedReverser、tool_MapPreviewer |
+| `notification.py` | tool_StrongHoldFinder、tool_SeedReverser、tool_MapPreviewer |
 | `structure_icons.py` | tool_MapPreviewer（st_icons）、tool_SeedReverser（struct_icons）、tool_StructurePreviewer（struct_icons）、Utils/MapPreviewer/choose_structure（st_icons） |
 | `biome_names.py` | tool_SeedReverser、tool_MapPreviewer、tool_StructurePreviewer、Utils/MapPreviewer/biome_colors |
 | `structure_params.py` | tool_SeedReverser、tool_MapPreviewer、tool_StructurePreviewer、Utils/MapPreviewer/choose_structure、Utils/SeedReverser/structure_math、Utils/Public/structure_map |
@@ -749,7 +740,7 @@ MCHelper/
 
 # 3. 工具控制层与后台线程（Tools / Threads）
 
-> 覆盖文件：`Tools/tool_base.py`、`Tools/tool_AutoBackUp.py`、`Tools/tool_Settings.py`、`Tools/tool_StrongHoldFinder.py`、`Tools/tool_EnchantCaculator.py`、`Threads/task_AutoBackUp.py`、`Threads/task_StrongHoldFinder.py`、`Threads/task_WorldSeedRefine.py`
+> 覆盖文件：`Tools/tool_base.py`、`Tools/tool_Settings.py`、`Tools/tool_StrongHoldFinder.py`、`Tools/tool_EnchantCaculator.py`、`Threads/task_StrongHoldFinder.py`、`Threads/task_WorldSeedRefine.py`
 > 所有内容均来自源码精读，代码标识符保留英文。
 
 ---
@@ -764,7 +755,7 @@ MCHelper/
    - `tool_name()` 类方法：子类必须覆盖，返回显示在 Tab 标签上的工具名称；未覆盖时抛 `NotImplementedError`；
    - `preferred_size` 类属性：可选的 `(宽, 高)` 元组（单位像素），声明工具期望的内容区尺寸。主窗口在切换到该工具的 tab 时会把窗口调整到该尺寸（窗口装饰差值自动计算）；设为 `None` 表示不声明，主窗口切换到该工具时保持当前窗口大小不动。
 
-此外主窗口在关闭与退出时通过鸭子协议调用工具的 `can_close()` / `save_config()` 方法（`main_window.py:228-259`），这两个方法不在基类中定义，由需要的工具自行实现（如 `AutoBackUpWidget.can_close`、`EnchantCalculatorWidget.save_config`）。
+此外主窗口在关闭与退出时通过鸭子协议调用工具的 `can_close()` / `save_config()` 方法（`main_window.py:228-259`），这两个方法不在基类中定义，由需要的工具自行实现（如 `EnchantCalculatorWidget.save_config`）。
 
 **类与函数**
 
@@ -778,7 +769,7 @@ MCHelper/
 
 **接口**
 
-- 被谁 import：`Tools/__init__.py:1`（re-export 供外部使用），以及 6 个工具模块 `tool_AutoBackUp.py`、`tool_EnchantCaculator.py`、`tool_MapPreviewer.py`、`tool_StrongHoldFinder.py`、`tool_SeedReverser.py`、`tool_StructurePreviewer.py`。
+- 被谁 import：`Tools/__init__.py:1`（re-export 供外部使用），以及 5 个工具模块 `tool_EnchantCaculator.py`、`tool_MapPreviewer.py`、`tool_StrongHoldFinder.py`、`tool_SeedReverser.py`、`tool_StructurePreviewer.py`。
 - 继承关系：继承 `QWidget`；是全部工具 Widget 类的直接基类。
 - 信号：定义 `request_status_message(str)`；不接收任何信号。
 
@@ -788,106 +779,6 @@ MCHelper/
 |---|---|---|
 | `request_status_message` | `Signal(str)` | 类级信号，工具 → 主窗口通信预留通道 |
 | `preferred_size` | `tuple \| None`，默认 `None` | 类属性；各工具以 `(628, 475)` 等具体值覆盖 |
-
----
-
-## `Tools/tool_AutoBackUp.py`
-
-**功能**：自动备份工具的主界面与控制层（586 行），职责包括：源/目标目录管理、存档列表展示（含 MC 存档封面图标）、备份任务队列调度、备份进度呈现、游戏进程监测与退出自动备份、配置持久化。
-
-**UI 构建流程**（`__init__` 按注释标号顺序执行）：
-
-1. `super().__init__(parent)` 初始化 QWidget；
-2. `setupUi(self)` 由编译生成的 `Ui_AutoBackUp` 创建全部控件与布局；
-3. 给存档列表 `targetDirList` 挂 `RightIconDelegate(icon_size=32)` 委托——MC 存档文件夹（内存档根目录直接存在 `icon.png/jpg/jpeg/webp/bmp`）的封面图标固定显示在行最右侧；
-4. 创建 300ms 单发防抖 `QTimer`（`_refresh_timer`）：源路径输入框 `textChanged` 每次只重启计时，用户停止输入 300ms 后才真正刷新列表（避免逐字符触发 `listdir` + 逐项解码存档图标造成卡顿）；
-5. 进度条 `backUpProgress` 清零；
-6. `connect_slots()` 连接全部信号槽；
-7. 取 `QThreadPool.globalInstance()` 并 `setMaxThreadCount(4)`，限制备份并发上限；
-8. 全部成员变量复位；
-9. `read_config()` 加载持久化配置（目录、选中项、监测进程名等）；
-10. 若配置中 `target_process` 非空，自动调用 `moniter_control()` 启动进程监测。
-
-**信号连接**（`connect_slots`）：`chooseTargetDir`/`chooseDesDir` 点击 → 弹目录对话框；`targetDirPath.textChanged` → 防抖刷新；`startBackUp` 点击 → `do_back_up("手动")`；`monitorController` 点击 → `moniter_control` 切换监测；`isAutoBackUp.checkStateChanged` → `on_back_up_check_box_changed`；`processName.textChanged` → `on_process_name_text_changed`；跨模块信号 `backup_bus.task_started/task_progress/task_finished` → 三个主线程更新槽。
-
-**备份任务生命周期（核心流程）**：`do_back_up(status)` 六步——
-
-1. `get_back_up_list()`：从列表当前选中项构建 `{文件名: 绝对路径}` 写回 `back_up_list`；随后 `save_config()` 先持久化配置；
-2. 重入保护：`is_backing_up` 为 True 时追加提示并返回（手动点击已被按钮禁用拦截，此处主要拦截"进程退出触发的自动备份"，防止计数被重置导致进度错乱）；
-3. 校验：`back_up_list` 为空报错返回；`des_dir_path` 为空报错返回（提前拦截 `makedirs('')` 的 `FileNotFoundError`）；通过后 `os.makedirs(self.des_dir_path, exist_ok=True)`；
-4. 阶段一（过滤有效文件，计算总大小）：遍历 `back_up_list`，路径不存在则警告跳过；文件夹用 `os.walk` 累计所有子文件大小、单文件直接 `os.path.getsize`，得到 `total_bytes` 与 `valid_paths`；全部无效则终止；
-5. 阶段二（设定备份初始状态）：`finished_bytes/finished_tasks/failed_tasks` 归零、`total_tasks = len(valid_paths)`、`is_backing_up = True`、进度条归零、`startBackUp` 禁用、`_set_backup_controls_enabled(False)` 禁用路径编辑与列表选择（防止用户在备份中修改路径/选区与备份交错），信息框输出概览（触发方式 status + `format_bytes` 格式化总大小 + 任务数）；
-6. 阶段三（提交任务到多线程池）：为每个 `valid_paths[idx]` 创建 `BackupTask(task_id=idx, file_path, dest_dir=self.des_dir_path)` 并 `self.thread_pool.start(task)`，由全局线程池（≤4 并发）调度执行；主线程随即返回，UI 靠 `backup_bus` 信号接收进度。
-
-**backup_bus 信号通信**：`BackupTask` 在工作线程发射 `task_started(int, str)` / `task_progress(int, int)`（第二个 int 为本次压缩的增量字节数，非百分比）/ `task_finished(int, bool, str)`。主线程三个槽：`on_back_up_started` 向信息框追加"正在备份"日志；`on_back_up_progress` 累加 `finished_bytes`，按 `total_bytes` 换算百分比刷新进度条（`min(percent, 100)` 防多任务超 100%）；`on_back_up_finished` 累计 `finished_tasks` 与 `failed_tasks`、按成败追加日志，当 `finished_tasks == total_tasks` 时收尾——`is_backing_up = False`、恢复开始按钮与路径/列表控件、弹 `NotificationWidget.Show`（全部成功 / 有 N 个失败，3000ms）、进度条置 100。
-
-**process_monitor 轮询**：监测器为 `Utils/AutoBackUp/process_monitor.py` 的 `ProcessMonitor`（`QObject` + `QTimer`，默认每 1000ms 触发 `_check`，内部用 `psutil.process_iter` 按进程名不区分大小写模糊匹配；PID 优先级更高但本工具只用进程名）。`start_monitoring()`：读取 `processName` 输入框（空则默认 `'java.exe'`）存入 `target_process`；旧 `monitor` 存在则先 `stop_monitoring()` + `deleteLater()`；新建 `ProcessMonitor(process_name=...)`，连接其 `started(name, pid)` / `stopped(name)` 信号，置 `is_monitoring = True` 后 `start_monitoring()`（内部先立即 `_check` 一次再启动定时器）。`stop_monitoring()`：停止并销毁 monitor、复位状态。`moniter_control()` 为切换开关，同时联动 `processName` 输入框的禁用/启用与按钮文本。槽 `on_process_started` 记录日志并弹通知；`on_process_stopped` 记录日志、按钮文本复位为"开始监测"，且当 `is_auto_back_up` 为 True 时调用 `do_back_up(status="自动")`——实现"游戏进程（默认 java.exe）退出即自动备份存档"。
-
-**配置持久化**：配置文件 `backup_config.json`，路径由 `get_config_path()` 决定——`QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)`（通常 `~/.config/` 或 `%APPDATA%/`），获取失败回退到脚本所在目录，目录不存在自动创建。字段五个：`target_dir_path`（源目录）、`des_dir_path`（备份目标目录）、`back_up_list`（选中项字典）、`target_process`（监测进程名）、`is_auto_back_up`（缺省 True）。`read_config()` 恢复变量并回填 UI（含 `refresh_dir_list()` 触发列表刷新，`_do_refresh_dir_list` 末尾按 `back_up_list` 键集合用 `QItemSelectionModel.Select | Rows` 自动重选列表行）；`save_config()` 在每次 `do_back_up` 前写入（`ensure_ascii=False, indent=2`）。
-
-**存档封面图标**：候选文件名元组 `_ICON_NAMES = ("icon.png", "icon.jpg", "icon.jpeg", "icon.webp", "icon.bmp")`；`_load_save_icon` 按候选顺序探测，命中且 `QPixmap` 非空则以 icon 文件绝对路径为键存入 `_icon_cache`（同一目录反复刷新不重复读盘解码），失败返回 `None`。`_add_list_items` 逐项构建 `QListWidgetItem`：text 保持原始文件夹名不变（它是 `saves_list`/`back_up_list` 的字典键，选中恢复逻辑依赖 text 匹配），图标通过 `RightIconDelegate.set_right_icon` 的自定义数据角色携带，不影响 text。目录无效（不存在/无权限）时 `_show_dir_error_item` 显示一行 `NoItemFlags` 的置灰提示项，不再静默空白。
-
-**关闭保护协议**：`can_close()` 在备份进行中返回 False；主窗口 `closeEvent`（`main_window.py:228-238`）逐 tab 检查 `can_close`，为 False 时弹警告并 `event.ignore()`，避免留下不完整的 zip。
-
-**类与函数**
-
-| 名称 | 签名 | 说明 |
-|---|---|---|
-| `format_bytes` | `format_bytes(num_bytes: int) -> str`（模块级） | 字节数格式化为 1024 进制易读单位（B/KB/MB/GB/TB），保留 1 位小数，整数值省略 `.0`（如 1024 → "1 KB"） |
-| `AutoBackUpWidget.__init__` | `__init__(self, parent=None)` | 按标号 1~9 顺序完成 UI 构建、委托挂载、防抖定时器、信号连接、线程池（setMaxThreadCount(4)）、成员复位、读配置、按需自动开启监测 |
-| `connect_slots` | `connect_slots(self)` | 连接全部控件信号与 `backup_bus` 三条跨模块信号 |
-| `tool_name` | `@classmethod tool_name(cls) -> str` | 返回 `"AutoBackUp"` 作为 Tab 标题 |
-| `choose_target_dir` | `@Slot() choose_target_dir(self)` | `QFileDialog.getExistingDirectory` 选源目录，写入 `target_dir_path` 与 `targetDirPath` 文本框；取消（空串）不动作 |
-| `choose_des_der` | `@Slot() choose_des_der(self)` | 同上，选备份目标目录，写入 `des_dir_path` 与 `targetDesPath` |
-| `refresh_dir_list` | `@Slot() refresh_dir_list(self)` | 源路径文本变化时的防抖入口：仅 `_refresh_timer.start()`，到期才执行实际刷新 |
-| `_do_refresh_dir_list` | `_do_refresh_dir_list(self)` | 实际刷新：清空列表与 `saves_list` → 校验 `os.path.isdir`（失败显示置灰错误项并返回）→ `os.listdir` 建 `{文件名: 绝对路径}` 映射 → `_add_list_items` 构建条目（含封面图标）→ 遍历列表按 `back_up_list` 键整行恢复选中 |
-| `_show_dir_error_item` | `_show_dir_error_item(self, message: str)` | 向列表添加一行 `Qt.ItemFlag.NoItemFlags` 的不可选提示项 |
-| `_load_save_icon` | `_load_save_icon(self, full_path: str)` | 按 `_ICON_NAMES` 顺序探测存档封面 icon，带 `_icon_cache` 缓存；命中返回 `QPixmap`，否则 `None` |
-| `_add_list_items` | `_add_list_items(self, items)` | 逐项添加列表条目；仅文件夹才尝试加载封面图标（普通文件跳过）；text 保持原文件夹名 |
-| `get_back_up_list` | `get_back_up_list(self)` | 清空 `back_up_list` 后按 `selectedItems()` 重建 `{选中文本: 绝对路径}` 映射 |
-| `get_config_path` | `get_config_path(self) -> str` | 返回配置文件绝对路径（AppConfigLocation，失败回退脚本目录，自动建目录） |
-| `read_config` | `read_config(self)` | 加载 JSON 配置到成员变量并回填 UI、触发列表刷新；文件不存在直接返回；异常打印不抛出 |
-| `save_config` | `save_config(self)` | 先 `get_back_up_list()` 取最新选中项，再写入五字段 JSON（`ensure_ascii=False, indent=2`） |
-| `do_back_up` | `@Slot() do_back_up(self, status)` | 备份主流程（见上文"备份任务生命周期"六步）；status 为 `"手动"`/`"自动"`，仅用于信息框文案 |
-| `_set_backup_controls_enabled` | `_set_backup_controls_enabled(self, enabled: bool)` | 备份期间禁用/恢复源目录按钮、路径输入框（readOnly）、存档列表 |
-| `can_close` | `can_close(self) -> bool` | 返回 `not self.is_backing_up`；主窗口关闭前询问用 |
-| `on_back_up_started` | `@Slot() on_back_up_started(self, task_id, filename)` | 接收任务开始信号，信息框追加 `[任务{id}] 正在备份：{filename}` |
-| `on_back_up_progress` | `@Slot() on_back_up_progress(self, task_id, chunk_bytes)` | 累加 `finished_bytes`，按总大小换算百分比（上限 100）刷新进度条 |
-| `on_back_up_finished` | `@Slot() on_back_up_finished(self, task_id, success, message)` | 统计成败并记日志；全部完成时复位 `is_backing_up`、恢复控件、弹通知、进度条置 100 |
-| `moniter_control` | `@Slot() moniter_control(self)` | 监测开关：未监测时改按钮文本为"停止监测"并 `start_monitoring()`、禁用进程名输入框；否则反向 |
-| `start_monitoring` | `start_monitoring(self)` | 取进程名（空默认 `java.exe`）；旧 monitor 清理后新建 `ProcessMonitor`，连接 `started`/`stopped`，置位并启动 |
-| `stop_monitoring` | `stop_monitoring(self)` | 停止并 `deleteLater()` monitor、置 None、`is_monitoring = False` |
-| `on_process_started` | `on_process_started(self, name, pid)` | 进程启动处理：信息框记录 + `NotificationWidget.Show` 通知 |
-| `on_process_stopped` | `on_process_stopped(self, name)` | 进程退出处理：记录日志、按钮复位；`is_auto_back_up` 为 True 时 `do_back_up(status="自动")` |
-| `on_back_up_check_box_changed` | `on_back_up_check_box_changed(self)` | 读 `isAutoBackUp.checkState().name`，`"Checked"` → `is_auto_back_up = True`，否则 False |
-| `on_process_name_text_changed` | `on_process_name_text_changed(self)` | 输入框文本同步到 `target_process` |
-
-**接口**
-
-- 继承：`BaseToolWidget` + `Ui_AutoBackUp`（`CodesUI.AutoBackUp` 编译生成的 UI 类）。
-- 依赖 import：`BackupTask`（Threads）、`backup_bus`（Utils.AutoBackUp.signals_AutoBackUp）、`ProcessMonitor`（Utils.AutoBackUp.process_monitor）、`NotificationWidget`（Utils.Public.notification）、`RightIconDelegate`（Utils.AutoBackUp.right_icon_delegate）。
-- 被谁 import：`Tools/__init__.py` 将其注册进 `TOOL_CLASSES`，由 `main_window.py` 加载为 tab 页。
-- 信号接收：`backup_bus.task_started/task_progress/task_finished`；`monitor.started(str, int)` / `monitor.stopped(str)`。
-- 信号发出：无自定义信号（基类 `request_status_message` 继承但未使用）。
-
-**关键变量/常量**
-
-| 名称 | 类型/值 | 说明 |
-|---|---|---|
-| `preferred_size` | `(628, 475)` | 类属性，UI 设计尺寸，主窗口切到本 tab 时自适应 |
-| `_ICON_NAMES` | `("icon.png", "icon.jpg", "icon.jpeg", "icon.webp", "icon.bmp")` | 类常量，存档封面图标候选文件名 |
-| `target_dir_path` / `des_dir_path` | `str`，默认 `''` | 类属性声明 + `__init__` 重赋实例属性：源/目标目录路径 |
-| `saves_list` / `back_up_list` | `dict`，默认 `{}` | 类属性声明 + `__init__` 重赋实例属性：源目录全部条目映射 / 用户选中的备份项映射 |
-| `target_process` | `str` | 监测的进程名（如 java.exe），触发自动备份的依据 |
-| `total_bytes` / `finished_bytes` | `int` | 待备份总字节数 / 已完成累计字节数 |
-| `total_tasks` / `failed_tasks` | `int` | 任务总数 / 失败数（`finished_tasks` 未在 `__init__` 初始化，仅在 `do_back_up` 阶段二赋值） |
-| `is_backing_up` | `bool` | 备份进行中标志（重入保护 + 主窗口关闭保护） |
-| `is_auto_back_up` | `bool`，默认 `True` | 进程退出时是否自动备份 |
-| `monitor` / `is_monitoring` | `ProcessMonitor \| None` / `bool` | 进程监测器实例与运行标志 |
-| `thread_pool` | `QThreadPool` | 全局线程池，最大并发 4 |
-| `_refresh_timer` | `QTimer`（单发，300ms） | 路径输入防抖定时器 |
-| `_icon_cache` | `dict` | `{icon 文件绝对路径: QPixmap}` 封面图标缓存 |
-| `backup_config.json` | 配置文件 | 位于 AppConfigLocation（失败回退脚本目录），五个字段见上文 |
 
 ---
 
@@ -1063,48 +954,6 @@ MCHelper/
 | `_optimizer` | `AnvilOptimizer` | 铁砧优化器实例（`DataManager()` 单例注入） |
 | `_last_plan` / `_last_dm` | 方案对象 / `DataManager` | 最近一次计算成功的方案及其数据管理器（displayMode 切换重渲染用） |
 | `enchant_session.json` | 配置文件 | 位于 AppConfigLocation，内容为卡片列表 JSON，重启恢复用 |
-
----
-
-## `Threads/task_AutoBackUp.py`
-
-**功能**：备份任务的可运行对象（124 行）。`BackupTask` 继承 `QRunnable`，封装**单个**文件或文件夹压缩到目标 ZIP 的全部逻辑；自身不创建线程，由 `AutoBackUpWidget` 持有的全局 `QThreadPool`（最大并发 4）调度执行 `run()`。采用分块读取（8KB）避免大文件内存溢出，通过全局信号总线 `backup_bus` 向主线程汇报开始/进度/结果——工作线程不直接接触任何 UI。
-
-**命名规则**：`__init__` 中预生成属性 `self.zip_name = 原文件名(不含扩展名)_YYMMDD_HHMMSS.zip`（时间戳 `datetime.now().strftime("%y%m%d_%H%M%S")`，如 `data_240808_153045.zip`）；`run()` 内再按源类型计算局部 `zip_name`——单文件取 `splitext` 去扩展名，文件夹直接用 `base_name`（文件夹名），并拼出 `dest_path = os.path.join(self.dest_dir, zip_name)`。
-
-**run() 执行流程**：
-
-1. `try` 块内先 `backup_bus.task_started.emit(self.task_id, os.path.basename(self.file_path))` 通知主界面任务开始；
-2. 创建 `zipfile.ZipFile(dest_path, 'w', compression=zipfile.ZIP_DEFLATED)`：
-   - **单文件**：记录 `total_size`（取了值但流程中未再使用，进度按增量汇报）、`open(源文件, 'rb')` 与 `zipf.open(条目名=basename, 'w')` 双上下文，循环 `src_file.read(8192)` 分块写入，每块 `backup_bus.task_progress.emit(self.task_id, len(chunk))`（增量字节数，非百分比）；
-   - **文件夹**：`os.walk` 递归遍历全部子目录，每个文件 `arcname = os.path.relpath(full_path, start=root_dir)` 保留相对目录结构（如 `folder/subfolder/file.txt`）写入 ZIP，同样 8KB 分块 + 每块发增量进度；
-3. 全部压缩完成：`backup_bus.task_finished.emit(self.task_id, True, f"{zip_name} 备份成功")`；
-4. 异常处理：`except Exception` 捕获所有异常，`backup_bus.task_finished.emit(self.task_id, False, f"{zip_name} 备份失败: {str(e)}")`——失败信息也经完成信号回传，不在工作线程弹窗。
-
-**类与函数**
-
-| 名称 | 签名 | 说明 |
-|---|---|---|
-| `BackupTask.__init__` | `__init__(self, task_id: int, file_path: str, dest_dir: str)` | 保存任务 ID（用于主界面区分并发任务）、源路径（单文件直压 / 文件夹递归）、输出目录；预生成 `self.zip_name`（原名去扩展名_时间戳.zip） |
-| `BackupTask.run` | `run(self)` | 压缩主逻辑：发 task_started → 按 basename/时间戳定 zip 名 → ZIP_DEFLATED 创建压缩包（单文件 8KB 分块 / 文件夹 os.walk 递归 + relpath 保结构 + 8KB 分块，每块发 task_progress 增量）→ 发 task_finished(成功)；任何异常发 task_finished(失败, 错误信息) |
-
-**接口**
-
-- 被谁 import：仅 `Tools/tool_AutoBackUp.py:15`（`do_back_up` 阶段三逐项创建并 `thread_pool.start(task)`）。
-- 继承：`QRunnable`（PySide6.QtCore）。
-- 信号：经模块级单例 `backup_bus`（`Utils/AutoBackUp/signals_AutoBackUp.py`，`BackupSignals(QObject)`：`task_started(int, str)`、`task_progress(int, int)` 增量、`task_finished(int, bool, str)`）发出三条信号；不接收信号。
-
-**关键变量/常量**
-
-| 名称 | 类型/值 | 说明 |
-|---|---|---|
-| `task_id` | `int` | 任务索引标识，对应 `valid_paths` 中的位置，主界面据此区分并发任务 |
-| `file_path` | `str` | 源文件/文件夹绝对路径 |
-| `dest_dir` | `str` | 目标 ZIP 存放目录 |
-| `zip_name` | `str` | `__init__` 预生成的目标文件名属性（run 内另有同规则局部变量） |
-| `8192` | 字节 | 分块读写缓冲大小（两处硬编码） |
-| `zipfile.ZIP_DEFLATED` | 压缩算法 | ZIP 创建时使用的 deflate 压缩 |
-| `"%y%m%d_%H%M%S"` | 时间戳格式 | 输出文件名时间戳（如 `240808_153045`） |
 
 ---
 
@@ -2579,106 +2428,10 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 | 条目角色 | `Qt.UserRole`=附魔 ID、`+1`=当前等级、`+2`=最大等级（由 `choose_items.update_tabs_and_lists` 写入） |
 | MIME 约定 | `text/plain` 的 `"附魔ID:等级"` |
 
-# 5. 备份组件与主窗口部件（AutoBackUp / Settings / MainWindow）
+# 5. 主窗口与设置组件（Settings / MainWindow）
 
-> 本文档基于源码精读整理，覆盖以下 5 个文件：
-> `Utils/AutoBackUp/signals_AutoBackUp.py`、`Utils/AutoBackUp/process_monitor.py`、`Utils/AutoBackUp/right_icon_delegate.py`、`Utils/Settings/signals_Settings.py`、`Utils/MainWindow/draggable_tab_bar.py`
-
----
-
-## `Utils/AutoBackUp/signals_AutoBackUp.py`
-
-**功能**：备份功能的跨线程信号总线。备份任务的压缩工作在 `QThreadPool` 工作线程（`Threads/task_AutoBackUp.py`）中执行，而 Qt 的 UI 更新只允许在主线程进行；本文件提供一个全局唯一的 `QObject` 信号载体，工作线程只管向它发射信号，主界面（`Tools/tool_AutoBackUp.py`）连接这些信号做日志、进度条与结果通知。PySide6 的信号是线程安全的队列连接载体，`emit` 从工作线程调用时会自动跨线程投递到接收者所在线程，从而实现"工作线程 → 主线程"的安全通信。文件极小（16 行），仅含一个信号类与一个模块级单例。
-
-**类与函数**：
-
-| 名称 | 签名 | 说明 |
-| --- | --- | --- |
-| `BackupSignals` | `class BackupSignals(QObject)` | 备份信号总线类，继承 `QObject`，仅声明信号、不含任何逻辑。docstring 写明用途："全局信号总线，用于所有备份任务与主线程通信"。 |
-| `BackupSignals.task_started` | `Signal(int, str)` | 任务开始信号，参数为 `(任务ID, 文件名)`。 |
-| `BackupSignals.task_progress` | `Signal(int, int)` | 任务进度信号，参数为 `(任务ID, 已压缩字节数)`。**注意：第二个参数是增量字节数（每次新压缩了多少），不是累计百分比**，百分比换算由接收方负责。 |
-| `BackupSignals.task_finished` | `Signal(int, bool, str)` | 任务完成信号，参数为 `(任务ID, 是否成功, 消息)`。 |
-
-**接口**：
-- 对外提供模块级全局单例 `backup_bus = BackupSignals()`（文件内注释"全局单例"），整个项目共用这一个实例。
-- 被 `Threads/task_AutoBackUp.py` import（`from Utils.AutoBackUp.signals_AutoBackUp import backup_bus`）：工作线程依次发射 `task_started(self.task_id, filename)`、循环中按压缩块发射 `task_progress(self.task_id, len(chunk))`、结束发射 `task_finished(self.task_id, True/False, 消息)`。
-- 被 `Tools/tool_AutoBackUp.py` import（同样导入 `backup_bus`）：在初始化中把三个信号分别连接到 `self.on_back_up_started`、`self.on_back_up_progress`、`self.on_back_up_finished`，完成 UI 反馈。
-
-**关键变量/常量**：
-
-| 名称 | 类型 | 说明 |
-| --- | --- | --- |
-| `backup_bus` | `BackupSignals` | 模块级全局单例（import 时即创建），任务线程与 UI 线程共同持有的通信枢纽。 |
-
----
-
-## `Utils/AutoBackUp/process_monitor.py`
-
-**功能**：进程监测器。用 `psutil` + `QTimer` 定时轮询的方式实时监测某个目标进程（按进程名或 PID 识别）是否在运行，状态发生变化时通过 Qt 信号向主界面汇报。核心机制是**轮询**：一个默认 1000ms 间隔的 `QTimer` 周期性触发 `_check()`，`_check()` 调 `_is_process_running()` 得到"当前是否在运行"，与内部缓存 `_is_running` 比较——只有发生**状态翻转**（停→跑 / 跑→停）才发射信号，状态不变时不发任何信号，避免刷屏。启动监测时会先立即执行一次 `_check()` 再启动定时器，这样目标进程若已在运行，监测开始的一瞬间就能收到 `started` 信号，不会漏报。
-
-进程名匹配规则（`_is_process_running`）：① 若提供了 `pid`，直接 `psutil.pid_exists(pid)` 判断，无需遍历进程表，最精确也最快；② 否则用 `process_name` 匹配——把目标名转小写，`psutil.process_iter(['name'])` 遍历全系统进程，逐个比较 `proc.info['name'].lower() == name_lower`，即**全名相等、忽略大小写**（不是子串模糊匹配）；③ 两者都没提供返回 `False`。遍历过程中对单个进程抛出的 `psutil.NoSuchProcess`（进程恰好消失）与 `psutil.AccessDenied`（无权限查看）做 `continue` 跳过，不影响整体检查。按名字匹配每次都要遍历整个进程表，文件注释也指出频繁调用时可改用 PID 方式规避开销。
-
-在项目中的实际用法（`Tools/tool_AutoBackUp.py`）：备份工具页让用户输入目标进程名（输入为空时默认监测 `java.exe`），点"开始监测"按钮后 `ProcessMonitor(process_name=process_name)` 实例化，把 `started`/`stopped` 连到 `on_process_started`/`on_process_stopped` 槽，再调 `start_monitoring()`；再点按钮则 `stop_monitoring()` + `deleteLater()` 销毁监测器。用于实现"监测到 MC 进程启动/退出时自动备份存档"类场景。
-
-**类与函数**：
-
-| 名称 | 签名 | 说明 |
-| --- | --- | --- |
-| `ProcessMonitor` | `class ProcessMonitor(QObject)` | 进程监测器类。信号：`started(str, int)`——目标进程启动时发射，附进程名与 PID；`stopped(str)`——目标进程关闭时发射，附最后一次获取的进程名；`status_changed(bool)`——状态翻转时发射（True=启动/恢复，False=关闭），供主界面统一更新状态。 |
-| `__init__` | `(self, process_name=None, pid=None, parent=None)` | 保存监测条件（`pid` 优先于 `process_name`），初始化状态缓存 `_is_running = False`，创建 `QTimer(self)` 并把 `timeout` 连到 `_check`，默认检查间隔 `_interval = 1000`（毫秒）。支持只给名字、只给 PID 或两者混用的三种构造方式。 |
-| `set_interval` | `(self, ms: int)` | 修改检查间隔。若定时器正在运行，先 `stop()` 再以新间隔 `start()`，保证改动立即生效；值越小响应越快但 CPU 占用越高，注释建议不要低于 100ms。 |
-| `start_monitoring` | `(self)` | 开始监测。若定时器未在运行：先立即执行一次 `_check()` 获取初始状态（避免漏掉"监测开始前就已运行"的进程，若已运行会当场发射 `started`），再 `self._timer.start(self._interval)` 进入周期轮询。 |
-| `stop_monitoring` | `(self)` | 停止监测：停掉定时器即不再轮询；内部缓存的状态保持不变，彻底清理需另行 `deleteLater()`。 |
-| `_check` | `(self)` | 轮询核心（由定时器触发）。流程：调用 `_is_process_running()` 得到当前状态 → 与缓存 `_is_running` 比较 → 不一致则更新缓存并按方向发射信号：变为运行时先 `_get_process_info()` 取 `(name, pid)` 发 `started`（取不到信息时走防御分支发 `(self.process_name or "Unknown", 0)`），再发 `status_changed(True)`；变为关闭则发 `stopped(self.process_name or "Unknown")` 与 `status_changed(False)`。状态无变化不发射。 |
-| `_is_process_running` | `(self) -> bool` | 按上文匹配规则判断目标进程是否存在：PID 优先走 `psutil.pid_exists`；否则按进程名小写全等匹配遍历 `psutil.process_iter(['name'])`，单进程异常（`NoSuchProcess`/`AccessDenied`）跳过；无条件时返回 `False`。 |
-| `_get_process_info` | `(self)` | 获取当前匹配进程的 `(进程名, PID)` 元组，找不到返回 `None`。有 `pid` 时直接 `psutil.Process(self.pid).name()`（进程不存在抛 `NoSuchProcess` 返回 `None`）；有名字时按与 `_is_process_running` 相同的忽略大小写规则遍历 `process_iter(['name', 'pid'])` 查找。供 `started` 信号与 `get_current_info()` 使用。 |
-| `is_running` | `(self) -> bool` | 对外查询当前运行状态：直接调 `_is_process_running()` 实时检查，不依赖缓存，即使定时器停了也能得到正确结果。 |
-| `get_current_info` | `(self)` | 对外查询当前匹配进程的详细信息 `(name, pid)`，与 `is_running()` 一样实时查询；区别在于它返回详细元组（可用于显示 "java.exe (PID: 1234)" 这类文本），找不到返回 `None`。 |
-
-**接口**：
-- 被 `Tools/tool_AutoBackUp.py` import（`from Utils.AutoBackUp.process_monitor import ProcessMonitor`）。工具页持有 `self.monitor` 实例与 `self.is_monitoring` 开关，`moniter_control` 按钮槽负责启停切换；`started` → `on_process_started`、`stopped` → `on_process_stopped`。
-- 对外提供：类 `ProcessMonitor`（三个信号 `started(str, int)` / `stopped(str)` / `status_changed(bool)`），以及 `start_monitoring()` / `stop_monitoring()` / `set_interval(ms)` / `is_running()` / `get_current_info()` 五个公开方法。
-
-**关键变量/常量**：
-
-| 名称 | 类型 | 说明 |
-| --- | --- | --- |
-| `self.process_name` | `str \| None` | 目标进程名（如 `"java.exe"`），匹配时忽略大小写。 |
-| `self.pid` | `int \| None` | 目标进程 PID，提供时优先于进程名（`psutil.pid_exists` 精确判断）。 |
-| `self._is_running` | `bool` | 上次轮询缓存的运行状态，用于在 `_check()` 中检测状态翻转。 |
-| `self._timer` | `QTimer` | 轮询定时器，`timeout` 连接 `_check`。 |
-| `self._interval` | `int` | 检查间隔毫秒数，默认 `1000`。 |
-
----
-
-## `Utils/AutoBackUp/right_icon_delegate.py`
-
-**功能**：把列表项图标固定绘制在**行最右侧**的自定义委托（Delegate），服务于 AutoBackUp 存档列表。背景：`QListWidget` 默认的图标（`DecorationRole`）由风格绘制在文字左侧，无法满足"图标统一靠右"的需求。本委托的策略是**分工绘制**：背景、选中高亮和文字仍交给 Qt 默认风格按完整行宽绘制（文字按剩余宽度做尾部省略 `…`，给右侧图标让位），只有自定义数据角色 `ICON_ROLE` 里携带的 `QPixmap` 由委托自己画在行的右缘。用途：扫描存档目录时，若文件夹内含 `icon` 文件（即 MC 地图存档），就把世界封面图标画在该行最右侧，一眼区分哪些文件夹是可玩的世界存档。
-
-`paint()` 的实现流程：① 无图标（`ICON_ROLE` 数据不是有效 `QPixmap`）时直接 `super().paint()` 完全走默认绘制；② 有图标时复制一份 `QStyleOptionViewItem` 并 `initStyleOption`，把 `textElideMode` 设为 `ElideRight`，用 `QFontMetrics.elidedText` 按"可用宽度 = 行宽 − 右留白 − 图标宽 − 文字图标间距"预先省略文本，再调 `option.widget.style()`（兜底 `QApplication.style()`）的 `drawControl(CE_ItemViewItem, ...)` 画完整行；③ 图标定位：槽宽 `slot = min(icon_size, 行宽 − ICON_RIGHT_MARGIN)`（行极窄时收缩到 0 防越界），水平贴右缘留白、垂直居中；非正方形源图按 `KeepAspectRatio` 等比缩放并在槽内居中（罕见情况的兜底，注释说明 MC 存档 `icon.png` 源图 64×64、按 2:1 整数缩小到 32 保持像素风清晰），最后 `drawPixmap` 绘制。`sizeHint()` 则把行高抬到至少 `icon_size + 4`，使无图标行与有图标行等高、列表视觉整齐。
-
-**类与函数**：
-
-| 名称 | 签名 | 说明 |
-| --- | --- | --- |
-| `RightIconDelegate` | `class RightIconDelegate(QStyledItemDelegate)` | 列表项委托：背景/选中高亮/文字由默认风格绘制，图标固定画在行最右侧。构造时记录 `icon_size`（默认 `DEFAULT_ICON_SIZE=32`）。 |
-| `__init__` | `(self, icon_size=DEFAULT_ICON_SIZE, parent=None)` | 保存图标显示尺寸 `self.icon_size`，其余交给父类。 |
-| `set_right_icon` | `@staticmethod (item, pixmap)` | 为列表项挂上要显示在行右缘的图标：`pixmap` 是非空 `QPixmap` 时写入 `ICON_ROLE`，否则写 `None` 清除图标。做成静态方法是为了不持有委托实例也能设置数据。 |
-| `paint` | `(self, painter, option, index)` | 绘制入口，流程见上文"功能"（无图标走默认；有图标则预省略文字 → 默认风格画整行 → 图标画右缘垂直居中，非正方形按比例缩放居中兜底）。 |
-| `sizeHint` | `(self, option, index)` | 在默认尺寸基础上保证行高 ≥ `icon_size + 4`，让所有行（含无图标行）统一预留图标高度。 |
-
-**接口**：
-- 被 `Tools/tool_AutoBackUp.py` import（`from Utils.AutoBackUp.right_icon_delegate import RightIconDelegate`）：以 `RightIconDelegate(icon_size=32, parent=self.targetDirList)` 实例化并通过 `self.targetDirList.setItemDelegate(...)` 挂到存档目录列表上；扫描到含 `icon` 的文件夹时调 `set_right_icon(list_item, pixmap)` 给对应行挂世界封面图。
-- 对外提供：类 `RightIconDelegate`、静态工具 `set_right_icon(item, pixmap)`，以及自定义数据角色常量 `ICON_ROLE`（外部一般不直接用，经 `set_right_icon` 间接读写）。
-
-**关键变量/常量**：
-
-| 名称 | 值 | 说明 |
-| --- | --- | --- |
-| `ICON_ROLE` | `Qt.ItemDataRole.UserRole + 1` | 自定义数据角色，存放要在行右缘显示的 `QPixmap`。 |
-| `ICON_RIGHT_MARGIN` | `6` | 图标与行右缘的留白（px）。 |
-| `ICON_TEXT_GAP` | `8` | 文字（省略号）与图标之间的最小间距（px）。 |
-| `DEFAULT_ICON_SIZE` | `32` | 默认图标显示尺寸；MC 存档 `icon.png` 源图 64×64，2:1 整数缩小保持像素风清晰。 |
+> 本文档基于源码精读整理，覆盖以下 2 个文件：
+> `Utils/Settings/signals_Settings.py`、`Utils/MainWindow/draggable_tab_bar.py`
 
 ---
 
@@ -5235,44 +4988,6 @@ RNG 与结构信息表：
 **类与函数**：无。
 
 **关键控件**：无。
-
----
-
-## `CodesUI/AutoBackUp.py`
-
-**功能**：自动备份工具（`Tools/tool_AutoBackUp.py` 的 `AutoBackUpWidget`）的界面骨架。顶层 `QWidget`（628×475），内部一个 `layoutWidget` 承载 `gridLayout`（列拉伸 1:4:1），自上而下分为四区：
-
-- 存档目录区：`label`（"存档目录"）+ 路径输入框 + "浏览文件夹"按钮；
-- 中部多选区：`targetDirList`（多选列表）与左右两个垂直弹簧；
-- 备份目录区：`label_2`（"备份目录"）+ 路径输入框 + "浏览文件夹"按钮；
-- 监测/执行区：`label_3`（"监测进程名"）+ 进程名输入框 + 监测开关按钮 + "自动备份"复选框；
-- 底部执行区："开始备份"按钮 + 进度条 + 信息输出框（跨 4 列）。
-
-**类与函数**：
-
-| 名称 | 签名 | 说明 |
-| --- | --- | --- |
-| `Ui_AutoBackUp` | `class Ui_AutoBackUp(object)` | 自动备份窗口的 UI 描述类 |
-| `setupUi` | `setupUi(self, AutoBackUp)` | 创建控件与 `gridLayout`，设置列拉伸后调用 `retranslateUi` |
-| `retranslateUi` | `retranslateUi(self, AutoBackUp)` | 设置窗口与各控件中文文本 |
-
-**关键控件**（均被 `tool_AutoBackUp.py` 引用）：
-
-| 对象名 | 控件类型 | 用途 |
-| --- | --- | --- |
-| `targetDirPath` | `QLineEdit` | 输入要备份的存档目录路径（带清除按钮） |
-| `chooseTargetDir` | `QPushButton` | "浏览文件夹"：选择存档目录 |
-| `targetDirList` | `QListWidget` | 存档目录下的存档/世界列表，多选模式、不可编辑 |
-| `targetDesPath` | `QLineEdit` | 输入备份目标目录路径（带清除按钮） |
-| `chooseDesDir` | `QPushButton` | "浏览文件夹"：选择备份目标目录 |
-| `processName` | `QLineEdit` | 监测的进程名输入框，占位文本 `java.exe` |
-| `monitorController` | `QPushButton` | 启动/停止监测进程的开关按钮 |
-| `isAutoBackUp` | `QCheckBox` | "自动备份"开关 |
-| `startBackUp` | `QPushButton` | "开始备份"按钮 |
-| `backUpProgress` | `QProgressBar` | 备份进度条 |
-| `informationBrowser` | `QTextBrowser` | 备份/监测日志输出区 |
-
-未列出的 `label`/`label_2`/`label_3`/`verticalSpacer*` 为纯标签与弹簧，业务代码未引用。
 
 ---
 
