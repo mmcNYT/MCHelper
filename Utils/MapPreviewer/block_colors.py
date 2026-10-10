@@ -80,6 +80,7 @@ _BLUE_ICE_RGB = np.array((172, 206, 236), dtype=np.float32)
 _WOODED_BAD_TOP = np.array((172, 162, 90), dtype=np.float32)
 _MYCELIUM_SPECK = np.array((150, 90, 110), dtype=np.float32)
 _CHERRY_CANOPY = np.array([231, 168, 193], dtype=np.float32)
+_CHERRY_BASE = np.array([240, 186, 208], dtype=np.float32)  # 樱花群系地表亮粉
 _PALE_CANOPY = np.array([172, 181, 158], dtype=np.float32)
 _SNOW_TAIGA_CROWN = np.array([56, 82, 70], dtype=np.float32)
 
@@ -382,6 +383,8 @@ def _cell_base(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
     base[bid == 175] = _CAVE_DRIPSTONE
     base[bid == 183] = _CAVE_DEEPDARK
     base[bid == 187] = _CAVE_SULFUR
+    # 樱花：整片亮粉（cell 与 block 地面基色；block 档树冠再叠加深粉）
+    base[bid == 185] = _CHERRY_BASE
 
     is_grass = cat == _CAT_GRASS
     uncovered = ~(is_water | is_grass | is_snow | is_sand | is_stone

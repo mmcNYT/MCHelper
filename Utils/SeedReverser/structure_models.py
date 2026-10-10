@@ -3502,10 +3502,13 @@ def build_mesh(vox: dict) -> dict:
     - 体素值两种形态：纯字符串 = 整格；(纹理键, 形状码) = 非完整
       方块（半砖/楼梯/门/活板门/栅栏/箱子/火把等，几何见
       block_shapes.shape_boxes）；
-    - 形状按 AABB 逐面生成（面法线朝外），面剔除采用“共面 +
+- 形状按 AABB 逐面生成（面法线朝外），面剔除采用“共面 +
       投影覆盖”精确判据：只有本 AABB 贴格界、且邻居在同格界处
       有贴界面完全遮盖本面投影时才剔（修复半砖/楼梯下方看穿：
       半砖顶面 y=0.5 不贴格界永不被上方整格误剔）；
+    - 邻居为整格实心非透明时按官方 Block.shouldRenderFace 第一步
+      无条件剔除本面（occluder==full block；涵盖蜡烛/火把等内嵌
+      形状块面对实心墙的情况，见 nb_full）；
     - 同方块内其他 AABB 同侧同平面完全覆盖时剔小面（如锅壁
       贴底），避免重复绘制；
     - 栅栏/墙/玻璃板按邻居连通类别自动补横臂（connect_arms），
@@ -3643,6 +3646,7 @@ def build_mesh(vox: dict) -> dict:
             pos_sign = ny or nx or nz
             # 邻居贴界面矩形（剔除候选）：透明异材不剔（透过可见）
             nb_rects = None
+            nb_full = False   # 邻居整格实心非透明：MC 恒剔（见下）
             nb_pos = (x + nx, y + ny, z + nz)
             nb_v = vox.get(nb_pos)
             if nb_v is not None:
@@ -3652,6 +3656,16 @@ def build_mesh(vox: dict) -> dict:
                 nb_mat, nb_shape = nb_info
                 if nb_mat in _LEAF_MATS:
                     pass                    # 树叶无遮挡（occlusion 空）
+                elif nb_shape is None and nb_mat not in _TRANSPARENT_MATS \
+                        and nb_mat not in _TRANSLUCENT_MATS:
+                    # 邻居整格实心非透明 = 官方 Block.shouldRenderFace 第一步
+                    # occluder == Shapes.block()：面无条件剔除。旧实现只有
+                    # “本 AABB 贴格界 + 邻居贴界面覆盖投影”才剔，漏掉形状块
+                    # （蜡烛/火把/栅栏柱等内嵌小盒）面对实心墙的面——邻居满
+                    # 格方块遮挡其所在整格截面的全部视线，该面永不可见，MC
+                    # 亦不渲染。此为多数“多余面”来源（ancient_city/shipwreck
+                    # 实测 2~8%）。
+                    nb_full = True
                 elif not (nb_mat in _TRANSPARENT_MATS
                           and mat != nb_mat):
                     nb_key = (nb_v, axis, pos_sign)
@@ -3685,8 +3699,8 @@ def build_mesh(vox: dict) -> dict:
                 plane = b[axis + 3] if pos_sign > 0 else b[axis]
                 flush = plane >= 1.0 - 1e-9 if pos_sign > 0 \
                     else plane <= 1e-9
-                covered = False
-                if flush and nb_rects:
+                covered = nb_full    # 邻居满格实心：无条件剔除本面
+                if not covered and flush and nb_rects:
                     r = _rect(b, axis)
                     for nr in nb_rects:
                         if _covered(r, nr):

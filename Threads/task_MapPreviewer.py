@@ -567,6 +567,9 @@ class BiomeLocateThread(QThread):
 
     located = Signal(object)
 
+    # 洞穴群系 id（不在地表群系源，须 surface_mode=False + 深采样层定位）
+    _CAVE_BIOME_IDS = frozenset({174, 175, 183, 187})
+
     # 扩窗起始/上限边长（方块）：512 与结构定位同源；上限 8192 与
     # 增量扫描同量级（秒级内完成，蘑菇岛/冰刺之地等稀疏群系可能
     # 超出上限 → 未找到提示扩大定位搜索范围）
@@ -602,12 +605,27 @@ class BiomeLocateThread(QThread):
             })
 
     def _sample_window(self, view: tuple) -> dict:
-        """按维度采样 view=(bx0, bz0, bx1, bz1) 群系矩阵。"""
+        """按维度采样 view=(bx0, bz0, bx1, bz1) 群系矩阵。
+
+        主世界分两类：地表群系用 surface_mode=True（与地图俯视图同语义）；
+        洞穴群系（lush/dripstone/deep_dark/sulfur）不在地表群系源，仅在
+        depth>0（采样层位于真实地表之下）时被 climateToBiome 判出，而
+        surface_mode=True 会把这类格重判回地表（消除"地表溶洞"），导致
+        洞穴群系永远采样不到。故洞穴群系改用 surface_mode=False，并取
+        较深采样层 ny=0（方块 y≈0）以覆盖 deep_dark（其需深层才判出，
+        地图固定层 ny=16 采不到）。
+        """
         bx0, bz0, bx1, bz1 = view
         cx = (bx0 + bx1) // 2
         cz = (bz0 + bz1) // 2
         w, h = bx1 - bx0, bz1 - bz0
         if self._dimension == "overworld":
+            if self._biome_id in self._CAVE_BIOME_IDS:
+                return sample_region(
+                    self._seed, self._version_key, cx, cz, w, h,
+                    ny=0, surface_mode=False,
+                    cancel=lambda: self._cancelled,
+                )
             return sample_region(
                 self._seed, self._version_key, cx, cz, w, h,
                 surface_mode=True, cancel=lambda: self._cancelled,
