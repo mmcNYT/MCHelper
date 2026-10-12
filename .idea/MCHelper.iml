@@ -30,6 +30,11 @@
       <excludeFolder url="file://$MODULE_DIR$/.temp/village_extract" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/_cpptest" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/_items_backup" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/backup_remove_autobackup_20261006" />
+      <excludeFolder url="file://$MODULE_DIR$/Utils/SeedReverser/cpp/build/lib.win-amd64-cpython-313" />
+      <excludeFolder url="file://$MODULE_DIR$/build" />
+      <excludeFolder url="file://$MODULE_DIR$/dist" />
+      <excludeFolder url="file://$MODULE_DIR$/versions" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

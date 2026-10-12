@@ -252,7 +252,16 @@ def _lift_split(observations, version_key: str, default_tol: int = 0):
         entry["lift_mod"] = params["lift_mod"]
         entry["tol"] = _obs_tol(o, default_tol)
         if params["scatter"] == "linear" and params["lift_mod"] >= 2:
-            lift_obs.append(entry)
+            # 跨区块大结构（村庄/试炼密室/古迹废墟，lift_mod==2）在容差
+            # 模式下：层1 mod 预筛随 tol≥1 全失效（无预筛价值），且玩家
+            # 站位可跨出锚点区块，导致「固定玩家区块→固定区域」的层2
+            # 用错误区域过滤掉真种子（只能剔除该观测重试）。故降级为仅
+            # 验证观测：由层3 _verify_observation 用玩家期望区块 ±tol
+            # 窗口枚举覆盖的全部区域做命中校验，根治跨区误归。
+            if params["lift_mod"] == 2 and entry["tol"] > 0:
+                other_obs.append(entry)
+            else:
+                lift_obs.append(entry)
         else:
             other_obs.append(entry)
     # mod4 观测优先（压缩比高）
@@ -503,28 +512,47 @@ def _verify_observation(seed: int, o: dict, version_key: str,
     """对一个观测做正向验证（返回该种子是否满足）。
 
     tol > 0：期望区块与生成区块的切比雪夫距离（max(|dx|, |dz|)）≤ tol。
+    容差观测（站位可跨区块，跨区块大结构尤其如此）用「期望区块 ±tol
+    窗口」枚举其覆盖的全部区域：任一区域生成锚点落在窗口内即视为满足，
+    根治“玩家站位跨出锚点区块 → 固定区域归错”的误判。
     """
     struct_key = o["struct_key"]
     params = structure_params.get_params(struct_key, version_key)
-    reg_x, reg_z = o["reg_x"], o["reg_z"]
-    # 观测的期望区块坐标
+    region_size = params["region_size"]
+    # 观测的期望区块坐标（= 玩家站位区块；跨区大结构该值可落在锚点区块外）
     if "block_cx" in o:
         want_cx, want_cz = o["block_cx"], o["block_cz"]
     else:
-        want_cx = o["reg_x"] * params["region_size"] + o["off_x"]
-        want_cz = o["reg_z"] * params["region_size"] + o["off_z"]
-    bx, bz = get_structure_pos(struct_key, seed, reg_x, reg_z, version_key)
+        want_cx = o["reg_x"] * region_size + o["off_x"]
+        want_cz = o["reg_z"] * region_size + o["off_z"]
+
+    if tol > 0:
+        # 窗口覆盖区域候选集（去重）：玩家期望区块 ±tol 内每个区块所属区域
+        regs = set()
+        for dx in range(-tol, tol + 1):
+            cx = want_cx + dx
+            for dz in range(-tol, tol + 1):
+                cz = want_cz + dz
+                regs.add((cx // region_size, cz // region_size))
+        for rx, rz in regs:
+            bx, bz = get_structure_pos(struct_key, seed, rx, rz, version_key)
+            if max(abs((bx >> 4) - want_cx), abs((bz >> 4) - want_cz)) <= tol:
+                if struct_key == "pillager_outpost":
+                    if outpost_probability(seed, rx, rz, version_key):
+                        return True
+                    continue
+                return True
+        return False
+
+    # 精确锚点：固定区域
+    bx, bz = get_structure_pos(struct_key, seed, o["reg_x"], o["reg_z"],
+                               version_key)
     dx = (bx >> 4) - want_cx
     dz = (bz >> 4) - want_cz
-    if tol > 0:
-        if max(abs(dx), abs(dz)) > tol:
-            return False
-    else:
-        if dx != 0 or dz != 0:
-            return False
+    if dx != 0 or dz != 0:
+        return False
     if struct_key == "pillager_outpost":
-        # 概率结构：坐标正确还必须判定生成
-        if not outpost_probability(seed, reg_x, reg_z, version_key):
+        if not outpost_probability(seed, o["reg_x"], o["reg_z"], version_key):
             return False
     return True
 
@@ -552,24 +580,45 @@ def verify_candidate_seed(seed: int, observations, version_key: str,
     matched = 0
     for i, obs in enumerate(observations, 1):
         obs_tol = _obs_tol(obs, tol)
-        bx, bz = get_structure_pos(
-            obs["struct_key"], seed, obs["reg_x"], obs["reg_z"], version_key)
+        params = structure_params.get_params(
+            obs["struct_key"], version_key)
         # 观测方块坐标（自动验证透传 F3+C 原始站位；缺失则取期望区块）
         if "x" in obs:
             obs_cx, obs_cz = obs["x"] >> 4, obs["z"] >> 4
         else:
-            params = structure_params.get_params(
-                obs["struct_key"], version_key)
             obs_cx = obs["reg_x"] * params["region_size"] + obs["off_x"]
             obs_cz = obs["reg_z"] * params["region_size"] + obs["off_z"]
-        gen_cx, gen_cz = bx >> 4, bz >> 4
-        pos_ok = (gen_cx == obs_cx and gen_cz == obs_cz)
+        # 生成区块：容差观测（站位可跨区块，跨区大结构尤甚）用期望区块
+        # ±tol 窗口枚举覆盖区域，取距观测区块最近且落窗内的锚点做展示，
+        # 与层3 _verify_observation 同口径，根治“跨区误归”显示错误。
         if obs_tol > 0:
-            pos_ok = (max(abs(gen_cx - obs_cx), abs(gen_cz - obs_cz)) <= obs_tol)
+            regs = set()
+            for dx in range(-obs_tol, obs_tol + 1):
+                cx = obs_cx + dx
+                for dz in range(-obs_tol, obs_tol + 1):
+                    cz = obs_cz + dz
+                    regs.add((cx // params["region_size"],
+                              cz // params["region_size"]))
+            best = None
+            for rx, rz in regs:
+                bx, bz = get_structure_pos(
+                    obs["struct_key"], seed, rx, rz, version_key)
+                dist = max(abs((bx >> 4) - obs_cx), abs((bz >> 4) - obs_cz))
+                if best is None or dist < best[0]:
+                    best = (dist, (bx >> 4), (bz >> 4), rx, rz)
+            _, gen_cx, gen_cz, hit_rx, hit_rz = best
+            pos_ok = best[0] <= obs_tol
+            gen_rx, gen_rz = hit_rx, hit_rz
+        else:
+            bx, bz = get_structure_pos(
+                obs["struct_key"], seed, obs["reg_x"], obs["reg_z"], version_key)
+            gen_cx, gen_cz = bx >> 4, bz >> 4
+            pos_ok = (gen_cx == obs_cx and gen_cz == obs_cz)
+            gen_rx, gen_rz = obs["reg_x"], obs["reg_z"]
         outpost_prob_fail = False
         if pos_ok and obs["struct_key"] == "pillager_outpost":
             outpost_prob_fail = not outpost_probability(
-                seed, obs["reg_x"], obs["reg_z"], version_key)
+                seed, gen_rx, gen_rz, version_key)
         if pos_ok and not outpost_prob_fail:
             matched += 1
             verdict = "  ✓ 吻合"
