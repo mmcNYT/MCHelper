@@ -124,6 +124,10 @@ _TASK_DONE = "完成"
 # 群系下拉项图标：统一缩放尺寸与缓存（同图标只缩放一次）
 _BIOME_ICON_SIZE = 18
 _BIOME_ICON_CACHE: dict[str, QIcon] = {}
+# 结构定位下拉项图标：统一缩放尺寸与缓存（同结构只缩放一次；
+# 图标源为 structure_icons.icon_path，村庄取默认精灵）
+_STRUCT_ICON_SIZE = 20
+_STRUCT_ICON_CACHE: dict[str, QIcon] = {}
 # 结构图标浮板合成结果缓存：{icon_file 路径: 合成 QPixmap}。
 # 同一种结构（同图标）只合成一次，避免批量上屏时重复 _compose_plate_icon。
 _ICON_PLATE_CACHE: dict = {}
@@ -793,7 +797,9 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         box.clear()
         box.addItem("选择结构", None)
         for key in self._avail_keys():
+            idx = box.count()
             box.addItem(STRUCT_NAMES.get(key, key), key)
+            box.setItemIcon(idx, self._struct_icon_for_key(key))
         if keep is not None:
             i = box.findData(keep)
             if i >= 0:
@@ -1064,6 +1070,30 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         return {int(bid): str(label).split(" ")[-1]
                 for label, bid in DIM_BIOME_TABLES.get(
                     self._current_dimension(), ())}
+
+    @staticmethod
+    def _struct_icon_for_key(key: str) -> QIcon:
+        """按结构键取缩放后图标（缓存复用；无图/加载失败回退空）。
+
+        与结构标记同一图标源（structure_icons.icon_path，村庄取默认
+        变体图标），统一缩放到 _STRUCT_ICON_SIZE 供下拉项左侧显示。
+        """
+        if not key:
+            return QIcon()
+        icon = _STRUCT_ICON_CACHE.get(key)
+        if icon is not None:
+            return icon
+        icon = QIcon()
+        path = st_icons.icon_path(key)
+        if path:
+            pm = QPixmap(path)
+            if not pm.isNull():
+                icon = QIcon(pm.scaled(
+                    _STRUCT_ICON_SIZE, _STRUCT_ICON_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+        _STRUCT_ICON_CACHE[key] = icon
+        return icon
 
     @staticmethod
     def _biome_icon_for_key(key) -> QIcon:
