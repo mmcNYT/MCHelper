@@ -1648,10 +1648,17 @@ class Structure3DView(QOpenGLWidget):
             gx0 = gz0 = 0.0
         y0 = float(min((yy for (_x, yy, _z) in self._model["voxels"]),
                        default=-1) - 0.02)
-        cx0i = int((0.0 - gx0) // 16.0)       # 首个边界 <= 0 的列索引
-        cx1i = int((w - 1 - gx0) // 16.0)     # 末块所在区块列索引
-        cz0i = int((0.0 - gz0) // 16.0)
-        cz1i = int((d - 1 - gz0) // 16.0)
+        # 区块覆盖范围：直接按体素实际 x/z 足迹算，不依赖 size 元组
+        # 顺序（build_model 的 size=[x,z,y]，compose_display_model 的
+        # size=[x,height,z]，顺序不同——用 size[1] 当 z 会让组合模型
+        # 的 z 方向少算区块：如试炼密室体素 z 跨 92（区块 3、4），
+        # size[1]=53 只算到 cz1=2，右侧凸出部分黄框缺失）。
+        _pxs = [p[0] for p in self._model["voxels"]] or [0]
+        _pzs = [p[2] for p in self._model["voxels"]] or [0]
+        cx0i = int(math.floor((min(_pxs) - gx0) / 16.0))
+        cx1i = int(math.floor((max(_pxs) - gx0) / 16.0))
+        cz0i = int(math.floor((min(_pzs) - gz0) / 16.0))
+        cz1i = int(math.floor((max(_pzs) - gz0) / 16.0))
         _seen = set()
         cv = []
 
