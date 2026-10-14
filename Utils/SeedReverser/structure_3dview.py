@@ -65,6 +65,9 @@ _FPS_BAD = QColor(229, 72, 77, 230)      # FPS 掉帧预警（红）
 _FPS_BAD_TH = 30.0                       # 低于此阈值显红（掉帧预警）
 
 # 旁观者模式参数（键位/语义见类 docstring）
+_SP_DT_MAX = 0.05         # 飞行位移单帧积分上限（秒）：防帧率掉到 0 后
+                          # 恢复时瞬间穿墙；按 50ms 取，约每帧最多位移
+                          # speed*0.05 格
 _SP_FLY_MIN = 1.0        # 飞行速度限位（格/秒）
 _SP_FLY_MAX = 120.0
 _SP_MOUSE_SPEED = 0.05  # 鼠标转视角灵敏度默认值（度/像素，UI 可调）
@@ -446,6 +449,12 @@ class Structure3DView(QOpenGLWidget):
         self._sp_last_ev_pos: QPoint | None = None
         self._sp_speed_until_ms = 0      # 调速提示残显截止（ms，monotonic）
         self._sp_eye = QVector3D(0, 0, 0)   # 旁观者眼睛位置（世界坐标）
+        # 飞行位移积分用真实经过时间（monotonic 秒）而非名义 interval：
+        # QTimer 实际触发频率随主线程事件循环（帧率）波动，若按
+        # interval() 固定 dt 积分，帧率低时 tick 推迟→位移少→速度慢，
+        # 帧率高时位移足→速度快，飞行手感随帧率漂移。记录上次 tick
+        # 时刻，dt = now - last 使速度恒定；clamp 上限防卡顿后瞬移。
+        self._sp_tick_last_t = None
         # 锁定期钉扎定时器 + 飞行 tick：解除帧率限制后固定
         # _SP_LOGIC_HZ 高频（位移积分按 interval 缩放自适应，飞行
         # 平滑度不变；交互帧率上限 ≈ min(_SP_LOGIC_HZ, GPU 能力)，
@@ -1060,6 +1069,7 @@ class Structure3DView(QOpenGLWidget):
     def _sp_start_loop(self) -> None:
         """有键按下：启动飞行 tick；低频心跳兜底。"""
         if not self._sp_tick.isActive():
+            self._sp_tick_last_t = None   # 重启动时清时间戳，防旧值首帧大跳
             self._sp_tick.start()
         if not self._sp_idle.isActive():
             self._sp_idle.start()
@@ -1096,8 +1106,16 @@ class Structure3DView(QOpenGLWidget):
         if K._SP_K_SHIFT in self._sp_keys:
             mv -= QVector3D(0, 1, 0)
         if mv.lengthSquared() > 1e-10:
-            self._sp_eye += mv.normalized() * self._sp_speed \
-                * (self._sp_tick.interval() / 1000.0)
+            # 用真实经过时间积分位移，速度与帧率解耦（见 _sp_tick_last_t）
+            now_t = time.monotonic()
+            if self._sp_tick_last_t is None:
+                dt = 0.0                     # 首帧不积分，防进入瞬间大跳
+            else:
+                dt = now_t - self._sp_tick_last_t
+            self._sp_tick_last_t = now_t
+            if dt > _SP_DT_MAX:              # 卡顿后 clamp，防瞬移穿墙
+                dt = _SP_DT_MAX
+            self._sp_eye += mv.normalized() * self._sp_speed * dt
             self._spectator_update_crosshair()
             self.update()
         if not self._sp_keys:
