@@ -35,6 +35,8 @@
       <excludeFolder url="file://$MODULE_DIR$/build" />
       <excludeFolder url="file://$MODULE_DIR$/dist" />
       <excludeFolder url="file://$MODULE_DIR$/versions" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/backup_uvcheck_20261015-220317" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/mc262_decompile" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -109,9 +109,62 @@ SHAPE_LANTERN = "lantern"
 # 末地烛 erod:<facing 缩写|u|d>：底座 (6,0,6)-(10,1,10) + 立杆
 # (7,1,7)-(9,16,9) 按朝向旋转（官方 end_rod.json）
 SHAPE_END_ROD = "erod:y"
-# 龙首 dhead:<f>[:w]：头部主盒 12x12x12（DragonHeadModel upper_head
-# 16³ x0.75 近似）贴格底居中；:w = 墙挂（中心抬 0.25、向墙面外凸）
+# 龙首 dhead:<f>[:w]：**官方 DragonHeadModel 重建**（1.21.11 反编译）。
+# 官方盒经 PartPose.offset(0,-7.987,0).scaled(0.75) 折算到方块空间；
+# jaw 为 head 子部件（再 offset(0,4,-8)）。数值见 _DHEAD_BOXES。
 SHAPE_DRAGON_HEAD = "dhead:n"
+# 龙首官方 7 盒（标签, 方块空间 AABB）——顺序固定，供 _dhead_part_of
+# 反查部件名（分面按盒取官方 UV 窗）。标签 ∈ upper_head/upper_lip/
+# jaw/scale/nostril（左右鳞/鼻孔同标签，UV 相同）。
+#
+# 坐标推导（严格按官方 ModelPart.translateAndRotate：
+# translate(x/16, y/16, z/16) -> rotate -> scale，及 Cube 顶点 ÷16）：
+#   head 部件：PartPose.offset(0, -7.986666, 0).scaled(0.75)
+#     -> T_head = (0, -0.499166, 0)，S_head = 0.75
+#     model = T_head + 0.75 * (cube 像素 / 16)
+#   jaw 子部件：PartPose.offset(0, 4, -8) -> T_jaw = (0, 0.25, -0.5)
+#     model = T_head + 0.75 * (T_jaw + cube/16)
+#   SkullBlockRenderer.submitSkull：translate(0.5, 0, 0.5) 后
+#     scale(-1, -1, 1) -> **只翻 x/y，不翻 z**：
+#     x' = 0.5 - x, y' = -y, z' = 0.5 + z
+# 基准朝向 = 脸朝 -z（facing n）。jaw 盒此处给**未旋转**的 AABB
+# （旋转由 mesh 层的旋转 quad 路径表现，见 structure_models.build_mesh
+# 的 dhead 分支；AABB 仅用于剔除/遮挡）。
+_DHEAD_BOXES = (
+    ("upper_head", (0.125, 0.124166, 0.03125, 0.875, 0.874166, 0.78125)),
+    ("upper_lip", (0.21875, 0.311666, -0.625, 0.78125, 0.546041, 0.125)),
+    ("jaw", (0.21875, 0.124166, -0.625, 0.78125, 0.311666, 0.125)),
+    ("scale", (0.265625, 0.874166, 0.3125, 0.359375, 1.061666, 0.59375)),
+    ("scale", (0.640625, 0.874166, 0.3125, 0.734375, 1.061666, 0.59375)),
+    ("nostril", (0.265625, 0.546041, -0.53125, 0.359375, 0.639791,
+                 -0.34375)),
+    ("nostril", (0.640625, 0.546041, -0.53125, 0.734375, 0.639791,
+                 -0.34375)),
+)
+# jaw 旋转枢轴（方块空间）= jaw 部件原点 = 下颚后上缘（铰链）。
+# 官方 setupAnim: jaw.xRot = (sin(animPos·π·0.2)+1)·0.2 rad，静止
+# （animPos=0）恒为 0.2 rad ≈ 11.46° -> 嘴巴**天然微张**（非 0）。
+_DHEAD_JAW_PIVOT = (0.5, 0.311666, 0.125)
+_DHEAD_JAW_ANG = 0.2                     # 弧度（静止值）
+_DHEAD_JAW_C = 0.98006658               # cos(0.2)
+_DHEAD_JAW_S = 0.19866933               # sin(0.2)
+
+
+def _dhead_part_of(box: tuple) -> str:
+    """AABB -> 龙首部件名（按几何匹配；未命中回 upper_head）。
+
+    分面路径拿到的 box 可能已随 facing 旋转/墙挂平移，故用「尺寸
+    匹配 + 最小距离」容错反查：先按六元组尺寸（宽高深）唯一确定
+    部件类别，再返回标签。
+    """
+    dims = (box[3] - box[0], box[4] - box[1], box[5] - box[2])
+    best, best_d = "upper_head", 1e9
+    for label, b in _DHEAD_BOXES:
+        d0 = (b[3] - b[0], b[4] - b[1], b[5] - b[2])
+        d = sum(abs(dims[i] - d0[i]) for i in range(3))
+        if d < best_d:
+            best, best_d = label, d
+    return best
 # 床分半：bed:head / bed:foot（head 含枕头区顶面 rect，foot 毯子区）
 SHAPE_BED_HEAD = "bed:head"
 SHAPE_BED_FOOT = "bed:foot"
@@ -449,26 +502,50 @@ def _end_rod(facing: str):
 
 
 def _dragon_head(wall: bool, facing: str):
-    """龙首。DragonHeadModel head 框 16³ x0.75 = 12³ 单盒近似
-    （细节鳞片/鼻孔/下颚省略，观察定位够用）。落地：贴格底居中
-    (2,0,2)-(14,12,14)；墙挂：官方 SkullBlockRenderer 墙挂中心
-    抬 0.25、向墙面外凸 0.25 → 盒 (2,4,2)-(14,16,14) 沿 facing
-    平移 0.25（出格 2/16 保留官方凸出观感，面剔除按不贴界处理
-    无副作用）。facing = 脸朝向（渲染态 = 龙脸看向的方向）。"""
+    """龙首。**官方模型重建**（1.21.11 反编译 DragonHeadModel）。
+
+    官方盒（DragonHeadModel.createHeadLayer，PartPose.offset(0,-7.987,0)
+    .scaled(0.75)；jaw 为 head 子部件再 offset(0,4,-8)）：
+
+        upper_head  (-8,-8,-10) 16x16x16  主颅（4/16 前伸）
+        upper_lip   (-6,-1,-24) 12x5x16   前伸上颚
+        jaw         (-6, 0,-16) 12x4x16   下颚
+        scale_l/r   (∓5,-12,-4) 2x4x6     头顶双鳞
+        nostril_l/r (∓5, -3,-22) 2x2x4    鼻孔
+
+    经 0.75 缩放 + offset 后的方块空间盒见下方 BOXES（模型空间：
+    脸朝 -z、吻部前伸至 z≈1.5 格界，y 顶 0.937）。落地 = 直接用；
+    墙挂 = 抬 0.25 + 沿 facing 外凸 0.25（SkullBlockRenderer.submitSkull
+    同款），再由 _rot_y 绕格心转 facing。
+
+    返回 ((标签, AABB), ...)：标签 = 官方盒名（upper_head / upper_lip /
+    jaw / scale / nostril），供 dhead 分面按盒取对应 UV 窗
+    （同一盒不同面窗不同）。AABB 仍为 6 元组，shape_boxes 契约不变。
+    facing = 脸朝向（渲染态 = 龙脸看向的方向）。
+    """
+    boxes = _DHEAD_BOXES
     if wall:
-        box = (2 * _E, 4 * _E, 2 * _E, 14 * _E, 16 * _E, 14 * _E)
-        if facing == "n":
-            return ((box[0], box[1], box[2] - 2 * _E,
-                     box[3], box[4], box[5] - 2 * _E),)
-        if facing == "s":
-            return ((box[0], box[1], box[2] + 2 * _E,
-                     box[3], box[4], box[5] + 2 * _E),)
-        if facing == "e":
-            return ((box[0] + 2 * _E, box[1], box[2],
-                     box[3] + 2 * _E, box[4], box[5]),)
-        return ((box[0] - 2 * _E, box[1], box[2],
-                 box[3] - 2 * _E, box[4], box[5]),)
-    return ((2 * _E, 0.0, 2 * _E, 14 * _E, 12 * _E, 14 * _E),)
+        # 墙挂：抬 0.25 + 沿 facing 外凸 0.25（官方 submitSkull：
+        # translate(0.5 - facing.x*0.25, 0.25, 0.5 - facing.z*0.25)）
+        dy = 0.25
+        out = []
+        for label, (x0, y0, z0, x1, y1, z1) in boxes:
+            if facing == "n":
+                z0, z1 = z0 - 0.25, z1 - 0.25
+            elif facing == "s":
+                z0, z1 = z0 + 0.25, z1 + 0.25
+            elif facing == "e":
+                x0, x1 = x0 + 0.25, x1 + 0.25
+            else:
+                x0, x1 = x0 - 0.25, x1 - 0.25
+            out.append((label, (x0, y0 + dy, z0, x1, y1 + dy, z1)))
+        boxes = tuple(out)
+    # 按 facing 绕格心旋转几何。_DHEAD_BOXES 基准 = 脸朝 -z（= 官方
+    # 模型方向，facing n 即不转），从基准转到各 facing 用 _rot_y 同向
+    # 映射（n 不转 / e 90° / s 180° / w 270°，与 _ROT_FACE 一致）。
+    if facing != "n":
+        boxes = tuple((label, _rot_y(b, facing)) for label, b in boxes)
+    return boxes
 
 
 def _wall_sign(att: str):
@@ -1150,7 +1227,11 @@ def shape_boxes(shape: str | None) -> tuple:
         return _end_rod(rest)
     if kind == "dhead":
         f, _, w = rest.partition(":")
-        return _dragon_head(w == "w", f if f in ("n", "s", "e", "w") else "n")
+        # _dragon_head 返回 ((标签, AABB), ...)：本函数契约只要 AABB，
+        # 标签由 _dhead_part_of 按几何反查（分面路径用）
+        return tuple(b for _label, b in
+                     _dragon_head(w == "w", f if f in ("n", "s", "e", "w")
+                                  else "n"))
     if kind == "bed":
         # 分半床（26.2 template_bed_foot/head.json）：床板 y3..9 悬空
         # + 两腿 y0..3（head 在床头端 z0..3 两角、foot 在床尾端

@@ -2569,11 +2569,74 @@ _BED_FOOT_R = (0.0, 0.0, 1.0, 0.5)   # foot 无枕：毯区窗（各向同性）
 
 # 龙首 5 面 rect（16px 纹理直提，rect = 全图 None）：
 # face/top/side/west/bot 五键已在 make_decor_tex 按框 UV 区合成。
-_DHEAD_FACES = {
-    "face": "dragon face", "top": "dragon head top",
-    "side": "dragon head side", "west": "dragon head west",
-    "bot": "dragon head bot",
+# 龙首官方贴图表：部件 × 面 -> 纹理键（烘焙自官方 dragon.png，
+# 见 .temp/bake_dhead_tex.py）。旧实现的 face/top/side/west/bot 五键
+# 是 16x16 近似贴图，无法表达官方多盒 UV，已由本表取代。
+_DHEAD_MAIN_FACES = ("upper_head", "upper_lip", "jaw")
+_DHEAD_TEX = {
+    p: {f: f"dragon {p} {f}" for f in
+        ("down", "up", "west", "north", "east", "south")}
+    for p in ("upper_head", "upper_lip", "jaw", "scale", "nostril")
 }
+# 世界法线 -> 官方面名。**必须先做渲染链的 x/y 取反映射**，不能直查！
+#
+# 官方 ModelPart.Cube 事实（.temp/mansion/decomp/.../ModelPart.java）：
+#   DOWN 窗 = minY 面（顶点 19/20/23/24 的 y 全为 minY）
+#   UP   窗 = maxY 面（顶点 21/22/25/26 的 y 全为 maxY）
+# 即**模型空间 y 向下为正**。而 SkullBlockRenderer.submitSkull 的
+# scale(-1,-1,1) 把 x、y 取反：
+#   world.x = 0.5 - 0.75·mx/16, world.y = 0.499166 - 0.75·my/16,
+#   world.z = 0.5 + 0.75·mz/16            （z 不翻）
+# 故世界面与官方面恰好 x/y 互换：
+#   world +y（上）= 模型 minY = 官方 DOWN   world -y = 官方 UP
+#   world +x       = 模型 minX = 官方 WEST  world -x = 官方 EAST
+# 旧实现按世界法线直查 -> up/down、west/east 全反：口腔内壁（官方
+# upper_lip.UP / jaw.DOWN，含紫）被贴到 world 上面 = **鼻梁出现紫色**
+# （用户实测指出），而口腔内壁反而无紫。
+#
+# 注意：本表按**基准系（facing n）** 的世界法线给出；其它 facing 的
+# 法线须先用 _dhead_face_name 反旋回基准系再查。
+_DHEAD_FACE_OF = {
+    (0, -1, 0): "up", (0, 1, 0): "down",
+    (0, 0, -1): "north", (0, 0, 1): "south",
+    (-1, 0, 0): "east", (1, 0, 0): "west",
+}
+# facing -> 该朝向下「脸面」对应的世界法线（= 几何旋转后脸的指向）。
+# 由 _dragon_head 的旋转决定：基准脸朝 -z（facing n），经 _rot_y
+# 同向映射后 n=-z / e=+x / s=+z / w=-x。
+_DHEAD_FACE_NORMAL = {
+    "n": (0, 0, -1), "s": (0, 0, 1),
+    "e": (1, 0, 0), "w": (-1, 0, 0),
+}
+
+
+def _dhead_face_name(normal: tuple, facing: str) -> str:
+    """世界法线 + facing -> 官方面名（绕 y 轴按脸朝向反解）。
+
+    几何随 facing 旋转，故法线要**反向旋转**回模型基准系（脸朝 -z）
+    再查表：否则 dhead:s 的正面（世界 +z）会被当成 south（空白图），
+    带眼睛的 north 图被贴到背面 —— 观感即「龙眼位置不对/看不见脸」。
+    反向旋转量 = _ROT_FACE 的逆：n↦n、e↦w、s↦s、w↦e。
+    """
+    inv = {"n": "n", "e": "w", "s": "s", "w": "e"}.get(facing, "n")
+    nx, ny, nz = normal
+    # 把世界法线转回模型基准系（_rot_y 的逆：e/w 交换 x/z 且变号）
+    if inv == "e":          # 世界 +x 面 = 基准 -z 面（north）
+        nx, nz = -nz, nx
+    elif inv == "w":
+        nx, nz = nz, -nx
+    elif inv == "s":
+        nx, nz = -nx, -nz
+    return _DHEAD_FACE_OF[(nx, ny, nz)]
+# 龙首整面 UV 窗：**直接用 _FULL_UV (0,0,1,1)**。_emit_quad 的 rect
+# 分支对 rot=0 恒做 pv = 1-pv，而烘焙贴图本身来自官方 dragon.png 的
+# 原始朝向（图顶 = 面上端），经该翻转后正好落到面顶 -> 与官方实体
+# 模型一致（实测：嘴在面下、眼在面上）。传反向窗会上下镜像（实测
+# 嘴跑到面顶）。
+# 龙首整面 UV 窗：(0,1,1,0)。_emit_quad 的 rect 分支对 rot=0 恒做
+# pv = 1-pv，配此窗后贴图顶行落在面顶 —— 官方贴图的眼在自顶 0.25
+# 处（面内自底 0.75），故眼落在面内上部（用户要求：龙眼应在上部）。
+_DHEAD_UV = (0.0, 1.0, 1.0, 0.0)
 
 
 # 面跳过哨兵：_decor_face_mat 返回它 = 官方模型该面无 faces，应
@@ -2837,21 +2900,21 @@ def _decor_face_mat(mat: str, kind: str, rest: str, normal: tuple,
             return (mat, r["pole_u"])
         return (mat, r["pole_s"])
     if kind == "dhead":
-        # 12³ 单盒：facing = 脸朝向；脸面/背侧面/顶/底
-        key = _DHEAD_FACES
-        f = rest.partition(":")[0] or "n"
-        if ny > 0:
-            return (key["top"], None)
-        if ny < 0:
-            return (key["bot"], None)
-        face_n = _FACE_N[f]
-        if normal == face_n:
-            return (key["face"], None)
-        # 非 facing 侧面统一侧鳞图；f=n 时世界 west 面即模型 west
-        # 区（west 图与 side 同为鳞片，朝向旋转后不特判）
-        if normal == (-1, 0, 0) and f == "n":
-            return (key["west"], None)
-        return (key["side"], None)
+        # 官方 DragonHeadModel 重建：按「部件 × 面」取烘焙贴图
+        # （assets/.../block/dragon <part> <face>.png，由 .temp/
+        # bake_dhead_tex.py 从官方 dragon.png 按 ModelPart.Cube 窗裁出，
+        # 窗公式已用 upper_head.north 的紫眼/紫嘴分布实证校准）。
+        # **面名必须相对「脸朝向」判定**，不能按世界法线直查：几何已随
+        # facing 旋转，dhead:s 时朝 +z 的正面是官方 north（脸）面，直查
+        # 会把它当 south（空白图）-> 正面无脸、眼睛贴到背面（这正是
+        # 「龙眼位置不对」的根因）。
+        # **整面 UV 窗 (0,1,1,0)**：_emit_quad 对 rot=0 做 pv=1-pv，
+        # 配合该窗使贴图顶行落在面顶（官方贴图的眼在自顶 0.25 处）。
+        if box is None:
+            return (_DHEAD_TEX["upper_head"]["north"], _DHEAD_UV)
+        part = bs._dhead_part_of(box)
+        face = _dhead_face_name(normal, rest.partition(":")[0] or "n")
+        return (_DHEAD_TEX[part][face], _DHEAD_UV)
     if kind == "bed":
         # 顶面分区（键图 = 垫顶整块：上半枕带行 0..7、下半毯区）。
         # facing = 床头朝向（wiki：head 块在 facing 端、枕贴床头端）。
@@ -3181,6 +3244,75 @@ def _torch_stand_quads(texkey: str) -> tuple:
                                "west": (_RS(7, 6, 9, 16), texkey),
                                "east": (_RS(7, 6, 9, 16), texkey)})
     return tuple((mk, cuv, nrm) for (cuv, nrm, mk) in quads)
+
+
+def _dhead_quads(facing: str, wall: bool) -> tuple:
+    """龙首全 7 盒 -> 旋转 quad 列表（官方 DragonHeadModel 重建）。
+
+    与 AABB 路径（block_shapes._dragon_head）的唯一区别：**下颚按官方
+    setupAnim 绕铰链旋转**，从而表现「嘴巴微微张开」——AABB 无法表达
+    倾斜，故 jaw 必须走本旋转路径。官方：
+        jaw.xRot = (sin(animationPos·π·0.2) + 1) · 0.2   （弧度）
+    静止（animationPos=0）恒为 0.2 rad ≈ 11.46°，即嘴**天然微张**。
+
+    变换顺序与 AABB 路径一致：jaw 绕铰链 Rx(0.2) -> 墙挂平移 ->
+    按 facing 绕格心 _roty_q(k)。每面取 _DHEAD_TEX[部件][面]。
+    UV 用正向窗 (0,0,1,1)：本路径不经 _emit_quad 的 pv 翻转，v 直接
+    等于面内归一化 pv，与 AABB 路径净效果一致（贴图顶行在面顶）。
+    """
+    px, py, pz = bs._DHEAD_JAW_PIVOT
+    jc, js = bs._DHEAD_JAW_C, bs._DHEAD_JAW_S
+    k = {"n": 0, "e": 1, "s": 2, "w": 3}.get(facing, 0)
+    wdx, wdz = {"n": (0.0, -0.25), "s": (0.0, 0.25),
+                "e": (0.25, 0.0), "w": (-0.25, 0.0)}.get(facing, (0.0, 0.0))
+    out = []
+    for label, b in bs._DHEAD_BOXES:
+        txt = _DHEAD_TEX[label]
+        for normal in ((0, 1, 0), (0, -1, 0), (0, 0, -1), (0, 0, 1),
+                       (-1, 0, 0), (1, 0, 0)):
+            tex = txt[_DHEAD_FACE_OF[normal]]
+            cuv = _uv_corners(_box_face(b, normal), normal,
+                              (0.0, 0.0, 1.0, 1.0))
+            nrm = normal
+            if label == "jaw":
+                # 方块空间 y 向上、官方 xRot 作用在 y 向下的模型系，
+                # 故取负角使下颚向下张开（= 官方 +0.2 rad 的镜像）
+                cuv = _rotx4(cuv, py, pz, jc, -js)
+                nrm = _rotn_x(nrm, jc, -js)
+            if wall:
+                cuv = tuple((x + wdx, y + 0.25, z + wdz, u, v)
+                            for (x, y, z, u, v) in cuv)
+            if k:
+                cuv, nrm = _roty_q(cuv, nrm, k)
+            out.append((tex, cuv, nrm))
+    return tuple(out)
+
+
+def _uv_corners(corners, normal, rect):
+    """面 4 角 + 法线 + UV 窗 -> 5 元组角点 (x,y,z,u,v)。
+
+    轴配对与 _emit_quad 的 rect 分支一致（up/down：pu 沿 x、pv 沿 z；
+    x 面 (z,y)；z 面 (x,y)）。窗 (0,0,1,1) 时 v 恰为面内归一化 pv。
+    """
+    nx, ny, nz = normal
+    if ny != 0:
+        ia, ib = 0, 2
+    elif nx != 0:
+        ia, ib = 2, 1
+    else:
+        ia, ib = 0, 1
+    a0 = min(c[ia] for c in corners)
+    a1 = max(c[ia] for c in corners)
+    b0 = min(c[ib] for c in corners)
+    b1 = max(c[ib] for c in corners)
+    u0, v0, u1, v1 = rect
+    out = []
+    for c in corners:
+        pu = (c[ia] - a0) / (a1 - a0) if a1 > a0 else 0.0
+        pv = (c[ib] - b0) / (b1 - b0) if b1 > b0 else 0.0
+        out.append((c[0], c[1], c[2], u0 + (u1 - u0) * pu,
+                    v0 + (v1 - v0) * pv))
+    return out
 
 
 @lru_cache(maxsize=64)
@@ -3625,6 +3757,16 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                     else "n"
                 _emit_rot_quads(slot_verts, slot_index, rot_cells,
                                 (x, y, z), _lectern_quads(lf))
+                continue
+            if kind == "dhead":
+                # 龙首：走**旋转 quad 路径**而非 AABB 面循环 —— 下颚需
+                # 绕铰链微张（AABB 无法表达倾斜）。盒仍由 bs._dragon_head
+                # 提供（作剔除/遮挡），渲染由 _dhead_quads 生成全 7 盒。
+                bf, _, wf = shape_rest.partition(":")
+                _emit_rot_quads(
+                    slot_verts, slot_index, rot_cells, (x, y, z),
+                    _dhead_quads(bf if bf in ("n", "s", "e", "w") else "n",
+                                 wf == "w"))
                 continue
             if kind == "torch" and (shape_rest in ("n", "s", "e", "w")
                                     or shape_rest == "v"):

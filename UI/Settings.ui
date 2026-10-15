@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>229</width>
-    <height>120</height>
+    <height>173</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -19,10 +19,17 @@
      <x>30</x>
      <y>20</y>
      <width>161</width>
-     <height>61</height>
+     <height>88</height>
     </rect>
    </property>
    <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="0">
+     <widget class="QCheckBox" name="isSystemTray">
+      <property name="text">
+       <string>关闭时最小化到托盘</string>
+      </property>
+     </widget>
+    </item>
     <item row="0" column="0">
      <widget class="QCheckBox" name="isStartOnRoot">
       <property name="text">
@@ -30,10 +37,10 @@
       </property>
      </widget>
     </item>
-    <item row="1" column="0">
-     <widget class="QCheckBox" name="isSystemTray">
+    <item row="2" column="0">
+     <widget class="QPushButton" name="checkRenderingSupportButton">
       <property name="text">
-       <string>关闭时最小化到托盘</string>
+       <string>检测渲染支持</string>
       </property>
      </widget>
     </item>
