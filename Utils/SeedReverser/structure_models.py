@@ -3163,6 +3163,26 @@ def _torch_wall_quads(edge: str, texkey: str) -> tuple:
     return tuple(out)
 
 
+@lru_cache(maxsize=16)
+def _torch_stand_quads(texkey: str) -> tuple:
+    """直立火把（jar template_torch）：杆 (7,0,7)-(9,10,9)，不旋转。
+
+    走**显式像素窗**路径（与墙上火把同款），窗取官方 template_torch
+    原值：四侧 [7,6,9,16]（杆顶 = 图行 6 的火焰段）、up [7,6,9,8]、
+    down [7,13,9,15]。旧实现走 AABB 面循环的世界平铺 UV，而该 UV 的
+    竖直方向与图集实际朝向相反（贴图整体上下翻）——噪声类方块看不出，
+    火把这种强不对称精灵直接暴露为「火焰跑到棍子底部」，故改用窗路径。
+    """
+    rod = (7 / 16, 0.0, 7 / 16, 9 / 16, 10 / 16, 9 / 16)
+    quads = _rot_element(rod, {"up": (_RU(7, 6, 9, 8), texkey),
+                               "down": (_RU(7, 13, 9, 15), texkey),
+                               "north": (_RS(7, 6, 9, 16), texkey),
+                               "south": (_RS(7, 6, 9, 16), texkey),
+                               "west": (_RS(7, 6, 9, 16), texkey),
+                               "east": (_RS(7, 6, 9, 16), texkey)})
+    return tuple((mk, cuv, nrm) for (cuv, nrm, mk) in quads)
+
+
 @lru_cache(maxsize=64)
 def _lever_quads(face: str, f: str, pw: bool) -> tuple:
     """拉杆（jar lever.json / lever_on.json）：圆石底座 (5,0,4)-
@@ -3606,12 +3626,18 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 _emit_rot_quads(slot_verts, slot_index, rot_cells,
                                 (x, y, z), _lectern_quads(lf))
                 continue
-            if kind == "torch" and shape_rest in ("n", "s", "e", "w"):
-                # 墙上火把（官方 template_torch_wall 旋转面片，
-                # 不走 AABB 面循环；阶梯盒仅作剔除/遮挡）
-                _emit_rot_quads(slot_verts, slot_index, rot_cells,
-                                (x, y, z),
-                                _torch_wall_quads(shape_rest, mat))
+            if kind == "torch" and (shape_rest in ("n", "s", "e", "w")
+                                    or shape_rest == "v"):
+                # 火把：墙上（template_torch_wall 旋转面片）与直立
+                # （template_torch）都走显式像素窗路径，不走 AABB 面
+                # 循环；阶梯盒仅作剔除/遮挡。直立火把必须走窗路径：
+                # 世界平铺 UV 在竖直方向与图集朝向相反，会把火把贴图
+                # 上下翻（火焰跑到棍子底部）
+                _emit_rot_quads(
+                    slot_verts, slot_index, rot_cells, (x, y, z),
+                    _torch_wall_quads(shape_rest, mat)
+                    if shape_rest in ("n", "s", "e", "w")
+                    else _torch_stand_quads(mat))
                 continue
             if kind == "lever" and shape_rest.count(":") == 2:
                 # 拉杆：单根 ±45° 旋转杆（lever.json/lever_on.json）
