@@ -3493,9 +3493,15 @@ def build_occlusion(vox: dict) -> dict:
             "bounds": (x0, y0, z0, x1, y1, z1)}
 
 
-def build_mesh(vox: dict) -> dict:
+def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
     """体素 -> 绘制网格（共享顶点 + 材质槽区间）。
 
+    burial_volume = 结构体积格集合（拼装件盒并集，见 StructurePreviewer.
+    composition 的试炼密室深埋模拟）。给定时，**邻格不在该集合内一律
+    视作外围实心岩体** -> 结构外表面整片剔除：深埋结构在游戏里外表面
+    本就贴着石层（MC 的 Block.shouldRenderFace 对实心邻居恒剔），渲染
+    层因此不产出这些面，从任意位置（外部/内部）都能直接看到结构内部。
+    纯剔除，不生成任何岩体几何；缺省 None = 旧行为逐字节不变。
     返回 {"verts": [x,y,z,u,v,nx,ny,nz,...], "idx": [...],
           "slots": [(idx_start, idx_count), ...],
           "slot_mat": [mat, ...]}。
@@ -3529,6 +3535,12 @@ def build_mesh(vox: dict) -> dict:
     slot_verts: dict = {}
     slot_index: dict = {}
     rot_cells: dict = {}   # (材质, 字节偏移) -> 方块格（旋转 quad 分桶）
+    # 深埋结构（可选）：结构体积之外的邻格一律视作外围实心岩体
+    b_prot = burial_volume
+
+    def _burial_rock(p) -> bool:
+        """p 是否外围实心岩体（不在结构体积内）。"""
+        return b_prot is not None and p not in b_prot
     # 体素值级缓存（键 = 体素值，str 或 (mat, shape) 元组，均可哈希）
     v_ms: dict = {}        # v -> (mat, shape)                （_mat_shape）
     v_boxes: dict = {}     # v -> 基础 AABB 元组（不含连通臂）（shape_boxes）
@@ -3551,8 +3563,11 @@ def build_mesh(vox: dict) -> dict:
             # bastion 实测 ~60% 体素命中，面迭代 -60%。
             inside = True
             for d in _NEIGHBOR_DIRS:
-                nb_v = vox.get((x + d[0], y + d[1], z + d[2]))
+                nb_pos = (x + d[0], y + d[1], z + d[2])
+                nb_v = vox.get(nb_pos)
                 if nb_v is None:
+                    if _burial_rock(nb_pos):
+                        continue          # 深埋岩体：视作实心邻格
                     inside = False
                     break
                 nb_info = v_ms.get(nb_v)
@@ -3649,6 +3664,10 @@ def build_mesh(vox: dict) -> dict:
             nb_full = False   # 邻居整格实心非透明：MC 恒剔（见下）
             nb_pos = (x + nx, y + ny, z + nz)
             nb_v = vox.get(nb_pos)
+            if nb_v is None and _burial_rock(nb_pos):
+                # 深埋岩体：邻格视作整格实心 -> 剔本面（结构外表面
+                # 整片消失，相机在岩体盒内即透视内部）
+                nb_full = True
             if nb_v is not None:
                 nb_info = v_ms.get(nb_v)
                 if nb_info is None:
@@ -3737,6 +3756,7 @@ def build_mesh(vox: dict) -> dict:
                                slot_index.setdefault(fmat, []),
                                x, y, z, _box_face(b, normal), normal,
                                rect)
+    # ---- 深埋结构：外表面整片剔除（不生成岩体几何）----
     verts_all, idx_all, slots, slot_mat = [], [], [], []
     trans_idx: list = []     # 半透明槽索引（垫尾，视口第二遍）
     quad_slot: list = []      # 每 quad 槽序（quad -> slots 下标，烘焙用）

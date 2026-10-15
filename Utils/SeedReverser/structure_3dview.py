@@ -1461,7 +1461,9 @@ class Structure3DView(QOpenGLWidget):
         glf = self._glf
         glf.glEnable(0x0B71)                 # GL_DEPTH_TEST
         glf.glEnable(0x0BE2)                 # GL_BLEND
-        glf.glEnable(0x0BC5)                 # GL_CULL_FACE（背面裁剪）
+        glf.glEnable(0x0B44)                 # GL_CULL_FACE（背面裁剪；
+                                              #  0x0B44 = gl.h 实证常量，
+                                              #  旧 0x0BC5 无效枚举从未生效）
         # 标准预乘式混合：src*SRC_ALPHA + dst*(1-src_alpha)
         # 注意 0x0306 是 GL_DST_COLOR，不是 GL_SRC_ALPHA(0x0302)——
         # 写成 (0x0306,0x0303) 会让输出乘背景色系统性变暗(0.17x)
@@ -1960,7 +1962,7 @@ class Structure3DView(QOpenGLWidget):
         # 几何含闭合盒（第二遍含底/背面），双面绘制保证
         # 水下视角/斜视不被背向剔除误裁。
         glf.glDepthMask(0)
-        glf.glDisable(0x0BC5)                # GL_CULL_FACE：双面
+        glf.glDisable(0x0B44)                # GL_CULL_FACE：双面
         self._wshader.bind()
         self._wshader.setUniformValue(self._wu["uMVP"], mvp)
         self._qtex.bind(0)
@@ -1972,7 +1974,7 @@ class Structure3DView(QOpenGLWidget):
                                     self._idx_type, _VOIDP(byte_off))
         self._vao.release()
         self._wshader.release()
-        glf.glEnable(0x0BC5)                 # GL_CULL_FACE 恢复
+        glf.glEnable(0x0B44)                 # GL_CULL_FACE 恢复
         glf.glDepthMask(1)
 
     def _handle_render_failure(self, msg: str) -> None:
@@ -2006,8 +2008,15 @@ class Structure3DView(QOpenGLWidget):
         # 非冗余开销，属必要状态恢复；顺序与原实现一致。
         glf.glEnable(0x0B71)                 # GL_DEPTH_TEST
         glf.glEnable(0x0BE2)                 # GL_BLEND
-        glf.glEnable(0x0BC5)                 # GL_CULL_FACE（新增：剔除
-                                             #  依赖每帧重开，QP 后状态被关）
+        glf.glEnable(0x0B44)                 # GL_CULL_FACE：每帧重开（QP
+                                              #  后状态被关）。0x0B44 才是
+                                              #  正确常量（gl.h 实证）；旧值
+                                              #  0x0BC5 为无效枚举静默失败，
+                                              #  背面剔除从未生效 -> 眼进方
+                                              #  块内部看到内壁挡视线。修正
+                                              #  后 = MC 旁观者 x-ray 同款：
+                                              #  所在方块正面被背向剔除，
+                                              #  从方块内部可透视外部结构
         # 标准预乘式混合：src*SRC_ALPHA + dst*(1-src_alpha)
         # 注意 0x0306 是 GL_DST_COLOR，不是 GL_SRC_ALPHA(0x0302)——
         # 写成 (0x0306,0x0303) 会让输出乘背景色系统性变暗(0.17x)

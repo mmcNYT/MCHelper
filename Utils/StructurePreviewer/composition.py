@@ -2823,6 +2823,35 @@ def _bastion_jigsaw_voxels(comp: Composition) -> tuple[dict, set]:
     return vox, chest_offs
 
 
+# ---------------------------------------------------------------------------
+# 试炼密室：深埋模拟（直接剔除结构外壳面）
+# ---------------------------------------------------------------------------
+# 游戏内 trial_chambers 深埋地下（start_y ∈ [-40,-20]），四周是完整地层。
+# MC 的 Block.shouldRenderFace 对实心邻居恒剔，所以它的外表面在游戏里
+# 本来就一个都不渲染（被石层贴住），玩家看到的始终是内部。预览器照此
+# 办理，只做「外壳面剔除」、不生成任何岩体几何：
+#   件盒并集（拼装件覆盖的格 = 结构体积）作判据集，结构体素朝体积之外
+#   的面（= 贴石层的外壳面）整片剔除 -> 从任意位置（结构外或内部）都
+#   能直接看到密室内部，等价于「结构整个埋在地下」的观感。石层不可见
+#   是因为被剔除，而不是被画出来。
+# 判据集只在 build_mesh 期间需要，故模型不持有它。
+def _trial_burial_volume(pieces, ax: int, az: int, y0: int) -> set:
+    """拼装件盒 -> 结构体积格集（件盒并集，模型系）。
+
+    件盒是世界坐标，按 (ax, az, y0) 换算到与体素同一模型系。体积含
+    密室本体、模板挖空空腔与件盒内未定义格；体积之外即游戏里的天然
+    石层（预览器不渲染，只据此剔除结构外壳面）。
+    """
+    volume: set = set()
+    for p in pieces:
+        b = p.box
+        for x in range(b.x0, b.x1 + 1):
+            for y in range(b.y0, b.y1 + 1):
+                for z in range(b.z0, b.z1 + 1):
+                    volume.add((x - ax, y - y0, z - az))
+    return volume
+
+
 def _trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]:
     """Trial 显示：逐 seed 精确 jigsaw 拼装体素（真实结构布局）。
 
@@ -2864,7 +2893,7 @@ def _trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]:
             state = ta.apply_trial_degradation(nm, wx, wy, wz)
             mat = structure_models._map_block(state, "half")
             if mat is None:
-                continue
+                continue          # 模板显式空气（房间/走廊空腔）
             if shp is not None:
                 shp = _bs.shape_rotation(shp, _ROT_IDX[p.rot])
             base = mat[len("halfheight:"):] \
@@ -2873,6 +2902,9 @@ def _trial_jigsaw_voxels(comp: Composition) -> tuple[dict, set]:
                 shp = _bs.SHAPE_SLAB_BOT
             vox[(wx - ax, wy - y0, wz - az)] = \
                 (base, shp) if shp is not None else base
+    # 深埋模拟：结构体积集（外壳面剔除判据；岩体本身不落体素）
+    comp.extra["burial_volume"] = _trial_burial_volume(
+        res.pieces, ax, az, y0)               # 模型坐标（归一化前）
     for c in comp.chests:
         chest_offs.add((c.pos[0] - comp.anchor[0],
                         c.pos[1] - comp.anchor[1]))
@@ -3006,6 +3038,7 @@ def compose_display_model(comp: Composition) -> dict:
       （全箱子预测后 exact 匹配，无兜底）。
     """
     nether_chest_offs: set = set()
+    burial_volume = None              # 深埋结构体积集（trial 专属）
     if comp.struct_key == "igloo":
         voxels: dict = {}
         for fname, dx, dy, dz in _igloo_model_parts(comp):
@@ -3063,6 +3096,8 @@ def compose_display_model(comp: Composition) -> dict:
         # RNG 预测容器与拼装几何同源（同一 piece 序 + 同一变换），
         # pos3 3D exact 匹配（同 (x,z) 不同 y 可区分），无兑底。
         voxels, nether_chest_offs = _trial_jigsaw_voxels(comp)
+        # 深埋模拟：结构体积集（外壳面剔除判据）随下方归一化一并平移
+        burial_volume = comp.extra.get("burial_volume")
         start_off = (0, 0)
     elif comp.struct_key == "pillager_outpost":
         # 前哨站：逐 seed 真实 jigsaw 拼装（list 双子模板 + 腐蚀），
@@ -3116,6 +3151,9 @@ def compose_display_model(comp: Composition) -> dict:
             voxels = {(x - min_x, y, z - min_z): m
                       for (x, y, z), m in voxels.items()}
             start_off = (start_off[0] + min_x, start_off[1] + min_z)
+            if burial_volume is not None:
+                burial_volume = {(x - min_x, y, z - min_z)
+                                 for (x, y, z) in burial_volume}
         size = (max(p[0] for p in voxels) + 1,
                 max(p[1] for p in voxels) - min(p[1] for p in voxels) + 1,
                 max(p[2] for p in voxels) + 1)
@@ -3364,7 +3402,9 @@ def compose_display_model(comp: Composition) -> dict:
         "voxels": voxels,
         "size": size,
         "min_y": min_y,
-        "mesh": structure_models.build_mesh(voxels),
+        # 深埋模拟（trial）：结构体积集只交给 build_mesh 用——它据此
+        # 把结构外壳面整片剔除（不生成任何岩体几何），故模型不持有
+        "mesh": structure_models.build_mesh(voxels, burial_volume),
         "tex_keys": tex_keys,
         "chests": chest_marks,
         "chest_blocks": chest_blocks,
