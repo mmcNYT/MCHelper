@@ -127,4 +127,13 @@ ITEM_CN = {
     "tall_grass": "高草丛", "water_bucket": "水桶",
     "wheat_seeds": "小麦种子", "white_wool": "白色羊毛",
     "yellow_dye": "黄色颜料",
+    # -- 堡垒遗迹 疣猪兽棚/藏宝室两表物品补全（中文 Wiki 核实）--
+    # 译名依据 zh.minecraft.wiki 各物品条目（非 jar 类别键推断）：
+    #   glowstone=荧石（非「萤石」）、iron_chain=铁链（Wiki「锁链」
+    #   重定向至「铁链」，为 1.21.9+ 的 chain 改名）、crimson_* 三者
+    #   均带「菌」字。
+    "netherite_ingot": "下界合金锭", "quartz": "下界石英",
+    "glowstone": "荧石", "soul_sand": "灵魂沙",
+    "crimson_fungus": "绯红菌", "crimson_nylium": "绯红菌岩",
+    "crimson_roots": "绯红菌索", "iron_chain": "铁链",
 }

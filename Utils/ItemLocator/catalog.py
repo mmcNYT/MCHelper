@@ -36,8 +36,10 @@ ALL_STRUCT_KEYS = ("igloo", "shipwreck", "ocean_ruin", "stronghold",
 UI_TO_ENUM = {"woodland_mansion": "mansion"}
 
 # 结构 -> 可用的战利品表（快照短名；含各自引用的子表）。
-# 说明：堡垒遗迹仅 bridge/other 两表快照（其余表缺失，无法求值，
-# 不进结构，避免候选过滤出现「能查但永远无结果」的空结构）。
+# 堡垒遗迹四表齐备：other/treasure 为 1_21 + 1_21_11 分档（两档语义
+# 有差异，见 loot_engine._LOOT_TABLE_ERAS），bridge/hoglin_stable 为
+# 无后缀单文件（两档逐字节相同）。_table_paths 会把 <名>.*.json 各档
+# 一并纳入并取物品并集，故此处按表短名声明即可。
 _STRUCT_TABLES = {
     "igloo": ("igloo_chest",),
     "shipwreck": ("shipwreck_supply", "shipwreck_map", "shipwreck_treasure"),
@@ -45,7 +47,8 @@ _STRUCT_TABLES = {
     "stronghold": ("stronghold_corridor", "stronghold_crossing",
                    "stronghold_library"),
     "nether_fortress": ("nether_bridge",),
-    "bastion_remnant": ("bastion_bridge", "bastion_other"),
+    "bastion_remnant": ("bastion_bridge", "bastion_other",
+                        "bastion_hoglin_stable", "bastion_treasure"),
     "end_city": ("end_city_treasure",),
     # trial_chambers 的 NBT 实际引用 chests/trial_chambers/<子表>，
     # 快照按子表短名分文件（reward/corridor/entrance/supply/

@@ -1168,6 +1168,17 @@ _LOOT_TABLE_ERAS: dict[str, tuple[int, str, str]] = {
     # 占位），1_21_11 增鹦鹉螺铠四色 + iron_spear。
     "ruined_portal": (E_1_21_11, E_1_21, "1_20"),
     "buried_treasure": (E_1_21_11, E_1_21, "1_20"),
+    # 堡垒遗迹：四表里 other/treasure 两表在 1.21.1 与 1.21.11 间有语义
+    # 差异（other：chain→iron_chain 改名；treasure：1.21.11 增
+    # diamond_spear、钻石装备与金苹果权重调整），故按 (1_21, 1_21_11)
+    # 两级分档。26.2 复用 1_21_11 档：实测两者关键路径（item/weight/
+    # count/type/min/max）**零差异**，仅省略 bonus_rolls:0.0 与惰性
+    # functions[].add:false（不影响求值），且全部既有分档表对 26.2 同
+    # 口径（era 5 >= E_1_21_11 取 1_21_11 档）。
+    # bridge / hoglin_stable 两表 1.21 与 1.21.11 **逐字节相同**，故不入
+    # 本表，走无后缀单文件（与 igloo_chest 等同款）。
+    "bastion_other": (E_1_21_11, E_1_21, "1_21"),
+    "bastion_treasure": (E_1_21_11, E_1_21, "1_21"),
 }
 
 # 快照档后缀 -> 解析 era（对齐 C 烘焙表 version 烧死语义）
