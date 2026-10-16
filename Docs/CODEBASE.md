@@ -72,6 +72,7 @@
   - [`Utils/StructurePreviewer/mansion_pieces.py`](#utilsstructurepreviewermansion_piecespy)
   - [`Utils/StructurePreviewer/end_city_pieces.py`](#utilsstructurepreviewerend_city_piecespy)
   - [`Utils/StructurePreviewer/fortress_pieces.py`](#utilsstructurepreviewerfortress_piecespy)
+  - [`Utils/StructurePreviewer/chest_orient.py`](#utilsstructurepreviewerchest_orientpy)
   - [`Utils/StructurePreviewer/pyramid_pieces.py`](#utilsstructurepreviewerpyramid_piecespy)
   - [`Utils/StructurePreviewer/ruined_portal_pieces.py`](#utilsstructurepreviewerruined_portal_piecespy)
   - [`Utils/StructurePreviewer/village_assembly.py`](#utilsstructurepreviewervillage_assemblypy)
@@ -4456,7 +4457,7 @@ RNG 与结构信息表：
 | `_generate_box_skip` | `(piece_bb0, piece_bb1, piece_rot, cx, cz, x0..z1, rng) -> None` | xp generateBox 的 RNG 侧：三重循环体素，仅世界坐标落在本区块且位于盒壳层的格消耗 `next_float()`（对应 Java SmoothStoneSelector 的区块外短路）。 |
 | `simulate_loot_stream` | `(world_seed, pieces, version_key="1.21") -> None` | getStrongholdLoot 的 loot/眼睛段：逐区块建流、按 piece 序消耗（见上文 loot 流表格），就地填 `piece["chests"]`（`{"x","y","z","table","seed"}`）与 `piece["eyes"]`。 |
 | `compose_stronghold_pieces` | `(world_seed, chunk_x, chunk_z, version_key="1.21") -> list[dict]` | 组装入口：`assemble_stronghold(sink_y=True)` + `simulate_loot_stream`；返回含 type/name/pos/rot/depth/bb0/bb1/add/entry_door/rc_type/chests/eyes 的 piece dict 列表。 |
-| `_CtxS` | 类（继承 `fortress_pieces._Ctx`） | 要塞 postProcess 上下文：`wx_dir`（局部水平朝向→世界朝向）、`stairs`、`torch_wall`（方向链字节码定案，贴附墙取世界 FACING 反侧）、`torch_post`、`panel`、`button`、`door`（恒关闭+铰链左）、`chest`、`sel_box`（hollow 双模式石砖盒）。 |
+| `_CtxS` | 类（继承 `fortress_pieces._Ctx`） | 要塞 postProcess 上下文：`wx_dir`（局部水平朝向→世界朝向）、`stairs`、`torch_wall`（方向链字节码定案，贴附墙取世界 FACING 反侧）、`torch_post`、`panel`、`button`、`door`（恒关闭+铰链左）、`chest`（官方 reorient 自动定向，见 `chest_orient.py`）、`sel_box`（hollow 双模式石砖盒）。 |
 | `_door_type` | `(c, typ, x, y, z) -> None` | StrongholdPiece.a()：entryDoor 构造值 0/1/2/3/4 → OPENING/WOOD_DOOR/GRATES/IRON_DOOR 五种门几何。 |
 | `_piece_chest_corridor` | `(c, ed) -> None` | ChestCorridor.postProcess：hollow 盒 + 双门 + 石砖台 + 台阶 + 箱（局部 (3,2,3)）。 |
 | `_piece_filler_corridor` | `(c, steps) -> None` | FillerCorridor.postProcess：steps 从 bb 跨度现算（N/S→zSpan、E/W→xSpan），逐列画壳体并挖空走廊。 |
@@ -4634,7 +4635,7 @@ RNG 与结构信息表：
 
 坐标与朝向语义（StructurePiece.java 字节码级定案）：`getWorldX/Y/Z` 的 facing 0..3 = C 口径 `Plane.HORIZONTAL` 随机序 {N,E,S,W}——0 NORTH: `x=minX+x, z=maxZ-z`；1 EAST: `x=minX+z, z=minZ+x`；2 SOUTH: `x=minX+x, z=minZ+z`；3 WEST: `x=maxX-z, z=minZ+x`；y = bb.minY + y。方向性方块（楼梯 FACING）经 placeBlock 内 mirror/rotate 的净效果即 `_WX_STAIRS` 映射表（0 恒等、1 CW90、2 LEFT_RIGHT 镜像、3 镜像+CW90）。
 
-已知妥协（源码注释声明、用户已认可）：无地形（fillColumnDown 全部跳过）；箱子朝向固定局部 north（真实游戏按周边固体邻居 reorient，LootTableSeed 口径不变）；spawner/lava 恒放置（真实游戏受 chunkBB.isInside 限制）；y 基准恒 64（不模拟 moveInsideHeights 平移）；AIR = generateBox 显式挖空（体素 pop），postProcess 按 accepted 顺序执行、后写胜出。
+已知妥协（源码注释声明、用户已认可）：无地形（fillColumnDown 全部跳过）；spawner/lava 恒放置（真实游戏受 chunkBB.isInside 限制）；y 基准恒 64（不模拟 moveInsideHeights 平移）；AIR = generateBox 显式挖空（体素 pop），postProcess 按 accepted 顺序执行、后写胜出。箱子朝向走官方 `StructurePiece.reorient`（`chest_orient.py`，锁扣背向唯一实心邻），纯几何、不消耗 RNG，LootTableSeed 口径不变。
 
 **类与函数**：
 
@@ -4658,7 +4659,7 @@ RNG 与结构信息表：
 | `_piece_bridge_end_filler` | `(c: _Ctx, self_seed: int) -> None` | BridgeEndFiller.postProcess：**本模块唯一的独立 RNG 消耗点**——`selfRandom = RandomSource.createThreadLocalInstance((long)selfSeed)`（LegacyRandomSource），用 `loot_rng.JavaRandom` 复刻；selfSeed 为无符号 32 位捕获（mc_random.next_bits），Java 存储为有符号 int32，先转回有符号再播种；随后消耗 `nextInt(8)`×10（两组 y=3/4 的桥面延伸）、`nextInt(8)`×2（檐口）、`nextInt(5)`×5（中段）、`nextInt(3)`×10（底层），逐列画不对称的下界砖残段。 |
 | `build_fortress_voxels` | `(comp) -> dict` | 入口：遍历 `comp.pieces`（accepted 顺序 = Java postProcess 顺序，后写胜出），把 piece AABB 平移到模型系（- anchor，y-64），按 `_DISPATCH`/专用分支逐类型执行布局转写；`p.bb is None` 或 type=14 缺 self_seed 的 piece 跳过；返回值不含箱子标注逻辑（compose_display_model 负责）。 |
 
-**接口**：被两方导入——`composition.py`（L2477-2478：`build_fortress_voxels` 生成显示体素）；`stronghold_pieces.py`（L730-731：复用 `_Ctx` 作 `_CtxS` 基类、`_PieceBB` 与 `_WX_STAIRS` 朝向映射表）。本模块自身导入：`block_shapes`（SHAPE_STAIRS/SHAPE_FENCE_POST/SHAPE_CHEST_N/SHAPE_CROSS）、`loot_rng`（JavaRandom，仅 BridgeEndFiller 用）。对外提供 `_DISPATCH`（类型号→布局函数）与 `_WX_STAIRS`。
+**接口**：被两方导入——`composition.py`（L2477-2478：`build_fortress_voxels` 生成显示体素）；`stronghold_pieces.py`（L730-731：复用 `_Ctx` 作 `_CtxS` 基类、`_PieceBB` 与 `_WX_STAIRS` 朝向映射表）。本模块自身导入：`block_shapes`（SHAPE_STAIRS/SHAPE_FENCE_POST/SHAPE_CHEST_N/SHAPE_CROSS）、`chest_orient`（箱子 reorient 朝向）、`loot_rng`（JavaRandom，仅 BridgeEndFiller 用）。对外提供 `_DISPATCH`（类型号→布局函数）与 `_WX_STAIRS`。
 
 **关键变量/常量**：
 
@@ -4669,6 +4670,28 @@ RNG 与结构信息表：
 | `_WART` | `("nether wart", bs.SHAPE_CROSS)`，地狱疣作物。 |
 | `_WX_STAIRS` | 楼梯局部朝向→世界朝向映射表（索引 = piece facing 0..3）：0 恒等、1 CW90（n→e/s→w/e→s/w→n）、2 LEFT_RIGHT 镜像（n/s 不变、e↔w）、3 镜像+CW90（n→e/s→w/e→n/w→s）。被 stronghold_pieces 复用。 |
 | `_DISPATCH` | 类型号 → 布局函数：0/2 → start_bridge_crossing（NeStart/NeBCr 同布局）、1 → bridge_straight、3 → room_crossing、4 → stairs_room、5 → monster_throne、6 → castle_entrance、7 → castle_small_corridor、8 → corridor_crossing、12 → t_balcony、13 → stalk_room；9/10（左右拐角，需 chest 标志）与 14（需 selfSeed）单独分发。 |
+
+---
+
+## `Utils/StructurePreviewer/chest_orient.py`
+
+**功能**：箱子朝向 reorient（官方 `StructurePiece.reorient` 转写）。官方 `StructurePiece.createChest`（1.21.11 反编译 `ffs`）在未显式传入 BlockState 时调用 `reorient(level, pos, Blocks.CHEST.defaultBlockState())` 自动定向——箱子锁扣必须背向实心墙，否则视觉上"面壁"。本模块把该算法从世界上下文解耦为**纯几何 + 体素读取回调**，供四结构共用；**不消耗任何 RNG**，故不影响已对拍的 LootTableSeed。
+
+**`reorient` 算法**（`StructurePiece.java` L354-396 逐行转写）：① 扫水平四邻（`Direction.Plane.HORIZONTAL` 序 = N,E,S,W），若有邻为 CHEST → **原样返回**（避免两箱对脸）；② 记录**唯一**的 `isSolidRender` 邻，出现第二个实心邻即放弃（`$$3 = null; break`）；③ 有唯一实心邻 → `FACING = 该邻的对向`；④ 否则 fallback 链：从默认 FACING（chest 默认态 = NORTH）起，依次 反 → 顺时针 → 反，取第一个非实心邻。
+
+**`isSolidRender` 语义**（`BlockBehaviour.java` L489/L630）：`solidRender = Block.isShapeFullBlock(occlusionShape)`，即"遮挡形状为满块"，**与透明度无关**。对应本项目模型：体素值为元组 `(mat, shape)` → 非整格形状 → 非满块 → False；整格字符串 → 满块，但水/岩浆的 `occlusionShape` 为空 → False（`_NON_SOLID_FULL`）。实测四结构箱子邻位出现的材质为 cut sandstone / cobblestone / stone bricks / mossy cobblestone / bookshelf（整格实心）与 stone brick slab / tripwire / torch（形状码，非满块），判定与官方逐格一致。
+
+**接口**：
+
+| 名称 | 签名 | 说明 |
+|---|---|---|
+| `HORIZ` | `("n", "e", "s", "w")` | 官方 `Direction.Plane.HORIZONTAL` 序（faces 数组序 N,E,S,W）。 |
+| `is_chest` | `(val) -> bool` | 该体素是否为箱子（官方 `state.is(Blocks.CHEST)` 近似，材质键以 `chest` 结尾）。 |
+| `is_solid_render` | `(val) -> bool` | 官方 `BlockState.isSolidRender()`：元组（带形状码）→ False；整格但属 `_NON_SOLID_FULL`（水/岩浆）→ False；其余整格 → True。 |
+| `reorient` | `(get, pos, default="n") -> str` | 官方 reorient → 世界水平 FACING 字母。`get(pos) -> 体素值`（None = 空气）；邻居偏移在各坐标系间平移不变，故世界系/模型系皆可。 |
+| `chest_shape` | `(get, pos, default="n") -> str` | reorient 结果 → 形状码 `chest:<f>:single`。 |
+
+**接入点**（四处，均通过 `read`/`get` 回调按世界坐标读取已写入体素——postProcess 顺序 = 先摆墙体后放箱子，与官方一致）：`pyramid_pieces._Sim.create_chest`（沙漠神殿 / 丛林神庙共用）、`fortress_pieces._Ctx.chest`（下界要塞，`_Ctx.__slots__` 增 `read`）、`stronghold_pieces._CtxS.chest`（要塞，复用 `_Ctx.read`）。`read` 缺省 None 时退回旧行为（固定 `chest:n:single`），保证既有单测构造路径不破。
 
 ---
 
@@ -4684,7 +4707,7 @@ RNG 与结构信息表：
 
 | 名称 | 签名 | 说明 |
 |---|---|---|
-| `_Sim` | 类 | 单结构 postProcess 模拟器：`_w`（getWorldPos：局部→世界，y+64）、`facing_of`（局部水平朝向→世界，机关方向属性净变换）、`next_long/next_int`、`place`（val=None 为 AIR 挖空）、`stairs`（局部 FACING 经 `_STAIRS_MAP[facing]`）、`fill_hollow`（generateBox edge/inner）、`fill_air`（generateAirBox）、`fill_mossy`（MossStoneSelector 逐格 nextFloat <0.4→cobblestone）、`fill_down`（fillColumnDown 平坦画单层）、`create_chest/create_dispenser`（1 nextLong + 体素 + chests 记录 (世界 x,z, y_local, table, seed)；dispenser 带 fc 朝向码）。 |
+| `_Sim` | 类 | 单结构 postProcess 模拟器：`_w`（getWorldPos：局部→世界，y+64）、`_read`（世界坐标读已写入体素，reorient 用）、`facing_of`（局部水平朝向→世界，机关方向属性净变换）、`next_long/next_int`、`place`（val=None 为 AIR 挖空）、`stairs`（局部 FACING 经 `_STAIRS_MAP[facing]`）、`fill_hollow`（generateBox edge/inner）、`fill_air`（generateAirBox）、`fill_mossy`（MossStoneSelector 逐格 nextFloat <0.4→cobblestone）、`fill_down`（fillColumnDown 平坦画单层）、`create_chest/create_dispenser`（1 nextLong + 体素 + chests 记录 (世界 x,z, y_local, table, seed)；dispenser 带 fc 朝向码；chest 朝向走 `chest_orient.chest_shape` 的官方 reorient）。 |
 | `_thook`/`_segs`（模块级） | helper | `_thook(sim, local)` = 绊线钩体素值（世界贴边 + `:a`）；`_segs(sim, mat, kind, n/so/e/w)` = rswire/twire 四向连接段体素值（局部连接向经净变换重排段序）。 |
 | `_sim_desert` | `(world_seed, ax, az, facing) -> _Sim` | fhj L34-231 逐行转写：底座/9 层金字塔/双塔楼/中室/走廊/大厅/陶瓦菱形/前后墙面装饰/门洞/TNT 竖井（3×3 TNT + 压力板）/四臂通道口/4 箱/秘密室。 |
 | `_desert_secret_room` | `(s) -> None` | fhj L227-306：挖掘室——下行楼梯（局部 w）+ 沙墙（`level.getRandom().nextBoolean()` 不可预测，固定 true 分支）+ 三层外框（原 skipExisting=true，平坦预览恒写入）+ 顶面挖空 + 陶瓦装饰。挖掘点记录（k 列表）不转写（仅 gameplay）。 |
@@ -4699,12 +4722,12 @@ RNG 与结构信息表：
 |---|---|
 | `SANDSTONE`/`CUT_SANDSTONE`/`CHISELED_SANDSTONE`/`SANDSTONE_STAIRS`/`SANDSTONE_SLAB`/`SAND`/`ORANGE_TERRACOTTA`/`BLUE_TERRACOTTA`/`TNT`/`COBBLESTONE`/`MOSSY_COBBLESTONE`/`COBBLESTONE_STAIRS`/`DISPENSER`/`STICKY_PISTON`/`CHISELED_STONE_BRICKS`/`TRIPWIRE_HOOK`/`VINE`/`LEVER`/`REPEATER`/`TRIPWIRE`/`REDSTONE_WIRE` | 材质键（纹理文件名；机关键与形状码分离，形状码逐方块生成）。`REDSTONE_WIRE = "redstone wire"`——合成图（blockstate multipart 官方口径）：1.21.11 官方 line0/line1 灰度纹理按 `RedStoneWireBlock`（egb 反编译）`COLORS[power=0]` 染色（神庙陷阱未触发真实色），N/S 臂 line0 原样 + E/W 臂 line1 y270 旋转转置（与 rswire 平铺 UV 逐像素对应）；ancient_city 同键（`_MAT_MAP`）。 |
 | `STONE_PLATE` | `("stone", bs.SHAPE_PLATE)` 石质压力板（desert TNT 井口）。 |
-| `CHEST` | `("chest", bs.SHAPE_CHEST_N)`，朝向固定局部 north（真实游戏经 reorient）。 |
+| `CHEST` | `("chest", <形状码>)`，形状码由 `chest_orient.chest_shape` 按官方 `reorient` 算出（锁扣背向唯一实心邻）。 |
 | `_EDGE` / `_SEG_IDX` | 挂件贴边 = FACING 反侧表 / rswire/twire 段序 n:s:e:w 下标。 |
 | `_DIR_STEPS` | `((0,-1),(1,0),(0,1),(-1,0))`——{N,E,S,W} 的 getStepX/getStepZ（C 口径）。 |
 | `_STAIRS_MAP` | 楼梯局部→世界朝向表（0 恒等、1 CW90、2 n↔s、3 n→w/s→e/e→s/w→n）。**注意与 fortress `_WX_STAIRS` 的 2/3 两行不一致**（fortress 表疑把 LEFT_RIGHT/FRONT_BACK 效果互换；1.21.11 字节码 eev.a=NONE/b=LEFT_RIGHT/c=FRONT_BACK + 26.2 StairBlock.mirror 双证指向本表）。 |
 
-**已知妥协**：无地形（desert 底座 fillColumnDown 画单层）；挖掘室沙/砂岩分布固定 nextBoolean=true 分支；afterPlace 可疑的沙子（forkPositional 独立流，不影响箱子 seed）统一画普通 sand；箱子朝向固定 north；y 基准恒 64（不模拟 updateAverageGroundHeight 的地表修正）。机关方块已全官方几何码（绊线钩/绊线/红石线/拉杆/活塞/中继器/藤蔓/发射器，方向属性净变换），无近似形状。
+**已知妥协**：无地形（desert 底座 fillColumnDown 画单层）；挖掘室沙/砂岩分布固定 nextBoolean=true 分支；afterPlace 可疑的沙子（forkPositional 独立流，不影响箱子 seed）统一画普通 sand；箱子朝向走官方 `reorient`（`chest_orient.py`）；y 基准恒 64（不模拟 updateAverageGroundHeight 的地表修正）。机关方块已全官方几何码（绊线钩/绊线/红石线/拉杆/活塞/中继器/藤蔓/发射器，方向属性净变换），无近似形状。
 
 ---
 

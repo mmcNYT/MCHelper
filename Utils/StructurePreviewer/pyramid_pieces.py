@@ -59,8 +59,9 @@ updateAverageGroundHeight 修正后 bb.minY 恰为 64；真实游戏 y 随
 - afterPlace 可疑的沙子（DesertPyramidStructure.afterPlace）用
   forkPositional 独立流选取挖掘点（不消耗 postProcess 流、不影响
   箱子 seed），预览统一画普通 sand（suspicious sand 纹理同 sand）；
-- 箱子朝向固定局部 north（真实游戏经 reorient 按邻居重定向，预览
-  无全局世界上下文）；
+- 箱子朝向走官方 `StructurePiece.reorient`（见 chest_orient.py，
+  锁扣背向唯一实心邻；四邻全实心时走 fallback 链），纯几何、
+  不消耗 RNG，LootTableSeed 口径不变；
 - jungle 台阶/楼梯的方向性已按 _STAIRS_MAP 映射，desert 秘密室
   下行楼梯为 SANDSTONE_STAIRS.rotate(CCW90) 的局部 w 再查表。
 
@@ -80,6 +81,7 @@ updateAverageGroundHeight 修正后 bb.minY 恰为 64；真实游戏 y 随
 from __future__ import annotations
 
 from Utils.SeedReverser import block_shapes as bs
+from . import chest_orient
 from . import loot_rng
 
 # --------------------------------------------------------------- 材质键
@@ -258,11 +260,22 @@ class _Sim:
 
     def create_chest(self, x: int, y: int, z: int, table: str) -> None:
         """createChest（无朝向重载）：1 个 nextLong（LootTableSeed）
-        + chest 体素（局部 north 占位，真实游戏经 reorient）。"""
+        + chest 体素。
+
+        朝向走官方 `StructurePiece.reorient`（未传 BlockState 时的
+        自动定向）：锁扣背向唯一实心邻，否则按 fallback 链。**纯几何、
+        不消耗 RNG**，故 LootTableSeed 口径不变。官方是先查邻居再写入，
+        本项目同序（暗室墙体在本函数调用前已 place）。
+        """
         seed = self.rng.next_long()
         wx, wy, wz = self._w(x, y, z)
-        self.voxels[(wx, wy, wz)] = CHEST
+        shape = chest_orient.chest_shape(self._read, (wx, wy, wz))
+        self.voxels[(wx, wy, wz)] = (CHEST[0], shape)
         self.chests.append((wx + self.ax, wz + self.az, y, table, seed))
+
+    def _read(self, pos):
+        """按世界坐标读已写入体素（reorient 邻居查询用）。"""
+        return self.voxels.get(pos)
 
     def create_dispenser(self, x: int, y: int, z: int, table: str,
                          local_facing: str) -> None:

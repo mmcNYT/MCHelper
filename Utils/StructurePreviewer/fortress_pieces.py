@@ -36,17 +36,18 @@ NetherFortressPieces.java（26.1 官方未混淆源码，postProcess 逐段
 
 已知妥协（用户已认可）：
 - 无地形：fillColumnDown 全部跳过（预览只画 piece 布局本身）；
-- 箱子朝向从简：固定局部 north（真实游戏按周边固体邻居
-  reorient，预览无全局世界上下文）；LootTableSeed 口径不变（xp）。
 - spawner/lava 恒放置（真实游戏受 chunkBB.isInside 限制，预览中
   chunk 覆盖全结构恒真）；y 基准恒 64（不模拟 moveInsideHeights
   平移，该平移发生在 piece 树生成之后、不影响布局内部）。
 - AIR = generateBox 显式挖空（体素 pop），非空气保留；postProcess
   按 accepted 顺序执行、无条件覆盖（后写胜出）。
+- 箱子朝向走官方 `StructurePiece.reorient`（见 chest_orient.py，
+  锁扣背向唯一实心邻），纯几何、不消耗 RNG，LootTableSeed 口径不变。
 """
 from __future__ import annotations
 
 from Utils.SeedReverser import block_shapes as bs
+from . import chest_orient
 from . import loot_rng
 
 # --------------------------------------------------------------- 材质键
@@ -106,12 +107,14 @@ class _Ctx:
     write(x, y, z, val)：val None = AIR（体素 pop，显式挖空）。
     """
 
-    __slots__ = ("pbb", "facing", "write")
+    __slots__ = ("pbb", "facing", "write", "read")
 
-    def __init__(self, pbb: _PieceBB, facing: int, write) -> None:
+    def __init__(self, pbb: _PieceBB, facing: int, write,
+                 read=None) -> None:
         self.pbb = pbb
         self.facing = facing
         self.write = write
+        self.read = read
 
     # -- placeBlock 语义：局部 (x,y,z) -> 世界，方向性状态做变换 --
     def place(self, x: int, y: int, z: int, val) -> None:
@@ -122,6 +125,21 @@ class _Ctx:
         """楼梯：局部 FACING 状态 -> 世界 FACING 状态。"""
         world = _WX_STAIRS[self.facing].get(local, local)
         self.place(x, y, z, (NB, bs.SHAPE_STAIRS[world]))
+
+    def chest(self, x: int, y: int, z: int) -> None:
+        """createChest（未传 BlockState）-> 官方 reorient 自动定向。
+
+        官方 `StructurePiece.createChest` 无显式朝向时调 `reorient`，
+        锁扣背向唯一实心邻（否则箱子"面壁"）。朝向纯几何推导、不消耗
+        RNG，故 LootTableSeed 口径不变。需 `read` 已注入（世界系查询）。
+        """
+        wx, wz = self.pbb.world_xy(x, z, self.facing)
+        wy = self.pbb.min_y + y
+        if self.read is None:
+            self.place(x, y, z, (CHEST_MAT, bs.SHAPE_CHEST_N))
+            return
+        shape = chest_orient.chest_shape(self.read, (wx, wy, wz))
+        self.write(wx, wy, wz, (CHEST_MAT, shape))
 
     def fence(self, x0: int, y0: int, z0: int,
               x1: int, y1: int, z1: int) -> None:
@@ -354,8 +372,8 @@ def _piece_corridor_turn(c: _Ctx, chest: bool) -> None:
     c.box(1, 2, 4, 4, 5, 4, NB)
     c.fence(1, 3, 4, 1, 4, 4)        # weFence
     c.fence(3, 3, 4, 3, 4, 4)
-    if chest:                        # 局部 (1,2,3)，createChest
-        c.place(1, 2, 3, (CHEST_MAT, bs.SHAPE_CHEST_N))
+    if chest:                        # 局部 (1,2,3)，createChest -> reorient
+        c.chest(1, 2, 3)
     c.box(0, 6, 0, 4, 6, 4, NB)
     # fillColumnDown：跳过
 
@@ -371,8 +389,8 @@ def _piece_corridor_turn_left(c: _Ctx, chest: bool) -> None:
     c.box(0, 2, 4, 3, 5, 4, NB)
     c.fence(1, 3, 4, 1, 4, 4)        # weFence
     c.fence(3, 3, 4, 3, 4, 4)
-    if chest:                        # 局部 (3,2,3)
-        c.place(3, 2, 3, (CHEST_MAT, bs.SHAPE_CHEST_N))
+    if chest:                        # 局部 (3,2,3)，createChest -> reorient
+        c.chest(3, 2, 3)
     c.box(0, 6, 0, 4, 6, 4, NB)
     # fillColumnDown：跳过
 
@@ -577,7 +595,13 @@ def build_fortress_voxels(comp) -> dict:
                 return
             vox[(wx - ax, wy - 64, wz - az)] = val
 
-        c = _Ctx(pbb, facing, write)
+        # reorient 需要按世界坐标读已写入的邻居（postProcess 顺序 =
+        # 先摆墙体后放箱子，与官方一致）
+        def read(pos):
+            wx, wy, wz = pos
+            return vox.get((wx - ax, wy - 64, wz - az))
+
+        c = _Ctx(pbb, facing, write, read)
         fn = _DISPATCH.get(p.type)
         if fn is not None:
             fn(c)

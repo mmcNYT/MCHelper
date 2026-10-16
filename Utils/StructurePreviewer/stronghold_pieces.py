@@ -727,6 +727,7 @@ def compose_stronghold_pieces(world_seed: int, chunk_x: int, chunk_z: int,
 # ---------------------------------------------------------------------------
 
 from Utils.SeedReverser import block_shapes as bs          # noqa: E402
+from . import chest_orient                                  # noqa: E402
 from .fortress_pieces import _Ctx as _FCtx                 # noqa: E402
 from .fortress_pieces import _PieceBB, _WX_STAIRS          # noqa: E402
 
@@ -796,7 +797,18 @@ class _CtxS(_FCtx):
                    (mat, "door:l:c:" + self.wx_dir(local) + ":left"))
 
     def chest(self, x: int, y: int, z: int) -> None:
-        self.place(x, y, z, (CHEST_M, bs.SHAPE_CHEST_N))
+        """createChest（未传 BlockState）-> 官方 reorient 自动定向。
+
+        官方 `StructurePiece.createChest` 无显式朝向时调 `reorient`，
+        锁扣背向唯一实心邻（否则箱子"面壁"）。纯几何、不消耗 RNG。
+        """
+        wx, wz = self.pbb.world_xy(x, z, self.facing)
+        wy = self.pbb.min_y + y
+        if self.read is None:
+            self.place(x, y, z, (CHEST_M, bs.SHAPE_CHEST_N))
+            return
+        shape = chest_orient.chest_shape(self.read, (wx, wy, wz))
+        self.write(wx, wy, wz, (CHEST_M, shape))
 
     def sel_box(self, x0: int, y0: int, z0: int, x1: int, y1: int,
                 z1: int, hollow: bool) -> None:
@@ -1245,7 +1257,13 @@ def build_stronghold_voxels(pieces: list[dict], anchor) -> dict:
             else:
                 vox[k] = val
 
-        c = _CtxS(pbb, facing, write)
+        # reorient 需按世界坐标读已写入的邻居（postProcess 顺序 =
+        # 先摆墙体后放箱子，与官方一致）
+        def read(pos):
+            wx, wy, wz = pos
+            return vox.get((wx - ax, wy - 64, wz - az))
+
+        c = _CtxS(pbb, facing, write, read)
         if typ == SH_STAIRS_DOWN:
             _piece_stairs_down(c, ed)            # StartPiece 同布局
         elif typ == SH_STRAIGHT:
