@@ -1,0 +1,830 @@
+# -*- coding: utf-8 -*-
+"""剩余 26 条指令的规格追加（cmd_specs3.py，由 cmd_specs 合并）。
+
+每条一个 spec dict，形态与 cmd_specs.SPECS 相同。
+"""
+
+def _f(key, label, kind, **kw):
+    d = {"key": key, "label": label, "kind": kind}
+    d.update(kw)
+    return d
+
+
+TARGET_PRESETS2 = ["@p", "@a", "@e", "@r", "@s", "@e[type=zombie]",
+                   "@a[distance=..10]", "@p[level=1..]", "@a[team=red]"]
+POS2 = ["~ ~ ~", "~ ~ ~1", "0 64 0", "~ -1 ~"]
+BLOCKS2 = ["stone", "air", "glass", "oak_planks", "dirt", "cobblestone",
+           "water", "lava", "oak_log", "sand"]
+
+SPECS3 = {
+    # ------------------------------------------------------------- 简单组
+    "chase": {
+        "title": "chase — 服务端联动（26.2 新增）",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "lead": {"label": "lead（作为主机）",
+                     "fields": [
+                         _f("host", "主机", "text", default="localhost"),
+                         _f("port", "端口", "int", minimum=1,
+                            maximum=65535, default=25565),
+                         _f("bind_address", "绑定地址（可选）", "text",
+                            optional=True, default=""),
+                     ]},
+            "follow": {"label": "follow（作为客户端）",
+                       "fields": [
+                           _f("host", "主机", "text", default="localhost"),
+                           _f("port", "端口", "int", minimum=1,
+                              maximum=65535, default=25565),
+                       ]},
+            "stop": {"label": "stop（停止）", "fields": []},
+        },
+    },
+
+    "debugconfig": {
+        "title": "debugconfig — 调试对话框配置",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "config": {"label": "config（配置）",
+                       "fields": [
+                           _f("target", "目标", "targets", default="@s"),
+                           _f("dialog", "对话框", "resource",
+                              optional=True, source="dialog",
+                              default=None),
+                       ]},
+            "unconfig": {"label": "unconfig（取消）",
+                         "fields": [
+                             _f("target", "目标", "targets",
+                                default="@s"),
+                         ]},
+        },
+    },
+
+    "dialog": {
+        "title": "dialog — 显示对话框",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "show": {"label": "show（显示）",
+                     "fields": [
+                         _f("targets", "目标", "targets", default="@s"),
+                         _f("dialog", "对话框", "resource",
+                            optional=True, source="dialog", default=None),
+                     ]},
+            "clear": {"label": "clear（清除）", "fields": []},
+        },
+    },
+
+    "gamerule": {
+        "title": "gamerule — 游戏规则",
+        "fields": [
+            _f("rule", "规则", "enum", choices=[], default=None,
+               special="gamerule",
+               hint="59 条规则；类型随规则自动变化（bool/int）"),
+            _f("value", "值", "text", optional=True, default=None,
+               hint="留空 = 查询当前值"),
+        ],
+    },
+
+    "raid": {
+        "title": "raid — 袭击",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "check": {"label": "check（查询）", "fields": []},
+            "start": {"label": "start（开始）",
+                      "fields": [
+                          _f("omenlvl", "不祥等级", "int", optional=True,
+                             minimum=0, maximum=5, default=None),
+                      ]},
+            "stop": {"label": "stop（停止）", "fields": []},
+            "sound": {"label": "sound（号角）",
+                      "fields": [
+                          _f("type", "目标", "targets", default="@s"),
+                          _f("level", "音量等级", "int", optional=True,
+                             minimum=0, maximum=7, default=None),
+                      ]},
+            "spawnleader": {"label": "spawnleader（生成队长）",
+                            "fields": []},
+            "glow": {"label": "glow（发光标记）", "fields": []},
+            "setomen": {"label": "setomen（设置不祥之兆）",
+                        "fields": []},
+        },
+    },
+
+    "random": {
+        "title": "random — 随机数",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "roll": {"label": "roll（掷一次）",
+                     "fields": [
+                         _f("range", "范围", "text", default="1..6",
+                            hint="如 1..6 / 1.. / ..6"),
+                     ]},
+            "reset": {"label": "reset（重置序列）",
+                      "fields": [
+                          _f("seed", "种子", "int", optional=True,
+                             minimum=-2147483648, maximum=2147483647,
+                             default=None),
+                          _f("include_world_seed", "含世界种子", "bool",
+                             optional=True, default=None),
+                          _f("include_sequence_id", "含序列 id", "bool",
+                             optional=True, default=None),
+                          _f("sequence", "序列 id", "text", optional=True,
+                             default=""),
+                      ]},
+        },
+    },
+
+    "schedule": {
+        "title": "schedule — 计划函数",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "function": {
+                "label": "function（计划）",
+                "fields": [
+                    _f("function", "函数", "text", default="",
+                       hint="数据包函数 id"),
+                    _f("time", "时间", "text", default="1d",
+                       hint="如 1d / 100t / 50s"),
+                    _f("mode", "追加模式", "enum",
+                       choices=["", "append", "replace"], optional=True,
+                       default=None),
+                ],
+            },
+            "clear": {"label": "clear（清除）",
+                      "fields": [
+                          _f("function", "函数", "text", default=""),
+                      ]},
+        },
+    },
+
+    "tick": {
+        "title": "tick — 刻控制",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "query": {"label": "query（查询）", "fields": []},
+            "rate": {"label": "rate（速率）",
+                     "fields": [
+                         _f("rate", "每秒刻数", "float", minimum=1.0,
+                            maximum=10000.0, default=20.0),
+                     ]},
+            "step": {"label": "step（步进）",
+                     "fields": [
+                         _f("time", "步进刻数", "int", minimum=1,
+                            maximum=1000000, default=1),
+                     ]},
+            "sprint": {"label": "sprint（冲刺）",
+                       "fields": [
+                           _f("time", "时长（刻）", "int", minimum=1,
+                              maximum=1000000, default=100),
+                       ]},
+            "stop": {"label": "stop（停止步进）", "fields": []},
+            "freeze": {"label": "freeze（冻结）", "fields": []},
+            "unfreeze": {"label": "unfreeze（解冻）", "fields": []},
+        },
+    },
+
+    "forceload": {
+        "title": "forceload — 强制加载区块",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "add": {"label": "add（加载）",
+                    "fields": [
+                        _f("from", "起点（区块坐标）", "pos",
+                           default="0 0"),
+                        _f("to", "终点（可选）", "pos", optional=True,
+                           default=""),
+                    ]},
+            "remove": {"label": "remove（卸载）",
+                       "fields": [
+                           _f("from", "起点", "pos", default="0 0"),
+                           _f("to", "终点（可选）", "pos", optional=True,
+                              default=""),
+                       ]},
+            "all": {"label": "all（全部卸载）", "fields": []},
+            "query": {"label": "query（查询）",
+                      "fields": [
+                          _f("from", "位置（可选）", "pos", optional=True,
+                             default=""),
+                      ]},
+        },
+    },
+
+    "waypoint": {
+        "title": "waypoint — 路径点",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "list": {"label": "list（列表）",
+                     "fields": [
+                         _f("waypoint", "过滤实体（可选）", "targets",
+                            optional=True, default=""),
+                     ]},
+            "modify": {"label": "modify（修改）",
+                       "fields": [
+                           _f("waypoint", "路径点实体", "targets",
+                              default="@e[limit=1]"),
+                           _f("sub", "属性", "enum",
+                              choices=["color", "style"], default="color"),
+                           _f("color", "颜色", "enum",
+                              choices=["default", "white", "gray", "black",
+                                       "brown", "red", "orange", "yellow",
+                                       "lime", "green", "cyan",
+                                       "light_blue", "blue", "purple",
+                                       "magenta", "pink"],
+                              optional=True, default=None),
+                           _f("style", "样式 id", "text", optional=True,
+                              default=""),
+                       ]},
+        },
+    },
+
+    # ------------------------------------------------------------- 中等组
+    "experience": {
+        "title": "experience — 经验",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "add": {"label": "add（增加）",
+                    "fields": [
+                        _f("target", "目标", "targets", default="@s"),
+                        _f("amount", "数量", "int", minimum=-2147483648,
+                           maximum=2147483647, default=1),
+                        _f("unit", "单位", "enum",
+                           choices=["points", "levels"],
+                           default="points"),
+                    ]},
+            "set": {"label": "set（设置）",
+                    "fields": [
+                        _f("target", "目标", "targets", default="@s"),
+                        _f("amount", "数量", "int", minimum=0,
+                           maximum=2147483647, default=0),
+                        _f("unit", "单位", "enum",
+                           choices=["points", "levels"],
+                           default="points"),
+                    ]},
+            "query": {"label": "query（查询）",
+                      "fields": [
+                          _f("target", "目标", "targets", default="@s"),
+                          _f("unit", "单位", "enum",
+                             choices=["points", "levels"],
+                             default="points"),
+                      ]},
+        },
+    },
+
+    "title": {
+        "title": "title — 标题显示",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "title": {"label": "title（大标题）",
+                      "fields": [
+                          _f("targets", "目标", "targets", default="@a"),
+                          _f("text", "文本", "text", default="标题"),
+                      ]},
+            "subtitle": {"label": "subtitle（副标题）",
+                         "fields": [
+                             _f("targets", "目标", "targets",
+                                default="@a"),
+                             _f("text", "文本", "text", default=""),
+                         ]},
+            "actionbar": {"label": "actionbar（动作栏）",
+                          "fields": [
+                              _f("targets", "目标", "targets",
+                                 default="@a"),
+                              _f("text", "文本", "text", default=""),
+                          ]},
+            "times": {"label": "times（时序）",
+                      "fields": [
+                          _f("targets", "目标", "targets", default="@a"),
+                          _f("fade_in", "淡入(刻)", "int", minimum=0,
+                             maximum=1000000, default=10),
+                          _f("stay", "停留(刻)", "int", minimum=0,
+                             maximum=1000000, default=70),
+                          _f("fade_out", "淡出(刻)", "int", minimum=0,
+                             maximum=1000000, default=20),
+                      ]},
+            "clear": {"label": "clear（清除）",
+                      "fields": [
+                          _f("targets", "目标", "targets", default="@a"),
+                      ]},
+            "reset": {"label": "reset（重置）",
+                      "fields": [
+                          _f("targets", "目标", "targets", default="@a"),
+                      ]},
+        },
+    },
+
+    "spreadplayers": {
+        "title": "spreadplayers — 随机分散实体",
+        "fields": [
+            _f("center_x", "中心 X", "float", minimum=-3.0e7,
+               maximum=3.0e7, default=0.0),
+            _f("center_z", "中心 Z", "float", minimum=-3.0e7,
+               maximum=3.0e7, default=0.0),
+            _f("spread_distance", "最小间距", "float", minimum=0.0,
+               maximum=10000.0, default=16.0),
+            _f("max_range", "最大范围", "float", minimum=1.0,
+               maximum=10000.0, default=128.0),
+            _f("respect_teams", "按队伍分散", "bool", default=False),
+            _f("targets", "目标", "targets", default="@e"),
+            _f("max_height", "最大高度（under，可选）", "int",
+               optional=True, minimum=-64, maximum=320, default=None),
+        ],
+    },
+
+    "teleport": {
+        "title": "teleport — 传送",
+        "fields": [
+            _f("targets", "目标", "targets", optional=True, default="",
+               hint="留空 = 传送自己"),
+            _f("mode", "传送方式", "enum",
+               choices=["location", "entity"], default="location"),
+            _f("location", "坐标（location 时）", "pos",
+               default="~ ~ ~"),
+            _f("destination", "目标实体（entity 时）", "targets",
+               optional=True, default="@e[limit=1]"),
+            _f("rotation", "朝向（可选）", "text", optional=True,
+               default="",
+               hint="如 0 90（yaw pitch）；留空保持原朝向"),
+            _f("facing_mode", "面向（可选）", "enum",
+               choices=["", "entity", "location"], optional=True,
+               default=None),
+            _f("facing_anchor", "锚点（facing entity 时）", "enum",
+               choices=["eyes", "feet"], optional=True,
+               default="eyes"),
+            _f("facing_entity", "面向实体", "targets", optional=True,
+               default="@e[limit=1]"),
+            _f("facing_location", "面向坐标", "pos", optional=True,
+               default="~ ~ ~"),
+        ],
+    },
+
+    "rotate": {
+        "title": "rotate — 旋转实体",
+        "fields": [
+            _f("target", "目标", "targets", default="@s"),
+            _f("rotation", "朝向（yaw pitch）", "text", default="0 0"),
+            _f("facing_mode", "面向模式", "enum",
+               choices=["", "entity", "location"], optional=True,
+               default=None),
+            _f("facing_anchor", "锚点", "enum",
+               choices=["eyes", "feet"], optional=True, default="eyes"),
+            _f("facing_entity", "面向实体", "targets", optional=True,
+               default="@e[limit=1]"),
+            _f("facing_location", "面向坐标", "pos", optional=True,
+               default="~ ~ ~"),
+        ],
+    },
+
+    "datapack": {
+        "title": "datapack — 数据包",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "list": {"label": "list（列表）",
+                     "fields": [
+                         _f("filter", "过滤", "enum",
+                            choices=["", "available", "enabled"],
+                            optional=True, default=None),
+                     ]},
+            "enable": {"label": "enable（启用）",
+                       "fields": [
+                           _f("name", "数据包名", "text", default=""),
+                           _f("order", "顺序", "enum",
+                              choices=["", "first", "last"],
+                              optional=True, default=None),
+                           _f("before_after", "相对位置", "enum",
+                              choices=["", "before", "after"],
+                              optional=True, default=None),
+                           _f("existing", "相对的数据包", "text",
+                              optional=True, default=""),
+                       ]},
+            "disable": {"label": "disable（禁用）",
+                        "fields": [
+                            _f("name", "数据包名", "text", default=""),
+                        ]},
+            "create": {"label": "create（创建）",
+                       "fields": [
+                           _f("id", "数据包 id", "text", default=""),
+                           _f("description", "描述", "text",
+                              optional=True, default=""),
+                       ]},
+        },
+    },
+
+    "fillbiome": {
+        "title": "fillbiome — 填充群系",
+        "fields": [
+            _f("from", "起点", "pos", default="~ ~ ~"),
+            _f("to", "终点", "pos", default="~ ~ ~"),
+            _f("biome", "群系", "resource", source="biome",
+               default="plains"),
+            _f("filter", "替换过滤（可选）", "resource",
+               source="biome", optional=True, default=None,
+               hint="仅替换该群系；留空 = 全部"),
+        ],
+    },
+
+    "clone": {
+        "title": "clone — 克隆区域",
+        "fields": [
+            _f("source_dimension", "源维度（可选）", "resource",
+               source="dimension", optional=True, default=None),
+            _f("begin", "起点", "pos", default="~ ~ ~"),
+            _f("end", "终点", "pos", default="~ ~ ~"),
+            _f("target_dimension", "目标维度（可选）", "resource",
+               source="dimension", optional=True, default=None),
+            _f("destination", "目标点", "pos", default="~ ~ ~"),
+            _f("strict", "严格模式", "bool", optional=True,
+               default=None),
+            _f("mode", "模式", "enum",
+               choices=["replace", "masked", "filtered"],
+               default="replace"),
+            _f("filter", "过滤方块（filtered 时）", "block",
+               optional=True, default=""),
+            _f("overlap", "重叠处理", "enum",
+               choices=["normal", "force", "move"], default="normal"),
+        ],
+    },
+
+    "worldborder": {
+        "title": "worldborder — 世界边界",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "get": {"label": "get（查询）", "fields": []},
+            "add": {"label": "add（扩缩）",
+                    "fields": [
+                        _f("distance", "变化量（格）", "float",
+                           minimum=-6.0e7, maximum=6.0e7, default=0.0),
+                        _f("time", "过渡时间(秒)", "int", optional=True,
+                           minimum=0, maximum=2147483647, default=None),
+                    ]},
+            "set": {"label": "set（设置）",
+                    "fields": [
+                        _f("distance", "大小（格）", "float",
+                           minimum=1.0, maximum=6.0e7, default=100.0),
+                        _f("time", "过渡时间(秒)", "int", optional=True,
+                           minimum=0, maximum=2147483647, default=None),
+                    ]},
+            "center": {"label": "center（中心）",
+                       "fields": [
+                           _f("center_x", "X", "float", minimum=-3.0e7,
+                              maximum=3.0e7, default=0.0),
+                           _f("center_z", "Z", "float", minimum=-3.0e7,
+                              maximum=3.0e7, default=0.0),
+                       ]},
+            "damage": {
+                "label": "damage（伤害）",
+                "fields": [
+                    _f("damage_sub", "属性", "enum",
+                       choices=["amount", "buffer"], default="amount"),
+                    _f("damage_value", "值", "float", minimum=0.0,
+                       maximum=1.0e9, default=0.0),
+                ],
+            },
+            "warning": {
+                "label": "warning（警告）",
+                "fields": [
+                    _f("warning_sub", "属性", "enum",
+                       choices=["distance", "time"], default="distance"),
+                    _f("warning_value", "值", "int", minimum=0,
+                       maximum=2147483647, default=0),
+                ],
+            },
+        },
+    },
+
+    # ------------------------------------------------------------- 复合组
+    "data": {
+        "title": "data — 方块/实体 NBT 数据",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "get": {"label": "get（读取）",
+                    "fields": [
+                        _f("kind", "类型", "enum",
+                           choices=["entity", "block"], default="entity"),
+                        _f("target", "实体（entity 时）", "targets",
+                           optional=True, default="@s"),
+                        _f("pos", "坐标（block 时）", "pos",
+                           optional=True, default="~ ~ ~"),
+                        _f("path", "NBT 路径（可选）", "text",
+                           optional=True, default=""),
+                        _f("scale", "倍率（可选）", "float",
+                           optional=True, minimum=-1e9, maximum=1e9,
+                           default=None),
+                    ]},
+            "merge": {"label": "merge（合并）",
+                      "fields": [
+                          _f("kind", "类型", "enum",
+                             choices=["entity", "block"],
+                             default="entity"),
+                          _f("target", "实体", "targets", optional=True,
+                             default="@s"),
+                          _f("pos", "坐标", "pos", optional=True,
+                             default="~ ~ ~"),
+                          _f("nbt", "NBT", "nbt", default="{}"),
+                      ]},
+            "remove": {"label": "remove（删除）",
+                       "fields": [
+                           _f("kind", "类型", "enum",
+                              choices=["entity", "block"],
+                              default="entity"),
+                           _f("target", "实体", "targets", optional=True,
+                              default="@s"),
+                           _f("pos", "坐标", "pos", optional=True,
+                              default="~ ~ ~"),
+                           _f("path", "NBT 路径", "text", default=""),
+                       ]},
+            "modify": {"label": "modify（修改）",
+                       "fields": [
+                           _f("kind", "类型", "enum",
+                              choices=["entity", "block"],
+                              default="entity"),
+                           _f("target", "实体", "targets", optional=True,
+                              default="@s"),
+                           _f("pos", "坐标", "pos", optional=True,
+                              default="~ ~ ~"),
+                           _f("path", "目标路径", "text", default=""),
+                           _f("modify_op", "操作", "enum",
+                              choices=["set", "merge", "prepend",
+                                       "append", "from"],
+                              default="set"),
+                           _f("nbt", "NBT 值", "nbt", optional=True,
+                              default=""),
+                           _f("source_kind", "来源类型（from）", "enum",
+                              choices=["entity", "block"],
+                              optional=True, default="entity"),
+                           _f("source_target", "来源实体", "targets",
+                              optional=True, default="@s"),
+                           _f("source_pos", "来源坐标", "pos",
+                              optional=True, default="~ ~ ~"),
+                           _f("source_path", "来源路径", "text",
+                              optional=True, default=""),
+                       ]},
+        },
+    },
+
+    "scoreboard": {
+        "title": "scoreboard — 记分板",
+        "branch_key": "branch",
+        "branch_field": "操作",
+        "branches": {
+            "objectives_list": {"label": "objectives list（列出目标）",
+                                "fields": []},
+            "objectives_add": {"label": "objectives add（新建目标）",
+                               "fields": [
+                                   _f("objective_name", "目标名",
+                                      "text", default="obj1"),
+                                   _f("criteria", "判据", "enum",
+                                      choices=["dummy", "trigger",
+                                               "deathCount", "playerKillCount",
+                                               "totalKillCount", "health",
+                                               "xp", "level", "food",
+                                               "air", "armor"],
+                                      default="dummy"),
+                                   _f("display_name", "显示名（可选）",
+                                      "text", optional=True, default=""),
+                               ]},
+            "objectives_remove": {
+                "label": "objectives remove（删除目标）",
+                "fields": [
+                    _f("objective", "目标名", "text", default="obj1"),
+                ]},
+            "objectives_setdisplay": {
+                "label": "objectives setdisplay（设置显示位）",
+                "fields": [
+                    _f("slot", "显示位", "enum",
+                       choices=["sidebar", "list", "below_name",
+                                "sidebar.team.red", "sidebar.team.blue",
+                                "sidebar.team.green"],
+                       default="sidebar"),
+                    _f("objective", "目标名（可空）", "text",
+                       optional=True, default=""),
+                ]},
+            "players_set": {"label": "players set（设分）",
+                            "fields": [
+                                _f("targets", "目标", "targets",
+                                   default="@s"),
+                                _f("objective", "目标名", "text",
+                                   default="obj1"),
+                                _f("score", "分数", "int",
+                                   minimum=-2147483648,
+                                   maximum=2147483647, default=0),
+                            ]},
+            "players_add": {"label": "players add（加分）",
+                            "fields": [
+                                _f("targets", "目标", "targets",
+                                   default="@s"),
+                                _f("objective", "目标名", "text",
+                                   default="obj1"),
+                                _f("score", "分数", "int", minimum=1,
+                                   maximum=2147483647, default=1),
+                            ]},
+            "players_get": {"label": "players get（查分）",
+                            "fields": [
+                                _f("targets", "目标", "targets",
+                                   default="@s"),
+                                _f("objective", "目标名", "text",
+                                   default="obj1"),
+                            ]},
+            "players_reset": {"label": "players reset（重置）",
+                              "fields": [
+                                  _f("targets", "目标", "targets",
+                                     default="@s"),
+                                  _f("objective", "目标名（可空）",
+                                     "text", optional=True, default=""),
+                              ]},
+            "players_list": {"label": "players list（列出有分者）",
+                             "fields": [
+                                 _f("targets", "目标（可空）", "targets",
+                                    optional=True, default=""),
+                             ]},
+        },
+    },
+
+    "team": {
+        "title": "team — 队伍",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "list": {"label": "list（列出）",
+                     "fields": [
+                         _f("team", "队伍（可空）", "text",
+                            optional=True, default=""),
+                     ]},
+            "add": {"label": "add（新建）",
+                    "fields": [
+                        _f("team", "队伍名", "text", default="newteam"),
+                    ]},
+            "remove": {"label": "remove（删除）",
+                       "fields": [
+                           _f("team", "队伍名", "text",
+                              default="newteam"),
+                       ]},
+            "empty": {"label": "empty（清空成员）",
+                      "fields": [
+                          _f("team", "队伍名", "text",
+                             default="newteam"),
+                      ]},
+            "join": {"label": "join（加入）",
+                     "fields": [
+                         _f("team", "队伍名", "text", default="newteam"),
+                         _f("members", "成员（可空）", "targets",
+                            optional=True, default=""),
+                     ]},
+            "leave": {"label": "leave（离开）",
+                      "fields": [
+                          _f("members", "成员", "targets", default="@s"),
+                      ]},
+            "modify": {"label": "modify（修改属性）",
+                       "fields": [
+                           _f("team", "队伍名", "text",
+                              default="newteam"),
+                           _f("option", "属性", "enum",
+                              choices=["color", "prefix", "suffix",
+                                       "friendlyFire",
+                                       "seeFriendlyInvisibles"],
+                              default="color"),
+                           _f("color", "颜色（color 时）", "enum",
+                              choices=["red", "green", "blue", "yellow",
+                                       "gold", "aqua", "dark_red",
+                                       "dark_green", "dark_blue",
+                                       "dark_purple", "dark_aqua",
+                                       "dark_gray", "gray", "black",
+                                       "white", "light_purple"],
+                              optional=True, default=None),
+                           _f("text", "文本（prefix/suffix 时）",
+                              "text", optional=True, default=""),
+                           _f("value", "布尔（friendlyFire 等）",
+                              "bool", optional=True, default=None),
+                       ]},
+        },
+    },
+
+    "bossbar": {
+        "title": "bossbar — Boss 血条",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "list": {"label": "list（列表）", "fields": []},
+            "add": {"label": "add（新建）",
+                    "fields": [
+                        _f("id", "血条 id", "text", default="boss1"),
+                    ]},
+            "remove": {"label": "remove（删除）",
+                       "fields": [
+                           _f("id", "血条 id", "text", default="boss1"),
+                       ]},
+            "get": {"label": "get（查询）",
+                    "fields": [
+                        _f("id", "血条 id", "text", default="boss1"),
+                    ]},
+            "set": {"label": "set（设置）",
+                    "fields": [
+                        _f("id", "血条 id", "text", default="boss1"),
+                        _f("sub", "属性", "enum",
+                           choices=["name", "color", "style", "value",
+                                    "max", "visible", "players"],
+                           default="name"),
+                        _f("name", "名称（name 时）", "text",
+                           optional=True, default="Boss"),
+                        _f("color", "颜色（color 时）", "enum",
+                           choices=["pink", "blue", "red", "green",
+                                    "yellow", "purple", "white"],
+                           optional=True, default=None),
+                        _f("style", "样式（style 时）", "enum",
+                           choices=["notched_6", "notched_10",
+                                    "notched_12", "notched_20", "progress"],
+                           optional=True, default=None),
+                        _f("value", "值（value/max 时）", "int",
+                           optional=True, minimum=0, maximum=2147483647,
+                           default=None),
+                        _f("visible", "可见（visible 时）", "bool",
+                           optional=True, default=None),
+                        _f("targets", "玩家（players 时）", "targets",
+                           optional=True, default="@a"),
+                    ]},
+        },
+    },
+
+    "advancement": {
+        "title": "advancement — 进度",
+        "branch_key": "branch",
+        "branch_field": "动作",
+        "branches": {
+            "grant": {"label": "grant（授予）", "fields": []},
+            "revoke": {"label": "revoke（撤销）", "fields": []},
+        },
+        "_mode_fields": [
+            _f("targets", "目标", "targets", default="@s"),
+            _f("mode", "范围", "enum",
+               choices=["everything", "only", "from", "through",
+                        "until"], default="everything"),
+            _f("advancement", "进度 id", "resource",
+               optional=True, source="advancement", default=None),
+            _f("criterion", "判据（only 时可选）", "text",
+               optional=True, default=""),
+        ],
+    },
+
+    "place": {
+        "title": "place — 放置结构",
+        "branch_key": "branch",
+        "branch_field": "类型",
+        "branches": {
+            "structure": {"label": "structure（结构）",
+                          "fields": [
+                              _f("structure", "结构", "resource",
+                                 source="structure",
+                                 default="village_plains"),
+                              _f("pos", "位置（可选）", "pos",
+                                 optional=True, default="~ ~ ~"),
+                          ]},
+            "feature": {"label": "feature（地物）",
+                        "fields": [
+                            _f("feature", "地物 id", "text",
+                               default=""),
+                            _f("pos", "位置", "pos", default="~ ~ ~"),
+                        ]},
+            "template": {"label": "template（模板）",
+                         "fields": [
+                             _f("template", "模板 id", "text",
+                                default=""),
+                             _f("pos", "位置", "pos", default="~ ~ ~"),
+                             _f("rotation", "旋转", "enum",
+                                choices=["none", "clockwise_90",
+                                         "180", "counterclockwise_90"],
+                                optional=True, default=None),
+                             _f("mirror", "镜像", "enum",
+                                choices=["none", "left_right",
+                                         "front_back"],
+                                optional=True, default=None),
+                             _f("integrity", "完整度", "float",
+                                optional=True, minimum=0.0,
+                                maximum=1.0, default=None),
+                             _f("seed", "种子", "int", optional=True,
+                                minimum=0, maximum=2147483647,
+                                default=None),
+                         ]},
+            "jigsaw": {"label": "jigsaw（拼图）",
+                       "fields": [
+                           _f("pool", "模板池", "text", default=""),
+                           _f("target", "目标", "text", default=""),
+                           _f("max_depth", "最大深度", "int", minimum=1,
+                              maximum=100, default=7),
+                           _f("position", "位置", "pos", optional=True,
+                              default="~ ~ ~"),
+                       ]},
+        },
+    },
+}

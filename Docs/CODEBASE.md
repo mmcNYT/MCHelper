@@ -28,6 +28,7 @@
   - [`Tools/tool_SeedReverser.py`](#toolstool_seedreverserpy)
   - [`Threads/task_SeedReverser.py`](#threadstask_seedreverserpy)
   - [`Tools/tool_StructurePreviewer.py`](#toolstool_structurepreviewerpy)
+  - [`Tools/tool_CommandGenerator.py`](#toolstool_commandgeneratorpy)
 - [4. 附魔计算器（Utils/EnchantCaculator）](#4-附魔计算器utilsenchantcaculator)
   - [`Utils/EnchantCaculator/enchant_data_manager.py`](#utilsenchantcaculatorenchant_data_managerpy)
   - [`Utils/EnchantCaculator/anvil_optimizer.py`](#utilsenchantcaculatoranvil_optimizerpy)
@@ -92,7 +93,20 @@
   - [`CodesUI/Settings.py`](#codesuisettingspy)
   - [`CodesUI/StrongHoldFinder.py`](#codesuistrongholdfinderpy)
   - [`CodesUI/StructurePreviewer.py`](#codesuistructurepreviewerpy)
+  - [`CodesUI/CommandGenerator.py`](#codesuicommandgeneratorpy)
 - [11. 资源与数据](#11-资源与数据)
+- [12. 指令生成器（Utils/CommandGenerator）](#12-指令生成器utilscommandgenerator)
+  - [`Utils/CommandGenerator/snbt.py`](#utilscommandgeneratorsnbtpy)
+  - [`Utils/CommandGenerator/give.py`](#utilscommandgeneratorgivepy)
+  - [`Utils/CommandGenerator/commands.py`](#utilscommandgeneratorcommandspy)
+  - [`Utils/CommandGenerator/cmd_specs.py`](#utilscommandgeneratorcmd_specspy)
+  - [`Utils/CommandGenerator/cmd_form.py`](#utilscommandgeneratorcmd_formpy)
+  - [`Utils/CommandGenerator/components.py`](#utilscommandgeneratorcomponentspy)
+  - [`Utils/CommandGenerator/comp_meta.py`](#utilscommandgeneratorcomp_metapy)
+  - [`Utils/CommandGenerator/comp_editors.py`](#utilscommandgeneratorcomp_editorspy)
+  - [`Utils/CommandGenerator/item_list.py`](#utilscommandgeneratoritem_listpy)
+  - [`Utils/CommandGenerator/resource_lists.py`](#utilscommandgeneratorresource_listspy)
+  - [`Utils/CommandGenerator/struct_list.py`](#utilscommandgeneratorstruct_listpy)
 
 # 0. 项目总览
 
@@ -5381,3 +5395,695 @@ RNG 与结构信息表：
 ## 11.4 用户配置（不随项目走）
 
 运行时配置写入 `QStandardPaths.AppConfigLocation`（失败回退模块所在目录）：`tab_order.json`（Tab 顺序）、`settings_config.json`（设置页）、`backup_config.json`（备份页）、`enchant_session.json`、`seed_reverser_session.json`、`structure_previewer_session.json` 等（会话持久化）。Windows 开机自启写注册表 Run 键。
+
+# 12. 指令生成器（Utils/CommandGenerator）
+
+## 12.1 定位与设计原则
+
+按表单填写参数生成 MC 指令文本，重点解决 **1.20.5+ 数据组件（Data Components）语法**与 **SNBT 转义**这类手写极易出错的部分。
+
+三条设计原则：
+
+1. **序列化与 UI 解耦**：UI 只负责把控件值收成 `dict`，序列化是纯函数
+   （`snbt.py` / `give.py`，零 Qt 依赖），因此可脱离 GUI 单测；
+2. **规格化组件清单**：组件不硬编码进 UI，而由 `components.py` 声明
+   「id + 中文名 + 控件类型」，`comp_editors.build_editor()` 按类型工厂化
+   创建编辑器 —— 新增组件只需加一行声明；
+3. **版本感知**：`give.py` 按 data version 分支输出（见 12.3）。
+
+## 12.2 模块清单
+
+| 模块 | 职责 |
+|---|---|
+| `snbt.py` | SNBT 原语：字符串/键转义、数字后缀、复合与列表、文本组件、`RawSnbt` 标记 |
+| `give.py` | `/give` 参数字典 -> 指令文本；附魔格式的版本分支 |
+| `components.py` | 79 个数据组件元数据（中文名 + 控件类型）；`COMMON` 20 个有专用编辑器 |
+| `comp_editors.py` | 10 类组件编辑器控件 + 工厂 `build_editor(cid)` |
+| `item_list.py` | 自动生成的物品清单（2636 项，含中文名与图标标记） |
+
+## 12.3 版本差异：附魔组件格式（重要）
+
+**同一段附魔语义在不同版本必须输出不同格式**：
+
+| 版本 | data version | 输出 |
+|---|---|---|
+| 1.21 | 3953 | `minecraft:enchantments={levels:{"minecraft:sharpness":5}}` |
+| 1.21.11 | 4671 | `minecraft:enchantments={"minecraft:sharpness":5}` |
+| 26.2 | 4903 | 同上（裸映射） |
+
+证据链（`give.py` 内 `_SCHEMA_FLATTENED = 4307` 注释有完整记录）：
+
+1. `ItemEnchantments.CODEC = Codec.unboundedMap(Enchantment.CODEC, LEVEL_CODEC)`
+   —— **裸映射**，无 `levels` 包装（1.21.11 反编译 `ItemEnchantments.java` L33）；
+2. `TooltipDisplayComponentFix`（DataFixers schema **4307**）执行
+   `fixComponentAndUnwrap(..., "minecraft:enchantments", "levels", ...)`，
+   即**把 levels 键剥掉** —— 故 4307 **之前**才是包装格式；
+3. 26.2 未混淆 jar 直接验证：`ItemEnchantments.class` 内**不含** `b"levels"`，
+   而 `ItemStackComponentizationFix.class`（写旧格式）与
+   `TooltipDisplayComponentFix.class`（读旧格式）内**均含**，对照成立。
+
+同类包装键（`attribute_modifiers` 的 `modifiers`、`dyed_color` 的 `rgb`、
+`jukebox_playable` 的 `song`）由同一个 fixer 处理，但**这些键在 1.21.11/26.2
+的组件内部仍然保留**（实测 jar 内 `ItemAttributeModifiers.class` 含
+`modifiers`），只有 enchantments 变成了裸映射 —— 不要一概而论。
+
+## 12.4 SNBT 转义要点
+
+- **含冒号的映射键必须加引号**：`SnbtGrammar.PLAIN_STRING_CHUNK` 的未引号
+  字符串规则贪婪且允许 `:`，故 `{minecraft:sharpness:5}` 的键会一路吃到行尾
+  而无法定位分隔冒号，必须写成 `{"minecraft:sharpness":5}`；
+- **纯文本组件写成裸 SNBT 字符串** `"文字"`，**不要**写成 `'"文字"'`
+  —— 后者是「内容是带引号的字符串」，游戏内会把引号显示出来。依据
+  `ComponentArgument.EXAMPLES` 首项即 `"hello world"`，且组件编解码为
+  `ComponentSerialization.CODEC = either(STRING, list, compound)`；
+- `unbreakable` 的组件值是**空复合** `{}`（不是 bool）；
+- `custom_model_data` 在 1.21.4+ 为 `{floats:[...]}` 复合；
+- `dyed_color` 为 `{rgb:N}` 复合。
+
+`RawSnbt`（`snbt.RawSnbt`，str 子类）用于标记「用户输入的已是合法 SNBT」，
+`give.py` 对其**直写不转义**，供 json 类组件的文本框兜底。
+
+## 12.5 UI 结构（三栏）
+
+`Tools/tool_CommandGenerator.py`：
+
+- **左栏** `cmdTree`：4 个语义分组共 41 条指令（与 `CMD_GROUPS` 一致），
+  全部已实现故**不再加 `[已实现]` 后缀**（标签已无区分作用，
+  只是噪音），仅保留加粗；宽度 200px（实测最长
+  `spawn_armor_trims` 含缩进需 175px，余量 25px）；
+- **中栏** `centerStack`：逐指令一页（`IMPLEMENTED` 字典映射指令 -> 页索引；
+  未实现落到 `pageUnsupported`）。`pageGive` 内为「基础参数 + 数据组件卡片区」，
+  组件卡片动态插入 `giveCompHostLayout`（spacer 之前）；
+- **右栏**：预览（图标 + 中文名 + 附魔/描述摘要）、输出（只读文本 + 长度）、
+  校验（`checkTitleLabel` + `checkList`）。
+
+宽度分配：左 200 / 中 ~930 / 右 278（中栏占比约 66%）。
+
+### 12.5.1 数据组件框占满剩余高度
+
+`pageGive` 的 `giveContentLayout` 末尾**不能放 expanding spacer** ——
+它会把多余高度全部吃掉，导致 `giveCompBox` 停在 sizeHint（实测仅
+375px，占页面 42.9%），下方留 383px 空白。
+
+正确做法：
+
+- 删除 `giveBottomSpacer`；
+- `giveCompBox` 设 `vPolicy=Expanding, vstretch=1`。
+
+效果：数据组件框 375px -> **749px**（占页面 42.9% -> **85.7%**），
+内容底部空白 383px -> 9px（仅布局边距）。
+
+**通用页（`pageGeneric`）保留 spacer**：那里是表单，字段应保持
+自然高度，拉伸反而难看。
+
+**注意 `.ui` 与 `CodesUI/` 的同步**：`CodesUI/CommandGenerator.py`
+是 `pyside6-uic` 的编译产物，改完 `.ui` **必须重新编译**，
+否则运行时用的还是旧布局（本次就踩了这个坑 —— 改了 `.ui` 但
+几何值没变，因为 `CodesUI` 是 39 分钟前的旧文件）：
+
+```
+.venv\Scripts\pyside6-uic.exe UI\CommandGenerator.ui -o CodesUI\CommandGenerator.py
+```
+
+## 12.6 实时刷新与校验
+
+任何控件变动 -> `_refresh()` -> 重新收集 `_params()` -> `G.give()` 产出文本
+-> 更新预览与校验。`_busy` 标志防止 `setPlainText` 等引发的递归刷新。
+
+校验项（`_update_checks`）：括号配平、指令长度上限 25600、数量范围、
+目标选择器形态、附魔等级上限、附魔互斥冲突、`stored_enchantments`
+用于非附魔书时的告警。
+
+## 12.7 数据来源
+
+- **组件清单**：反编译 `DataComponents.java` 的全部 79 个
+  `register("id", ...)`（实测与源码逐项对账，无遗漏无重复）；
+  注意该文件内 `public static final DataComponentType` 声明有 104 处，
+  但其中含 `register(` 辅助重载，**以提取到的 79 个 id 为准**；
+- **物品清单**：`1.21.11`/`26.2` jar 的 `assets/minecraft/lang/en_us.json`
+  （`item.minecraft.*` + `block.minecraft.*`，合并 2636 项）；
+- **物品中文名**：`.minecraft/assets/indexes/*.json` 指向的
+  `minecraft/lang/zh_cn.json`（取体积最大者，2770 条），叠加项目
+  `Utils/Public/item_names.py` 的 `ITEM_CN`（227 条战利品译名优先）——
+  最终 **2636/2636 全覆盖**；
+- **附魔数据**：复用 `data/enchants.json`（43 条，含 `max_level`/`conflicts`/
+  `applicable`）；
+- **物品图标**：复用 `assets/StructurePreviewer/items/*.png`（361 个）。
+
+生成脚本位于 `.temp/`（`gen_items2.py` 生成 `item_list.py`；
+`extract_zh.py` 提取中文语言表；`gen_resources.py` 生成
+`resource_lists.py`；`gen_poi.py` 提取 POI 清单）。
+
+## 12.8 支持的指令（41 / 41）
+
+**全部 41 条指令均已实现**（`execute` 见 12.8b）。
+
+| 组 | 指令 |
+|---|---|
+| 物品与实体 | `give` `item` `summon` `loot` `enchant` `effect` `kill` `attribute` `damage` `playsound` `particle` `spawn_armor_trims` |
+| 方块与世界 | `setblock` `fill` `clone` `fillbiome` `place` `locate` `forceload` `data` `worldborder` `gamerule` `tick` `schedule` |
+| 玩家与进度 | `experience` `advancement` `title` `scoreboard` `team` `bossbar` `waypoint` |
+| 执行与控制 | `dialog` `random` `spreadplayers` `teleport` `rotate` `debugconfig` `chase` `datapack` `raid` `execute` |
+
+### 数据源专项
+
+- **gamerule**：59 条规则由 `GameRules.java` 的
+  `registerBoolean/registerInteger("name", ...)` 提取
+  （**26.2 起规则名改为 snake_case**，如 `keep_inventory`，
+  与旧版的 camelCase `keepInventory` 不同）；类型随规则自动变化
+  （bool → true/false 下拉，int → 数字框）。中文名来自
+  `gamerule.*` lang 键（14 条有翻译，其余显示 id）。
+- **teleport 别名**：树中标 `teleport`，输出用 `/tp`（官方别名，
+  二者等价）。
+
+### 序列化分派链
+
+`commands.serialize()` 按以下顺序查找：
+1. `give` → 专用 `give.give()`（数据组件 + 版本分支）
+2. `commands.SERIALIZERS`（kill/effect/setblock 等 7 条）
+3. `commands2.SERIALIZERS`（item/loot/attribute 等 7 条）
+4. `commands3.SERIALIZERS`（其余 25 条）
+
+**坑**：`cmd_specs._merge_extra()` 曾被放在 `SPECS = {...}` **之前**
+调用 —— 那时 SPECS 还不存在，`SPECS[cmd] = spec` 会把 26 条写进
+一个刚建的空字典然后丢弃，**且不报任何错**（表现为新指令全部落到
+「未实现」页）。已移到定义之后，并加注释说明。
+
+**loot 的「来源 + 公共目标段」**：4 个来源（loot/fish/mine/kill）
+各自字段不同，但尾部目标段（give/spawn/insert/replace 及其参数）
+为**所有来源共享**。规格用 `_target_fields` 键表达，
+`cmd_form._current_fields()` 在分支字段后追加它们。
+
+**可选浮点的「不填」语义**：`cmd_form` 早先只对**整数**做了
+specialValueText 处理，可选浮点恒返回 0.0，导致
+`playsound`/`attribute get`/`particle` 的默认输出多出
+`0.0` 参数（`get 0`、`~ ~ ~ 0.0 0.0 0.0`）。已补齐 float 分支
+（与 int 同法：`minimum-1` + specialValueText），
+`params()` 的 float 读取同步判 `< minimum` 返回 None。
+
+## 12.8a 「用户不写，只选」改造（下拉全覆盖 + NBT 弹窗）
+
+设计原则：**认为用户什么都不会写**。改造前盘点出 45 个「要打字」
+的字段（`cmd_specs` 全字段扫描），逐一消除：
+
+### 数据源补齐（gen_res4.py 追加到 resource_lists.py）
+
+| 清单 | 数量 | 来源 | 中文名键 |
+|---|---|---|---|
+| `ATTRIBUTE_*` | 35 | `Attributes.java` 的 `register("id")` | `attribute.name.*` |
+| `DAMAGE_TYPE_*` | 50 | `DamageTypes.java` 的 `Identifier.withDefaultNamespace(...)` | `death.attack.*` |
+| `PARTICLE_*` | 115 | `ParticleTypes.java` | — |
+| `BLOCK_*` | 1053 | `world/level/block/Blocks.java`（**注意**同名文件在 `references/` 下只有 6 个假 id，须按路径消歧） | `block.minecraft.*` |
+| `LOOT_TABLE_IDS` | 119 | `BuiltInLootTables.java` | — |
+
+加上既有的物品/实体/效果/音效/药水/纹饰/旗帜/唱片/乐器等，
+**下拉数据源共 15 类、约 3300 项，全部可搜索**。
+
+### 字段类型改造
+
+| 原 kind | 新 kind | 说明 |
+|---|---|---|
+| `text`（属性/伤害类型/粒子） | `resource` | 可搜索下拉，中文名显示 |
+| `text`（战利品表） | `loot_table_res` | 119 官方表下拉（id 含斜杠，不加命名空间） |
+| `text`（delta 三维向量） | `pos` | 复用坐标预设 |
+| `block`（只有 12 个预设） | `block_res` | 预设 + 全量 1053 方块合并下拉 |
+| `nbt`（QLineEdit 手写） | **只读行 + 「编辑 NBT…」按钮** | 弹窗可视化构造 |
+
+**保留手输的字段**（官方无静态清单，无法下拉）：
+`item.modifier`（数据包战利品修饰符）、`attribute.id`（修饰符自定 id）、
+选择器与坐标（预设 + 可编辑下拉已覆盖常见情形）。
+
+### NBT 编辑弹窗（nbt_dialog.py）
+
+- **左：树形编辑**（键/类型/值三列；类型可下拉切换
+  compound/list/byte…；添加子项/删除/添加到根）
+- **右上：SNBT 原文**（随树实时同步；可粘贴外部 NBT 后点
+  「解析到树」反向进入树形编辑）
+- SNBT 解析为**简化递归下降**（覆盖复合/列表/数组/带后缀标量/
+  引号字符串/转义），不追求完整 NBT 规范
+
+**实现中的四个坑**（均有探针断言）：
+
+1. **空后缀 `in` 陷阱**：`sfx in "bB"` 当 `sfx=""` 时恒 True，
+   导致 `{a:1}` 被解析成 byte（`Pos:[1.5,2,3]` 全变 byte）。
+   必须用 `==` 逐个判断。
+2. **int 无后缀**：SNBT 裸整数即 int，回写时漏了 int 分支落到
+   `_esc()` 变成 `"1"`。
+3. **数组 kind 大小写**：`to_tree_items` 写的是 `intarray`（小写），
+   `tree_to_snbt` 却用 `startswith("intArray")`（驼峰）匹配，
+   数组被当空标量输出 `""`。
+4. **根复合重复包层**：`load_text` 调 `to_tree_items(dict, root)`
+   会再造一层 "{}" 节点（树显示 `{}:{id:...}`）——根本身就是复合，
+   应把键值对直接挂到 root 下。
+
+`probe_nbt_parse.py`（幂等回写 + 错误输入报错）与
+`probe_nbt_e2e.py`（弹窗打开 → 树内改值/加子项 → 确定 → 回填 →
+give 输出联动）覆盖全部路径。
+
+### 关键语法结论（逐条核对 1.21.11 反编译源码）
+
+- **kill**（L15-21）：`targets` 可省略，省略时作用于执行者自身；
+- **enchant**（L42-69）：`level` 可省略（默认 1），范围 `integer(0)`
+  —— **允许 0**、无上限；
+- **effect**（L36-160）：三分支结构不对称 ——
+  `give` 是 `<targets> <effect> [seconds] [amplifier] [hideParticles]`，
+  但 `infinite` 是 `<targets> <effect> [amplifier] [hideParticles]`
+  （**无 seconds**，L131）；`clear` 的 targets 与 effect 均可省略。
+  因 Brigadier 参数必须从左到右连续，用 `_positional()` 补齐空洞
+  （只填 amplifier 时自动补默认 seconds）；
+- **setblock**（L27-95）：`destroy|keep|replace|strict` 是**互斥的
+  同级 literal**（同一 mode 枚举），不是可叠加修饰符；
+- **fill**（L39-190）：基础形式 `<from> <to> <block>`；
+  `replace` 的 filter 可选（L71）；`outline/hollow/destroy/strict`
+  由 `wrapWithMode()` 生成（L100-190），与 `keep` 同级；
+- **summon**（L38-70）：`pos` 与 `nbt` 均可省；**只给 nbt 时需补
+  pos 占位**（`~ ~ ~`），否则游戏会把 NBT 当坐标解析；
+- **locate**（L57-90）：三分支 `structure|biome|poi`；
+  structure 用 `ResourceOrTagKeyArgument`、biome 用
+  `ResourceOrTagArgument` —— 均支持 `#标签` 形式（不加命名空间）。
+
+## 12.8b execute：唯一需要专用构建器的指令（41/41 完成）
+
+`execute` 是**管道**语法 —— 任意数量的子命令按序连接、以 `run` 收尾，
+不是「面包屑 + 表单」能表达的。故它是 41 条中唯一走**专用页**的指令
+（`pageGive` 是另一条，因其数据组件区特殊）。
+
+### UI：行列表（execute_ui.py）
+
+`ExecuteChainBuilder` = 有序行列表，每行一个子命令：
+
+- 每行：`[编号] [子命令下拉(分组)] [该行参数控件] [↑ ↓ ✕]`
+- 底部：`+ 添加子命令` / `清空`
+- 切换某行的子命令 → 该行参数控件**重建**（不同子命令参数不同）
+- 默认给一条**可直接用**的链：`as @s` → `run say hi`
+
+子命令全集 **36 项 / 4 组**：执行者位置 14、条件 if/unless 20
+（10 类 × if/unless）、store 1、run 1。
+
+### 序列化（execute_cmd.py）
+
+`serialize_chain(chains, version, ns_prefix)` 把行列表拼成文本。
+**复核 `_OP_PREFIX`**：复合子命令名要展开成官方多词形式 ——
+`positioned_over` → `positioned over`、`facing_entity` →
+`facing entity` 等。早先直接输出 op 名（`positioned_over`），
+产出的指令游戏**无法解析**。
+
+条件类 op 用 `if_` / `unless_` 前缀 + 条件名拼装
+（`if_block` → `if block ...`）。
+
+### 条件参数显示（show_when）
+
+`store` 有 10 个参数，但**按 store_target 只有 2~5 个相关**。
+字段支持 `show_when: (控制键, [允许值])`：
+
+| store_target | 实际显示 |
+|---|---|
+| `score` | result, store_target, target, objective |
+| `bossbar` | result, store_target, id |
+| `block` | result, store_target, pos, path, dtype, scale |
+| `entity` | result, store_target, target, path, dtype, scale |
+| `storage` | result, store_target, source, path, dtype, scale |
+
+### 三个坑（均有探针断言）
+
+1. **0 参信号被 Qt 传参**：`changed = Signal()` 而
+   `w.currentTextChanged.connect(self.changed.emit)` —— Qt 会传
+   `str`/`int`，抛 `TypeError: changed() only accepts 0 argument(s)`，
+   **连接静默失效** → `_refresh` 从不触发 → 改了参数输出不变。
+   修法：一律 `connect(lambda *_: self.changed.emit())`。
+   （与 12.11.5.1 的 `clicked(bool)` 是同一类坑。）
+2. **`isVisible()` 不能当「被条件隐藏」的判据**：控件所在页或其
+   祖先未显示时 `isVisible()` 也返回 False，于是 `params()` 把所有
+   字段都当成隐藏而丢弃 —— 表现为「args 全没了、只剩默认值」。
+   修法：`_apply_visibility()` 把结果记进显式的 `self._hidden`
+   集合，`params()` 查集合。
+3. **切控制字段时不要重建控件**：重建会销毁用户正在编辑的控件
+   （焦点丢失、外部引用变悬空），实测从 `score` 切到 `block` 完全
+   失效。修法：创建**全部**字段，`_on_control_changed()` 只
+   show/hide。
+
+### 动态页索引
+
+`execute` 页**不在 .ui 里**（避免改 .ui 后还要重编译 CodesUI），
+而是 `_ensure_execute_page()` 在首次进入时 `addWidget` 到
+`centerStack`，并把真实 `indexOf(page)` 写回 `IMPLEMENTED`。
+
+**顺序要求**：必须**先建页再取索引** —— 静态登记值（3）与实际索引
+在首次进入时不符，先取索引会切到错误页（实测切到了 give 页）。
+
+## 12.9 声明式规格体系（新增指令的唯一成本）
+新增一条指令只需在 `cmd_specs.SPECS` 写一段规格：
+
+```python
+"setblock": {
+    "title": "setblock — 放置单个方块",
+    "fields": [
+        _f("pos",   "坐标", "pos",   default="~ ~ ~"),
+        _f("block", "方块", "block", default="stone"),
+        _f("mode",  "模式", "enum",
+           choices=["replace", "destroy", "keep"], default="replace"),
+    ],
+},
+```
+
+`cmd_form.CommandForm` 会按 `kind` 工厂化创建控件并收集参数字典，
+再交给 `commands.serialize(cmd, params, version)` 产出文本。
+
+支持的 `kind`：`targets` / `pos` / `block` / `resource` / `enum` /
+`int` / `float` / `bool` / `nbt` / `text`。其中 `resource` 由
+`source` 指定数据源（`effect` / `entity` / `biome` / `structure` /
+`poi` / `enchant` / `item`）。
+
+**可选整数**用 `QSpinBox` 的 `specialValueText` 表达「不填」
+（值为 `minimum-1` 时视为 None），避免用 0 冒充空值 ——
+这在 `enchant` 的 `level`（0 是合法值）上尤其关键。
+
+## 12.10 资源清单数据来源
+
+| 清单 | 数量 | 来源 |
+|---|---|---|
+| 状态效果 `EFFECT_*` | 40 | jar `en_us.json` 的 `effect.minecraft.*` |
+| 实体 `ENTITY_*` | 215 | 同上的 `entity.minecraft.*` |
+| 生物群系 `BIOME_*` | 66 | 同上的 `biome.minecraft.*` |
+| 结构 `STRUCT_CN` | 34 | 反编译 `BuiltinStructures.java` 的 `createKey("id")` |
+| 兴趣点 `POI_IDS` | 20 | 反编译 `PoiTypes.java` 的 `ResourceKey<PoiType>` 声明 |
+
+中文名均来自 `.minecraft/assets` 的 `zh_cn.json`，**五类清单全部
+100% 有中文名**。
+
+三个易错点（均已修正）：
+
+1. **POI id ≠ 方块名**。POI `butcher` 对应烟熏炉、`fisherman` 对应
+   木桶、`home` 对应床。早先按「方块名当 POI 名」列出的清单是错的
+   （会产出游戏不认的 id）；正确清单以 `PoiTypes.java` 的
+   `ResourceKey` 声明为准（20 个，`test_instance` 为测试专用已排除）。
+2. **资料里的结构 id 与项目内部键不一致**：官方 `jungle_pyramid`
+   对应项目 `jungle_temple`、官方 `fortress` 对应项目
+   `nether_fortress`。`struct_list.py` 以**官方 id 为准**并逐一给出
+   中文名，不复用 `structure_params.STRUCT_NAMES` 的键。
+3. **jar 内没有中文语言文件**（只有 `en_us.json`）。中文名必须从
+   `.minecraft/assets/indexes/*.json` 指向的 content-addressed
+   对象里取（字段名是 `hash` 而非 `sha1`）。
+
+## 12.11 数据组件体系（79 个全支持）
+
+### 12.11.1 权威元数据自动提取
+
+**关键决策：不手写 79 个编辑器，而是从源码自动提取元数据表**。
+
+生成脚本 `.temp/gen_comp_meta.py` 解析：
+
+1. `DataComponents.java` 的全部 `register("id", ...)` -> 组件 id +
+   值类型 + persistent codec；
+2. 各组件的 **顶层 `CODEC`**（`Codec<Type> CODEC = ...;`）内的
+   `RecordCodecBuilder.group(... .fieldOf("key") ...)` -> 字段表。
+
+产出 `comp_meta.COMP_META[cid]`，每项含 `type` / `kind` / `fields`
+（`key` + `codec` + `optional` + `default`）/ `file`。
+
+**两个必须避开的坑**：
+
+- **只认顶层 CODEC**：若在整个文件里搜 `fieldOf`，会把嵌套 record
+  的字段算进来 —— 实测 `blocks_attacks` 会从正确的 7 个字段虚增到
+  12 个（混入 `base`/`factor`/`threshold`/`type`）。故
+  `top_codec_body()` 先按 `Codec<Type> CODEC =` 定位再截到 `;`。
+- **record 组件名 ≠ SNBT 键名**：record 是 camelCase、键名是
+  snake_case，且有不规则映射（`minRange` -> `min_reach`、
+  `disableSound` -> `disabled_sound`）。**不可机械转换**，必须以
+  `fieldOf("...")` 字面量为准。
+
+核对方式：`.temp/probe_meta_verify.py` 逐字段回源文件确认
+「键名出现在 fieldOf 中」「可选性与 optionalFieldOf 一致」
+「默认值文本存在」—— 87 个字段全部一致。
+
+### 12.11.2 十种组件形态
+
+`kind` 由 codec 表达式推断，共 10 种（实测分布）：
+
+| kind | 数量 | 含义 | 控件 |
+|---|---|---|---|
+| `compound` | 28 | 有字段的复合 | 按字段生成子控件 |
+| `list` | 12 | 列表 | 文本框 / 专用控件 |
+| `unit` | 10 | 无值 `{}` | 开关（**默认勾选**） |
+| `scalar` | 9 | 标量 | 整数/浮点/开关 |
+| `holder` | 6 | 资源 holder | 文本框 |
+| `nbt` | 4 | 复合标签 | 文本框 |
+| `map` | 4 | 键值映射 | 专用控件 |
+| `enum_string` | 3 | 枚举 -> 字符串 | 下拉（需 `ENUM_CHOICES`） |
+| `text` | 2 | 文本组件 | 文本编辑器 |
+| `textlines` | 1 | 文本组件列表 | 多行编辑器 |
+
+**「compound 但 0 字段」的 19 个实为单值包装**（如 `Rarity` 是枚举、
+`OminousBottleAmplifier` 是 int、`CustomData` 是 CompoundTag），
+由 `WRAPPER_KIND` 表 + `resolve_wrapper()` 细化形态，避免它们
+落到「无字段复合」而无法编辑。
+
+### 12.11.2.1 comp_meta 生成器的两个提取 bug（曾致 8 组件误分类）
+
+`gen_comp_meta.py` 曾把 `.persistent(codec)` 的提取结果**整个丢弃**
+（输出循环漏写 `"codec"` 键），且提取窗口用
+`search(src, m.end(), m.end()+3000)` + 括号配平，会**越界吞掉后续
+多条注册**。两个 bug 叠加使 `kind_from_codec("")` 全部落到
+「按值类型名猜」的兜底分支，产生 8 处误分类：
+
+| 组件 | 误判 | 正确 | 正确依据 |
+|---|---|---|---|
+| `damage` | unit | scalar | `ExtraCodecs.NON_NEGATIVE_INT` |
+| `max_damage` / `max_stack_size` / `repair_cost` | unit | scalar | 同上 |
+| `enchantment_glint_override` | unit | scalar(bool) | `Codec.BOOL` |
+| `minimum_attack_charge` / `potion_duration_scale` | unit/list | scalar(float) | `NON_NEGATIVE_FLOAT` |
+| `recipes` | holder | list | `Recipe.KEY_CODEC.listOf()` |
+
+**修正**：codec 的提取范围限定在**本条 register 的括号体内**（从
+`register(` 的 `(` 起 `read_paren_body` 配平），且只在本条内找
+`.persistent(`。同时输出循环补写 `"codec"` 与 `"note"` 键。
+
+验证探针 `probe_codec_verify.py` 断言三件事：codec 非空（除 2 个
+源码本就无 persistent 的组件）、codec 无越界痕迹（不含
+`public static final` / `DataComponentType<`）、unit 类的 codec 确为
+`Unit.CODEC`。
+
+**教训**：**结构化数据的「生成器」本身必须有回源断言** —— 生成物
+错八处而冒烟测试全绿（因为冒烟只验「能建编辑器能序列化」，不验
+「形态对不对」），直到做第二批编辑器时按类型筛选才发现。
+
+### 12.11.2.2 生成器修正后的形态分布（79 个）
+
+| kind | 数量 | 说明 |
+|---|---|---|
+| compound | 28 | 有字段的复合（字段驱动） |
+| scalar | 16 | 标量（int/float/bool） |
+| list | 12 | 列表 |
+| holder | 5 | 资源 holder |
+| nbt | 4 | 任意复合标签（SNBT 兜底是正确编辑方式） |
+| map | 4 | 键值映射 |
+| unit | 4 | 无值 `{}` |
+| enum_string | 3 | 枚举 -> 字符串 |
+| text | 2 | 文本组件 |
+| textlines | 1 | 文本组件列表 |
+
+### 12.11.3 手工专用编辑器（覆盖 75/79）
+
+语义特殊、需专用控件或版本分支的组件不参与自动生成。
+
+**覆盖演进**：初版 53/79 → 第二批 +15 → 第三批 +7 → **75/79**。
+剩余 4 个是纯 NBT 组件（`custom_data` / `entity_data` /
+`block_entity_data` / `bucket_entity_data`），值本身就是**任意复合
+标签**，SNBT 文本框即正确编辑方式（已给足示例提示）。
+
+| 组件 | 编辑器 | 值形态（源码依据） |
+|---|---|---|
+| `enchantments` / `stored_enchantments` | EnchantEditor | 裸映射 / 1.21 包装 |
+| `custom_name` / `item_name` / `lore` | Text / LoreEditor | 文本组件 |
+| `attribute_modifiers` | AttrEditor | 裸列表 / 1.21 包装 |
+| `dyed_color` | ColorEditor | 裸整数 / 1.21 包装 |
+| `custom_model_data` | IntEditor | `{floats:[...]}` |
+| unit 类（`unbreakable` 等） | FlagEditor | `{}` |
+| `bundle_contents` / `charged_projectiles` | ItemListEditor | **List<{id,count}>**（ItemStack） |
+| `pot_decorations` | ItemListEditor | List<Item id 字符串>（非 ItemStack） |
+| `container` | ContainerEditor | List<{slot,item:{id,count}}> |
+| `suspicious_stew_effects` | StewEditor | List<**{id,duration}**>（键名 id 非 effect；duration 默认 160） |
+| `banner_patterns` | BannerEditor | List<{pattern,color}> |
+| `block_state` | BlockStateEditor | Map<String,String>（值是字符串） |
+| `map_decorations` | MapDecoEditor | Map<id,{type,x,z,rotation}> |
+| `potion_contents` | PotionEditor | {potion?,custom_color?,custom_name?} |
+| `profile` | ProfileEditor | 裸玩家名 或 {name,id} |
+| `use_remainder` | ItemStackEditor | 裸 ItemStack |
+| `can_break` / `can_place_on` | BlockPredicateListEditor | List<方块id 或 #标签> |
+| `recipes` | RecipeListEditor | List<配方 id> |
+| `bees` | BeesEditor | List<{entity_data:{id},ticks_in_hive}> |
+| `lock` | LockEditor | 裸物品 id 谓词 |
+| `break_sound` 等纯资源 | HolderEditor | 裸资源 id（下拉） |
+| `damage_type` / `instrument` / `jukebox_playable` / `provides_trim_material` | HolderEditor | 同上 |
+
+**嵌套结构的三个易错点**（均有源码依据）：
+
+1. **ItemStack 不是字符串**：`bundle_contents` 的元素必须输出
+   `{id:"minecraft:x",count:1}`，而 `pot_decorations` 的元素是
+   **裸 Item id 字符串** —— 二者都叫「物品列表」但 CODEC 不同
+   （前者 `ItemStack.CODEC.listOf()`，后者 `byNameCodec().sizeLimitedListOf(4)`）。
+2. **键名以 fieldOf 为准，不凭直觉**：炖菜效果键是 **`id`** 不是
+   `effect`（`MobEffect.CODEC.fieldOf("id")`），duration 默认 160。
+3. **容器内 item 是复合不是字符串**：`container` 的
+   `item:{id:...,count:...}`，写 `item:"minecraft:x"` 解析失败。
+
+### 12.11.4 值序列化的三个类型陷阱
+
+均在实测中暴露并修复：
+
+1. **`long` 需 `L` 后缀**。`container_loot.seed` 的 codec 是
+   `Codec.LONG`，若输出 `seed:"0"` 或 `seed:0` 都错，须为 `seed:0L`。
+   故 `_ordered_pairs()` 按字段 codec 决定 SNBT 类型。
+2. **`Codec.FLOAT` 用 `f` 后缀，DOUBLE/floatRange 用 `d`**。
+   写错类型（如给 FLOAT 组件 `0.0d`）游戏会拒绝解析。
+3. **Java 常量默认值必须留空**。有 13 个字段的默认值是 Java 常量
+   引用（`BlocksAttacks.ItemDamageFunction.DEFAULT`、
+   `ItemUseAnimation.EAT`、`SoundEvents.GENERIC_EAT`、
+   `DEFAULT.speedMultiplier` 等），它们**不是 SNBT 字面量**。
+   若原样写入会产出
+   `item_damage:"BlocksAttacks.ItemDamageFunction.DEFAULT"`。
+   `_is_java_const_ref()` 识别这类文本并返回 None（= 不填），
+   由游戏取默认。
+
+### 12.11.5 必填字段的诚实处理
+
+有 **6 个组件**的必填字段**无法猜默认值**，缺了游戏会拒绝该组件：
+
+| 组件 | 必填字段 | 说明 |
+|---|---|---|
+| `container_loot` | `loot_table` | 战利品表 id |
+| `damage_resistant` | `types` | 伤害类型标签 |
+| `repairable` | `items` | 可修复物品列表 |
+| `tool` | `rules` | 挖掘规则列表 |
+| `trim` | `material` / `pattern` | 纹饰材料与图案 |
+| `written_book_content` | `title` / `author` | 成书标题与作者 |
+
+`_Editor.missing_required()` 由 `CompoundEditor` 实现，工具层
+`_missing_component_fields()` 汇总后在校验区报
+「✗ 有组件缺少必填字段」，避免静默产出非法指令。
+
+**注意实现细节**：枚举必填字段必须给下拉。早先 `firework_explosion.shape`
+与 `food.nutrition` 因无下拉/类型不匹配而**静默丢字段**，
+故引入 `components.FIELD_ENUMS`（字段级枚举表）。
+
+### 12.11.5.1 Qt `clicked(bool)` 陷阱（曾导致「添加按钮无反应」）
+
+`QPushButton.clicked` 信号会带一个 `checked: bool` 实参。若槽函数
+**有可选参数**，PySide6 会把它传进去：
+
+```python
+# 错误：点按钮时 cid 收到 False（不是 None）
+btn.clicked.connect(self._add_component)      # def _add_component(self, cid=None)
+# 正确：显式丢弃该实参
+btn.clicked.connect(lambda _=False: self._add_component())
+```
+
+表现是「点添加没有任何反应」—— 因为 `cid=False` 绕过了
+`if cid is None` 分支判定，随后 `not cid` 直接 return。
+
+**同类隐患的排查结论**：只有**带可选参数**的槽会受害。本工具里
+`_copy` / `_clear` / `_selector_dialog` / `_pick_item` 均无参数，
+故安全；`_add_component` 是唯一受害者（已修）。
+
+**测试盲区教训**：早先的 `probe_comp_tool` 直接调
+`w._add_component(cid)` 传 id，**绕过了按钮连接**，因此没发现该缺陷。
+现已改为走真实 GUI 路径（`combo.setCurrentIndex` + `btn.click()`），
+并新增 `probe_addbtn.py` 专项覆盖。
+
+### 12.11.6 UI 集成
+
+`give` 页的「添加组件」下拉由 `components.grouped_ids()` 填充：
+**7 个分组**（常用 / 战斗与工具 / 消耗与食物 / 装备与外观 /
+容器与存储 / 地图与书籍 / 其他）共 **79 个组件**。QComboBox 无
+原生 optgroup，故用「禁用 + 加粗」项作分组标题，
+`_on_comp_combo_changed()` 在选中标题时自动跳到下一个可选组件。
+
+### 12.11.7 版本分支：5 个「解包」组件
+
+`TooltipDisplayComponentFix`（schema **4307**）对 5 个组件各调用
+一次 `fixComponentAndUnwrap`，故它们的格式**随版本变化**：
+
+| 组件 | 包装键 | 4307+ (1.21.11/26.2) | <4307 (1.21) |
+|---|---|---|---|
+| `enchantments` | `levels` | 裸映射 | `{levels:{...}}` |
+| `stored_enchantments` | `levels` | 裸映射 | `{levels:{...}}` |
+| `dyed_color` | `rgb` | **裸整数** | `{rgb:N}` |
+| `attribute_modifiers` | `modifiers` | **裸列表** | `{modifiers:[...]}` |
+| `jukebox_playable` | `song` | 裸 holder | `{song:...}` |
+
+各组件自身 CODEC 印证裸值形态：`DyedItemColor.CODEC =
+RGB_COLOR_CODEC.xmap(...)`、`ItemAttributeModifiers.CODEC =
+Entry.CODEC.listOf().xmap(...)`、`ItemEnchantments.CODEC =
+unboundedMap(...)`、`JukeboxPlayable.CODEC = EitherHolder.codec(...)`。
+
+由 `give._UNWRAPPED` 表 + `_wrap_if_needed()` 统一处理。
+
+**注意**：同批被 fixer 触及的另外三个键
+（`attribute_modifiers.modifiers` 之外的 `dyed_color.rgb` 等）
+在 4307+ 都变成了裸值，**不要以为只有 enchantments 变了** ——
+这正是早期实现的错误来源。
+
+### 12.11.8 表格含控件时不能用 ResizeToContents（附魔「等级」列被压扁）
+
+**现象**：添加第一个附魔后，「等级」列被挤压得看不清数字和箭头。
+
+**根因**：`QHeaderView.ResizeToContents` 只按**表头文字与
+`setItem` 的文本**量宽，**不计入 `setCellWidget` 放的控件**。
+「等级」列因此按表头「等级」二字得到 **32px**，而
+`QSpinBox`（含上下箭头）实际需要 **73px** —— 差 41px。
+同时「附魔」列用 `Stretch` 独占 776px（其文本仅需 105px）。
+
+**修法**（`comp_editors.EnchantEditor`）：
+
+| 列 | 策略 | 宽度 |
+|---|---|---|
+| 附魔 | `Stretch` | 吸收余量 |
+| 等级 | `Fixed` | `_measure_spin_width()` |
+| 操作 | `Fixed` | `_measure_btn_width()` |
+
+- `_measure_spin_width()` **构造一个同规格 QSpinBox 取
+  `minimumSizeHint()`**（不硬编码，适配不同 DPI/字体），
+  并给最宽数字（255）以免数字位数变化导致抖动；
+- 单元格内的 SpinBox 设
+  `QSizePolicy.Expanding + setMinimumWidth(_spin_w - 14)`，
+  否则即使列够宽它也只占 31px。
+
+结果：等级列 32px -> **101px**，SpinBox 得 100px（需 73px）。
+
+**同类问题**：`AttrEditor`（属性修饰符表）的「操作」列同样是
+`ResizeToContents`，已一并改为 `Fixed`。
+
+**注意**：`Stretch` 列不会挤压 `Fixed` 列，故这种组合在窄窗口下
+也稳定（实测 1100/1200/1440 宽度下等级列恒为 101px）。
+
+## 12.12 回归探针清单
+
+| 探针 | 关注点 |
+|---|---|
+| `probe_give_ser.py` | give 序列化（含 5 个解包组件的版本分支） |
+| `probe_cmds7.py` | 7 条指令序列化 |
+| `probe_form.py` | 通用表单渲染器 |
+| `probe_tool8.py` | 8 条指令工具层 |
+| `probe_comp_meta` / `probe_meta_verify.py` | 组件元数据提取与回源核对 |
+| `probe_comp_smoke.py` | 79 组件 × 3 版本序列化 |
+| `probe_comp_tool.py` | 组件添加全链路（GUI 路径） |
+| `probe_addbtn.py` | 「添加」按钮（GUI 路径、去重、分组标题） |
+| `probe_missing.py` | 必填字段缺失提示闭环 |
+| `probe_ench_col.py` | 附魔表列宽（等级列不压扁） |
+| `probe_cols2.py` | 多行/长名/窄窗口下列宽稳定性 |
+| `probe_layout_real.py` | 数据组件框占满剩余高度 |
+| `probe_cmdgen_e2e.py` / `probe_cmdgen_integ.py` | 端到端 + 主窗口集成 |
+
+其中组件相关的四个探针设计要点：
+
+- `probe_comp_smoke.py`：**79 组件 × 3 版本 = 237 次**序列化，
+  校验括号配平、无 `None` 泄漏、无空值 `=`、无 Java 常量泄漏，
+  并报告需人工填写的必填字段；
+- `probe_addbtn.py`：**只走真实 GUI 路径**（下拉 + 按钮）验证
+  79 个组件均可添加、去重、分组标题不被停靠 ——
+  它专门用于防住「测试绕过按钮连接」这类盲区；
+- `probe_comp_tool.py`：全链路（下拉选中 -> 添加 -> 卡片出现 ->
+  输出合法）+ 移除 + 清空；
+- `probe_meta_verify.py`：元数据回源核对（87 字段）。
+
+
