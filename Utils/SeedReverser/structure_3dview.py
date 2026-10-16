@@ -621,7 +621,14 @@ class Structure3DView(QOpenGLWidget):
         # 整格且非透明）：眼实心格判定 O(1)
         self._occl_opaque: set = set()
         # 箱子高亮描边（set_chest_highlights 注入；(cx,cy,cz)->展平顶点）
-        self._chest_verts: dict | None = None
+        # 三个缓冲：_chest_sel_verts = 选中箱（tool 层注入）、
+        # _chest_all_verts = F3 全部箱子高亮、_chest_verts = 二者合并的
+        # 实际绘制缓冲（paintGL 只读它）。
+        self._chest_verts: list | None = None
+        self._chest_sel_verts: list | None = None
+        self._chest_all_verts: list | None = None
+        self._chest_all_on = False       # F3 全部箱子高亮开关
+        self._chest_all_n = 0            # 高亮箱子数（提示文案用）
         self._chest_vbo = None
         self._needs_chest_upload = False
         # 开箱交互：箱子位置（set_interact_chests 注入，模型坐标）
@@ -668,6 +675,7 @@ class Structure3DView(QOpenGLWidget):
         self._sp_mouse_speed = _SP_MOUSE_SPEED   # 转视角灵敏度（度/像素）
         self._sp_last_ev_pos: QPoint | None = None
         self._sp_speed_until_ms = 0      # 调速提示残显截止（ms，monotonic）
+        self._sp_hint_until_ms = 0       # F3 箱子高亮提示残显截止（ms）
         self._sp_eye = QVector3D(0, 0, 0)   # 旁观者眼睛位置（世界坐标）
         # 飞行位移积分用真实经过时间（monotonic 秒）而非名义 interval：
         # QTimer 实际触发频率随主线程事件循环（帧率）波动，若按
@@ -748,6 +756,10 @@ class Structure3DView(QOpenGLWidget):
         self._slot_of_mat = {}
         self._render_failed = False      # 新模型重新允许尝试渲染
         self._chest_verts = None         # 换模型：旧箱子高亮失效
+        self._chest_sel_verts = None
+        self._chest_all_verts = None
+        self._chest_all_on = False       # 换模型：F3 高亮态复位
+        self._chest_all_n = 0
         self._needs_chest_upload = False
         # 换模型：旧箱子交互坐标失效（tool 层预览后重新注入）
         self._interact_chests = None
@@ -790,34 +802,99 @@ class Structure3DView(QOpenGLWidget):
         self._sp_idle.stop()
         self._sp_pin.stop()
 
-    def set_chest_highlights(self, positions) -> None:
-        """箱子高亮描边（StructurePreviewer 箱子行点击联动用）。
+    @staticmethod
+    def _chest_box_verts(boxes) -> list:
+        """包围盒 -> 描边线段顶点（每盒 12 棱）。
 
-        positions: [(x, y, z), ...] 模型坐标（None/空清空）；每个箱子
-        画一个跨度 1.1 的包围盒描边（比体素大 0.05，避免与模型面
-        z-fighting）。
+        boxes: [(x, y, z, sx, sy, sz), ...]（min 角 + 各轴格跨度）。
+        兼容旧调用 [(x, y, z), ...]（视作跨度 1）。描边外扩 0.05
+        格，避免与模型面 z-fighting。返回展平线段端点（每点 3 float）。
         """
         verts = []
-        for (cx, cy, cz) in (positions or []):
+        for b in (boxes or ()):
+            if len(b) == 6:
+                cx, cy, cz, sx, sy, sz = b
+            else:
+                cx, cy, cz = b
+                sx = sy = sz = 1
             e = 0.05
-            x0, x1 = cx - e, cx + 1.0 + e
-            y0, y1 = cy - e, cy + 1.0 + e
-            z0, z1 = cz - e, cz + 1.0 + e
-            for (a, b, c, d) in (   # 12 条棱：六个矩形环各 4 条
+            x0, x1 = cx - e, cx + sx + e
+            y0, y1 = cy - e, cy + sy + e
+            z0, z1 = cz - e, cz + sz + e
+            for (a, b2, c, d) in (  # 12 条棱：六个矩形环各 4 条
                     ((x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)),
                     ((x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)),
                     ((x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)),
                     ((x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)),
                     ((x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)),
                     ((x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0))):
-                ring = (a, b, c, d)
+                ring = (a, b2, c, d)
                 for i in range(4):
                     p = ring[i]
                     q = ring[(i + 1) % 4]
                     verts.extend((*p, *q))
+        return verts
+
+    def _sync_chest_verts(self) -> None:
+        """合并「选中箱」与「F3 全部箱」描边 -> 实际绘制缓冲。
+
+        F3 全量高亮与点选高亮可同时存在（同一琥珀色），合并后一次
+        绘制，避免两套 VBO/两次上传。
+        """
+        verts = list(self._chest_all_verts or ())
+        verts.extend(self._chest_sel_verts or ())
         self._chest_verts = verts or None
         self._needs_chest_upload = True
         self.update()
+
+    def set_chest_highlights(self, positions) -> None:
+        """箱子高亮描边（StructurePreviewer 箱子行点击联动用）。
+
+        positions: [(x, y, z), ...] 模型坐标（None/空清空）。**大箱
+        两半合并为一个框**（经 sm.chest_highlight_boxes），避免接缝处
+        两条竖线；单箱跨度 1，描边外扩 0.05 防 z-fighting。与 F3
+        全部箱子高亮（`set_all_chests_highlight`）独立存储、合并绘制。
+        """
+        boxes = sm.chest_highlight_boxes(self._model, positions) \
+            if positions else []
+        self._chest_sel_verts = self._chest_box_verts(boxes) or None
+        self._sync_chest_verts()
+
+    def set_all_chests_highlight(self, positions) -> None:
+        """F3：高亮全部箱子（与点选高亮合并绘制）。
+
+        positions: [(x, y, z), ...] 模型坐标（None/空 = 关闭高亮）。
+        大箱两半合并为一个框（见 sm.chest_highlight_boxes）。
+        """
+        boxes = sm.chest_highlight_boxes(self._model, positions) \
+            if positions else []
+        self._chest_all_verts = self._chest_box_verts(boxes) or None
+        # 提示条按「框数」计（大箱算 1 个），与画面观感一致
+        self._chest_all_n = len(boxes)
+        self._sync_chest_verts()
+
+    def toggle_all_chests_highlight(self) -> bool:
+        """F3 开关：切换全部箱子高亮，返回切换后是否开启。
+
+        数据源优先取 `_interact_chests`（tool 层注入的容器全集，与
+        开箱准星同源，含 RNG 未预测的渲染箱）；未注入时（如
+        SeedReverser 锚点视口的 set_structure 路径）从当前模型的
+        体素现算兜底。
+        """
+        if self._chest_all_on:
+            self._chest_all_on = False
+            self.set_all_chests_highlight(None)
+            return False
+        pos = self._interact_chests
+        if not pos and self._model is not None:
+            pos = sm.chest_positions(self._model)
+        self._chest_all_on = True
+        self.set_all_chests_highlight(pos)
+        return True
+
+    def all_chests_highlight_on(self) -> bool:
+        """当前是否处于 F3 全部箱子高亮态。"""
+        return self._chest_all_on
 
     def set_interact_chests(self, positions) -> None:
         """注入可交互箱子坐标（开箱准星判定用，模型坐标）。
@@ -1240,19 +1317,30 @@ class Structure3DView(QOpenGLWidget):
     _SP_K_TILDE = int(Qt.Key.Key_AsciiTilde)
     _SP_K_ESC = int(Qt.Key.Key_Escape)
     _SP_K_E = int(Qt.Key.Key_E)
+    _SP_K_F3 = int(Qt.Key.Key_F3)
 
     def keyPressEvent(self, ev) -> None:  # noqa: N802
+        k = int(ev.key())
+        # F3 高亮全部箱子：与旁观者模式无关（普通环绕视角下同样可用），
+        # 故放在 _sp_mode 早退之前；开箱 GUI 锁定期也允许（只切高亮，
+        # 不涉及输入态）。自动重复（长按）忽略，避免高频重建 VBO。
+        if k == self._SP_K_F3 and not ev.isAutoRepeat():
+            self.toggle_all_chests_highlight()
+            self._sp_hint_until_ms = (time.monotonic_ns() // 1_000_000
+                                      + 1600)
+            self.update()
+            ev.accept()
+            return
         if not self._sp_mode or ev.isAutoRepeat():
             super().keyPressEvent(ev)
             return
         if self._sp_input_locked:    # 开箱 GUI 期间：Esc/E 转发关
             # 弹窗（焦点可能已不在弹窗：非模态窗失焦后 Esc/E 会
             # 到这里被吞，不转发则 GUI 关不掉），其余全吞
-            if int(ev.key()) in (self._SP_K_ESC, self._SP_K_E):
+            if k in (self._SP_K_ESC, self._SP_K_E):
                 self.spectator_close_request.emit()
             ev.accept()
             return
-        k = int(ev.key())
         if k == self._SP_K_QUOTE or k == self._SP_K_TILDE:
             self.spectator_toggle_grab()
             ev.accept()
@@ -2418,17 +2506,31 @@ class Structure3DView(QOpenGLWidget):
         p.setPen(QColor(235, 235, 235, 200))
         if self._sp_mode:
             now_ms = time.monotonic_ns() // 1_000_000
-            if now_ms < self._sp_speed_until_ms:
+            if now_ms < self._sp_hint_until_ms:
+                # F3 刚切换：优先显示结果（含箱数），1.6s 后回落常规提示
+                if self._chest_all_on:
+                    hint = f"F3：已高亮全部箱子（{self._chest_all_n} 个）"
+                else:
+                    hint = "F3：已关闭箱子高亮"
+            elif now_ms < self._sp_speed_until_ms:
                 hint = f"飞行速度 {self._sp_speed:.1f} 格/秒"
             elif self._sp_crosshair_idx >= 0:
                 hint = "右键/E 打开箱子"
             elif self._sp_grabbed:
                 hint = ("WASD/方向键 水平移动 · Space/Shift 升降 · "
-                        "鼠标转视角 · 滚轮调速 · ` 呼出鼠标")
+                        "鼠标转视角 · 滚轮调速 · F3 箱子高亮 · ` 呼出鼠标")
             else:
                 hint = "点击 3D 预览开始控制视角（或按 ` 键）"
         else:
-            hint = "右键拖拽旋转 · 滚轮缩放 · 左键拖拽平移 · 双击复位"
+            now_ms = time.monotonic_ns() // 1_000_000
+            if now_ms < self._sp_hint_until_ms:
+                if self._chest_all_on:
+                    hint = f"F3：已高亮全部箱子（{self._chest_all_n} 个）"
+                else:
+                    hint = "F3：已关闭箱子高亮"
+            else:
+                hint = ("右键拖拽旋转 · 滚轮缩放 · 左键拖拽平移 · "
+                        "双击复位 · F3 箱子高亮")
         if self._variant_n and not self._sp_mode:
             cur = 0 if self._variant is None else self._variant
             hint = f"变种 {cur + 1}/{self._variant_n} · {hint}"

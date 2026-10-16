@@ -2100,6 +2100,124 @@ def build_model(key: str, variant: int | None = None) -> dict:
         return model
 
 
+# 视口认得的容器方块材质键（与 StructurePreviewer.composition
+# ._CHEST_MATS 同口径：普通箱/陷阱箱/桶）。
+CHEST_MATS = frozenset({"chest", "trapped_chest", "barrel"})
+
+
+def is_chest_value(v) -> bool:
+    """体素值是否容器方块（兼容纯字符串与 (纹理, 形状) 元组）。"""
+    if isinstance(v, tuple):
+        return v[0] in CHEST_MATS
+    return v in CHEST_MATS
+
+
+def chest_positions(model: dict) -> list:
+    """模型体素里的全部容器方块坐标（升序，F3 高亮数据源）。
+
+    与 compose_display_model 的 chest_blocks 同口径，但直接从
+    model["voxels"] 现算——SeedReverser 的锚点视口走 set_structure
+    路径（无 tool 层注入），需要自带兜底。
+    """
+    vox = (model or {}).get("voxels") or {}
+    return sorted((x, y, z) for (x, y, z), v in vox.items()
+                  if is_chest_value(v))
+
+
+def _chest_half_type(v) -> str | None:
+    """体素值 -> 大箱半型（'left'/'right'）；非大箱返回 None。
+
+    形状码 `chest:<facing>:<type>`（type = single/left/right）。
+    """
+    if not isinstance(v, tuple) or not is_chest_value(v):
+        return None
+    shape = v[1] or ""
+    parts = shape.split(":")
+    if len(parts) < 3 or parts[0] != "chest":
+        return None
+    return parts[2] if parts[2] in ("left", "right") else None
+
+
+def chest_highlight_boxes(model: dict, positions=None) -> list:
+    """容器高亮包围盒：大箱两半合并为一个框。
+
+    返回 [(x, y, z, sx, sy, sz), ...]（min 角 + 各轴格跨度）。
+    单箱跨度 (1,1,1)；大箱把 left/right 两半并成一个 (2,1,1) 或
+    (1,1,2) 的框——否则相邻两半各画一个小框，接缝处出现两条竖线
+    （用户反馈：大箱应该是一个大黄框）。
+
+    positions 给定时（点选联动），只保留**包含**这些点的盒子：大箱
+    只点了其中一半也仍得到合并后的大框。model 缺体素信息时（模型
+    未装填/坐标来自外部）退化为逐点单箱框，不丢高亮。
+    """
+    vox = (model or {}).get("voxels") or {}
+    chests = {p: v for p, v in vox.items() if is_chest_value(v)}
+    if not chests:
+        # 无模型体素：无从判半型，按传入坐标逐个单箱框
+        return sorted((x, y, z, 1, 1, 1) for (x, y, z) in (positions or ()))
+
+    halves: dict = {"left": [], "right": []}
+    singles: list = []
+    for p, v in chests.items():
+        t = _chest_half_type(v)
+        if t is None:
+            singles.append(p)
+        else:
+            halves[t].append(p)
+
+    # 两半配对：同 y 且水平相邻（曼哈顿距离 1）；贪心按序取最近者，
+    # 避免两个大箱紧贴时错配（每个半只归一个框）
+    boxes = [(x, y, z, 1, 1, 1) for (x, y, z) in singles]
+    used: set = set()
+    for lp in sorted(halves["left"]):
+        if lp in used:
+            continue
+        best = None
+        for rp in halves["right"]:
+            if rp in used or rp[1] != lp[1]:
+                continue
+            d = abs(rp[0] - lp[0]) + abs(rp[2] - lp[2])
+            if d == 1 and (best is None or d < best[0]):
+                best = (d, rp)
+        if best is None:
+            boxes.append((lp[0], lp[1], lp[2], 1, 1, 1))   # 孤儿半
+            used.add(lp)
+            continue
+        rp = best[1]
+        used.add(lp)
+        used.add(rp)
+        x0, y0, z0 = min(lp[0], rp[0]), lp[1], min(lp[2], rp[2])
+        sx = abs(lp[0] - rp[0]) + 1
+        sz = abs(lp[2] - rp[2]) + 1
+        boxes.append((x0, y0, z0, sx, 1, sz))
+    for rp in sorted(halves["right"]):
+        if rp not in used:
+            boxes.append((rp[0], rp[1], rp[2], 1, 1, 1))
+
+    if positions:
+        want = set(positions)
+        keep = []
+        for (x, y, z, sx, sy, sz) in boxes:
+            hit = any((x + i, y + j, z + k) in want
+                      for i in range(sx) for j in range(sy)
+                      for k in range(sz))
+            if hit:
+                keep.append((x, y, z, sx, sy, sz))
+        # 兜底：请求点未被任何框覆盖时仍画单框。预测箱坐标
+        # （model["chests"]，RNG 推导）与渲染体素理论上重合，但
+        # fortress 等存在已知偏差，若不兜底则点箱子行会「什么都没
+        # 高亮」——保持「点了必有反馈」的既有保证。
+        for (x, y, z) in sorted(want):
+            if not any((x, y, z) in
+                       {(bx + i, by + j, bz + k)
+                        for i in range(bsx) for j in range(bsy)
+                        for k in range(bsz)}
+                       for (bx, by, bz, bsx, bsy, bsz) in keep):
+                keep.append((x, y, z, 1, 1, 1))
+        return sorted(keep)
+    return sorted(boxes)
+
+
 def tex_keys_used(model: dict) -> list:
     """模型用到的纹理键（含 halfheight: 前缀者去前缀）。"""
     out = set()

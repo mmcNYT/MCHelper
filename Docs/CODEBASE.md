@@ -1816,7 +1816,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 
 3. **compose（主线程同步）**：按钮「预览」态触发 `_on_preview_clicked`：先用 `check_structure_at` 对锚点做群系校验（主世界结构传入主线程新建的 `BiomeSampler`，下界/末地由校验函数内部惰性建采样器；校验失败仅提示「结构可能不存在，仅供 RNG 演示」，不阻断），再调用 `composition.compose(key, seed, bx, bz, biome_id, version_key)`——该函数逐行移植 cubiomes finders.c 的 `getVariant` + `getStructurePieces` RNG 消耗序列，产出 `Composition` 数据类（变种名/旋转/镜像/锚点/部件列表 `pieces`，其 `chests` property 汇总所有 `Chest{pos, loot_table, loot_seed, pos_model, pos3}`）。LootTableSeed 由 `loot_rng.get_population_seed` + salt 档推导（同区块流内 `nextLong` 消耗顺序即箱序），求值时用 `signed_seed` 转为 Java 有符号显示。
 
-4. **3D 渲染（主线程）**：`composition.compose_display_model(comp)` 组装显示模型 dict（mesh/tex_keys/chest_blocks），注入 `Structure3DView`（`Utils/SeedReverser/structure_3dview.py` 的 QOpenGLWidget，在 `_init_ui` 中替换 `.ui` 的占位件）。本页视口默认**旁观者相机模式**（`set_spectator_mode(True)`，WASD+鼠标 FP 飞行，` 键呼出/锁定鼠标）；渲染体素里的全部容器方块经 `set_interact_chests` 注册为可交互箱（含 RNG 未预测的箱，如 bastion jigsaw 渲染箱多于预测箱），准星右键/E 发 `chest_open_requested` 信号回控制层弹战利品 GUI；点箱子列表行发 `set_chest_highlights` 琥珀描边。
+4. **3D 渲染（主线程）**：`composition.compose_display_model(comp)` 组装显示模型 dict（mesh/tex_keys/chest_blocks），注入 `Structure3DView`（`Utils/SeedReverser/structure_3dview.py` 的 QOpenGLWidget，在 `_init_ui` 中替换 `.ui` 的占位件）。本页视口默认**旁观者相机模式**（`set_spectator_mode(True)`，WASD+鼠标 FP 飞行，` 键呼出/锁定鼠标，**F3 高亮全部箱子**——与旁观者模式无关，焦点不在视口时由工具层 `keyPressEvent` 兜底转发）；渲染体素里的全部容器方块经 `set_interact_chests` 注册为可交互箱（含 RNG 未预测的箱，如 bastion jigsaw 渲染箱多于预测箱），准星右键/E 发 `chest_open_requested` 信号回控制层弹战利品 GUI；点箱子列表行发 `set_chest_highlights` 琥珀描边。
 
 5. **战利品计算（主线程同步）**：`loot_engine.era_for_version(version)` 得时代码 `era`；逐箱经 `_loot_table(table_name, era)`（带模块级 `_loot_cache`）取 `LootTable`，`loot_engine.generate_loot(table, chest.loot_seed)` 用标准 Java LCG（`loot_rng.JavaRandom`）按 Cubiomes-Loot 移植逻辑在 float32 域求值出 `ItemStack` 列表（附魔/炖菜效果按 RNG 顺序生成）；`_merge_stacks` 把同箱内物品/附魔/效果/药水完全相同的堆合并数量后填入 `chestList` 树（顶层行=箱：战利品表名 + LootTableSeed + 坐标；子行=物品：图标 + 中文名 x 数量，tooltip 为游戏风格富文本卡片）。
 
@@ -1964,7 +1964,7 @@ _draw_locate(): 定位点+红虚线+距离文本+端点坐标标签 → _fit_loc
 - `Utils/Public/structure_params`——`VERSION_KEYS`（版本下拉）、`STRUCT_NAMES`（结构中文名）、`STRUCT_DIMENSION`（结构 → overworld/nether/end 维度路由，tp 指令/枚举维度/校验采样器选择三处使用）、`DIMENSION_NAMES`（维度中文名）。
 - `Utils/Public/biome_names`——`biome_label(bid)`（群系 id → 中文名）。
 - `Utils/Public/structure_icons`（as `struct_icons`）——`icon_path(enum_key)`（结构图标路径，复用 MapPreviewer 资产）。
-- `Utils/SeedReverser/structure_3dview`——`Structure3DView`（OpenGL 3D 视口：set_model/set_chest_highlights/set_interact_chests/set_spectator_mode/set_spectator_sensitivity/set_spectator_input_locked/note_chest_gui_closed/is_spectator_mode/mouse_grabbed/spectator_toggle_grab）。
+- `Utils/SeedReverser/structure_3dview`——`Structure3DView`（OpenGL 3D 视口：set_model/set_chest_highlights/set_all_chests_highlight/toggle_all_chests_highlight/all_chests_highlight_on/set_interact_chests/set_spectator_mode/set_spectator_sensitivity/set_spectator_input_locked/note_chest_gui_closed/is_spectator_mode/mouse_grabbed/spectator_toggle_grab）。
 - `Utils/StructurePreviewer/composition`——`compose(struct_key, world_seed, block_x, block_z, biome_id, version_key)`（getVariant+getStructurePieces RNG 移植，12 结构各有 compose_xxx 分派）、`compose_display_model(comp)`（体素拼装显示模型：mesh/tex_keys/chest_blocks/chests 等键）。数据类 `Chest`（pos/loot_table/loot_seed/pos_model/pos3）、`Piece`、`Composition`（pieces + chests property）。
 - `Utils/StructurePreviewer/loot_engine`——`load_loot_snapshot`（快照分档加载）、`era_for_version`（版本键 → era）、`generate_loot(table, seed)`（Java LCG 整表求值）、类型 `LootTable`/`ItemStack`。
 - `Utils/StructurePreviewer/loot_rng`——`signed_seed`（无符号 64 位 → Java 有符号显示）。
@@ -3459,6 +3459,11 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `model_size` | `model_size(vox: dict) -> tuple` | 体素 dict → 包围盒尺寸 (W, D, H)（x/z/y 方向跨度）；空模型 (0,0,0)。 |
 | `build_model` | `build_model(key: str, variant: int \| None = None) -> dict` | 构建并返回模型 dict（`(key, variant)` 单条缓存 + 线程锁）：`build_voxels` → `build_mesh` → `tex_keys`（`_mat_shape` 取纹理位排序去重）。返回 `{"key","variant","voxels","size","mesh","tex_keys"}`。 |
 | `tex_keys_used` | `tex_keys_used(model: dict) -> list` | 模型用到的纹理键（`halfheight:` 前缀去前缀），排序返回。 |
+| `CHEST_MATS` | `frozenset({"chest", "trapped_chest", "barrel"})` | 视口认得的容器方块材质键（与 `StructurePreviewer.composition._CHEST_MATS` 同口径）。 |
+| `is_chest_value` | `is_chest_value(v) -> bool` | 体素值是否容器方块（兼容纯字符串与 `(纹理, 形状)` 元组）。 |
+| `_chest_half_type` | `_chest_half_type(v) -> str \| None` | 体素值 -> 大箱半型（`'left'`/`'right'`）；非大箱返回 None。形状码 `chest:<facing>:<type>`。 |
+| `chest_highlight_boxes` | `chest_highlight_boxes(model, positions=None) -> list` | 容器高亮包围盒 `[(x, y, z, sx, sy, sz), ...]`（min 角 + 各轴格跨度）。**大箱两半合并为一个框**（否则接缝处两条竖线）；两半按「同 y + 曼哈顿距离 1」贪心配对，孤儿半退化为单框。`positions` 给定时只保留覆盖这些点的框（只点一半也仍得合并大框），未被任何框覆盖的点兜底补单框（保「点了必有反馈」，fortress 预测坐标有已知偏差）。 |
+| `chest_positions` | `chest_positions(model: dict) -> list` | 模型体素里的全部容器坐标（升序）。F3 全量高亮的数据源兜底——SeedReverser 锚点视口走 `set_structure` 路径（无 tool 层 `set_interact_chests` 注入），由本函数从 `model["voxels"]` 现算。 |
 | `_mat_shape` | `_mat_shape(v) -> tuple` | 体素值 → (基纹理键, 形状码\|None)：元组直取（门上半 `door:u:*` 且基键以 `" door bottom"` 结尾时换 `" door top"`）；旧 `halfheight:` 前缀字符串 → (去前缀, SHAPE_SLAB_BOT)；非字符串 → UNKNOWN_MAT。 |
 | `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap[,rot]])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell（柱/梁/吊杆精确 uv + 钟体 32x32 实体盒窗）/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。大箱顶面（`typ in (left,right)` 且材质在 `_CHEST_DOUBLE_TOP`）返回 `" top double"` + 全图窗 + `_CHEST_TOP_ROT[(facing, typ)]` 的 rot，接缝边钉到 u=0。 |
 | `_RU` / `_RS` | `_RU(a,b,c,d)` / `_RS(a,b,c,d)` | 官方模型 JSON 像素窗 → 归一化窗换算：up 面 `v=(1-b,1-d)`；side/down 面 `v=(1-d,1-b)`；u=(a,c)；除以 16。 |
@@ -3743,7 +3748,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
    - **旁观模式遮挡剔除** `occl_cells`：`_occl_cells_for_eye()` 移植自 1.21.11 反编译源码 `SectionOcclusionGraph.runUpdates`（MC 洞穴剔除运行期同款）——眼在实心整格（`_occl_opaque`，整格且非 `sm._TRANSPARENT_MATS`）返回 None = 全渲染（游戏 `isSolidRender` 时 smartCull=false 同款）；眼在空气格从眼 section 做 section 级 BFS：种子无条件可见且 6 向传播（源码 initializeQueue 无 sourceDirection 跳过 facesCanSeeEachother 检查），后续传播到方向 e 要求存在来向 d 使当前 section 矩阵 `facesCanSeeEachother(d.opposite, e)`（bit = `OPP[d] + 6*e`，门窗空域自然连通）；界外 section 视作未加载阻断（否则沿界外空 section "高速路"绕过实心 section，密封房间剔除失效——视线管探针实证）；结果按眼 section 缓存。与视锥结果取交集（`np.isin`；满集跳过、空集全剔）。近→远排序绘制经真窗口 A/B 实测无收益甚至略亏，不采用。
    - draw 经 **ctypes 原生 `glDrawElements`**（见下节兼容性）：`0x0004`（GL_TRIANGLES）+ `self._idx_type` + `c_void_p` 字节偏移。
    - 无 chunk 数据（旧 mesh/低层注入）回退单次全量 draw（水区间在索引尾部被排除）。
-6. **线框层** `_draw_guide_lines(mvp)`（不受渲染开关影响，锚点/区块是逆推核心信息）：`_plain` 简写着色器（aPos+uMVP+uColor）画三组线——①区块黄框（`GL_LINES` 1.5px，y=min_y-0.02 贴地微降防 z-fighting；只画结构足迹覆盖的区块格，每格输出 16×16 矩形四边，`_seen` 键去重共享边；网格相位 gx0/gz0 由锚点口径 mod 16 决定：monument 取 `(w/2,d/2) mod 16`、ANCHOR_OFFSETS 键取偏移 mod 16、注入模型用 `chunk_origin`、其余 (0,0)，世界对齐语义 = 锚点 ≡ 所在区块西北角）；②锚点无限红线（2.0px，`ext = max(w,d,h)*8+64` 上下延伸 + 地面十字 1×1 标精确点；位置口径：`sm.ANCHOR_CENTER_KEYS`(monument)→结构中心、`sm.ANCHOR_OFFSETS`(village 水井/trial_chambers 入口两水池)→偏移、注入模型 `anchor_local`、缺省 (0,0)）；③箱子高亮琥珀描边（`set_chest_highlights` 注入的 12 棱包围盒，跨度 1.1 = 体素外扩 0.05 防 z-fighting，惰性上传 `_chest_vbo`）。
+6. **线框层** `_draw_guide_lines(mvp)`（不受渲染开关影响，锚点/区块是逆推核心信息）：`_plain` 简写着色器（aPos+uMVP+uColor）画三组线——①区块黄框（`GL_LINES` 1.5px，y=min_y-0.02 贴地微降防 z-fighting；只画结构足迹覆盖的区块格，每格输出 16×16 矩形四边，`_seen` 键去重共享边；网格相位 gx0/gz0 由锚点口径 mod 16 决定：monument 取 `(w/2,d/2) mod 16`、ANCHOR_OFFSETS 键取偏移 mod 16、注入模型用 `chunk_origin`、其余 (0,0)，世界对齐语义 = 锚点 ≡ 所在区块西北角）；②锚点无限红线（2.0px，`ext = max(w,d,h)*8+64` 上下延伸 + 地面十字 1×1 标精确点；位置口径：`sm.ANCHOR_CENTER_KEYS`(monument)→结构中心、`sm.ANCHOR_OFFSETS`(village 水井/trial_chambers 入口两水池)→偏移、注入模型 `anchor_local`、缺省 (0,0)）；③箱子高亮琥珀描边（`set_chest_highlights` 点选注入 + `set_all_chests_highlight` F3 全量注入，二者合并为 `_chest_verts` 后一次绘制；包围盒经 `sm.chest_highlight_boxes` 生成——**大箱 left/right 两半合并为一个框**，单箱跨度 1，外扩 0.05 防 z-fighting，惰性上传 `_chest_vbo`）。
 7. **半透明第二遍** `_draw_water(mvp)`：`_FS_TRANS` 同图集采样（含流体帧动画换算）、按贴图 alpha 混合；`glDepthMask(0)` 深度只读 + 关 `GL_CULL_FACE(0x0B44)` 双面绘制（防水下/斜视水侧被背向剔除误裁）；在网格线之后绘制（水面混合叠在线上，与游戏内俯视观感一致）；索引区间 `[trans_off, trans_off+trans_count)`。
 8. **2D overlay**（QOpenGLWidget 仅允许在 paintGL 内开 QPainter，覆写 paintEvent 画属未定义行为会随机 0xC0000409）：QPainter 画开箱准星、左上图例（"红线 = 锚点（结构中心/西北角）"、"黄框 = 覆盖区块 (16×16)"）、底部操作提示（按模式/准星/锁定/调速残显态切换文案；变种键显示 `变种 k/n`）、右上 FPS（帧间 `perf_counter` 滚动均值 0.5s 刷一次防闪烁；低于 `_FPS_BAD_TH=30` 显红 `_FPS_BAD` 否则暗绿 `_FPS_OK`）。文字/准星硬边无抗锯齿（像素风对齐 + 省全窗口 AA pass 开销）。
 9. **连续渲染自驱动**：旁观模式且 tick/pin 定时器活跃时 `QTimer.singleShot(0, self.update)` 让出事件循环再调度下一帧——帧率 = min(GPU 能力, 合成节奏)，摆脱定时器精度钳制；paintGL 内直接 `update()` 实测会把 tick 从 248Hz 挤到 139Hz。静止/非交互态条件不满足自然停转，不空烧 GPU。
@@ -3816,7 +3821,8 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | 公开接口 | `set_structure(key, name="")` | 切换结构：`sm.build_model(key)` 构建失败则停渲染 + 发 render_error；`_load_model` 装填，变种键启动轮播 |
 | | `set_model(model)` | 低层注入入口（StructurePreviewer 用）：外建完整模型 dict 直接进视口，`_key` 置 None 退出结构键模式（不轮播、锚点/区块线按注入字段或西北角默认口径） |
 | | `stop_variant_timer()` | 停全部定时器（应用退出钩子，防退出期析构崩溃） |
-| | `set_chest_highlights(positions)` | 箱子高亮描边：每箱 12 棱包围盒顶点（外扩 0.05），惰性上传 |
+| | `set_chest_highlights(positions)` | 箱子高亮描边（点选联动）：经 `sm.chest_highlight_boxes` 得包围盒（**大箱两半合并为一个框**），每框 12 棱顶点（外扩 0.05 防 z-fighting），惰性上传；与 F3 全量高亮独立存储、合并绘制 |
+| | `set_all_chests_highlight(positions)` / `toggle_all_chests_highlight()` / `all_chests_highlight_on()` | F3 全部箱子高亮：开关态与描边缓冲（同样走大箱合并）；`_chest_all_n` 按**框数**计（大箱算 1 个）；数据源优先 `_interact_chests`（tool 注入全集），未注入时从 `model["voxels"]` 经 `sm.chest_positions` 现算兜底（SeedReverser 锚点视口路径）；换模型时复位 |
 | | `set_interact_chests(positions)` | 注入可交互箱子坐标并重判准星 |
 | | `crosshair_active()` / `note_chest_gui_closed()` | 准星命中查询 / GUI 关闭后按需恢复鼠标锁定 |
 | | `set_spectator_mode(on)` / `is_spectator_mode()` / `mouse_grabbed()` | 切换/查询旁观者模式与锁定态 |
@@ -3828,7 +3834,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | 交互 | `_orbit(dx,dy)` / `_pan_screen(d)` / `_eye_pos()` | 环绕旋转 / 平移 / 相机眼位（dist 缺省 radius*2.2） |
 | | `_screen_angle()` / `_orbit_cursor()` | 北向屏幕投影角 / 旋转光标位图生成 |
 | | `mouseDoubleClickEvent` / `mousePressEvent` / `mouseReleaseEvent` / `mouseMoveEvent` / `wheelEvent` | 双击复位（旁观者吞掉）；sp 分支：锁定态吞、准星态右键开箱、未控制态点击即锁定；orbit 分支：右键设旋转光标、move 驱动 orbit/pan 并 `_pause_rotation`；滚轮两分支分别调速/缩放 |
-| | `keyPressEvent` / `keyReleaseEvent` / `focusOutEvent` | sp 模式键处理（键集合存 int，PySide6 枚举 hash 与 int 不同必须双侧统一 int；` ` / Esc / E / 移动键分流，自动重复与锁定期分流）；失焦松键 |
+| | `keyPressEvent` / `keyReleaseEvent` / `focusOutEvent` | sp 模式键处理（键集合存 int，PySide6 枚举 hash 与 int 不同必须双侧统一 int；` ` / Esc / E / 移动键分流，自动重复与锁定期分流）；失焦松键。**F3 在 `_sp_mode` 早退之前处理**——高亮全部箱子与旁观者模式/输入锁定态均正交，长按（autoRepeat）忽略 |
 | 旁观者 | `_spectator_enter/exit/reposition` | 进入复位眼睛到模型前缘 / 退出停定时器清元键还原相机 / 按体素范围重置眼睛姿态与速度 |
 | | `_spectator_grab_mouse` / `_spectator_release_mouse` / `_spectator_recenter` / `_spectator_pin_tick` / `_spectator_toggle_grab` | 锁定（回中+隐藏+启动钉扎）/ 呼出 / 钉回中心（可重置基准）/ 直读光标位移转视角后钉回 / 切换 |
 | | `_spectator_tick` / `_spectator_idle_check` / `_sp_dir` / `_sp_start_loop` | FP 飞行积分 / 低频心跳兜底 / 视线向量 / 有键启动 tick+心跳 |
@@ -3873,7 +3879,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `_VARIANT_MS` / `_INTERACT_RESUME_MS` | 2500 / 4000 | 变种轮播间隔 / 交互停手后恢复轮播等待 |
 | `_CURSOR_PIX` / `_CURSOR_N_ARM` / `_CURSOR_W_ARM` / `_CURSOR_N_LETTER` / `_CURSOR_W_LETTER` | 56 / 线段元组 | 旋转光标位图边长与北/西箭臂、N/W 字母线段几何 |
 | `render_error` / `chest_open_requested` / `spectator_close_request` | Signal | 类信号（str / int / 无参） |
-| `_SP_K_*` | 类属性 int | 键位常量（W/A/S/D/方向键/Space/Shift/QuoteLeft/AsciiTilde/Esc/E），统一 int 化规避 PySide6 枚举 hash 问题 |
+| `_SP_K_*` | 类属性 int | 键位常量（W/A/S/D/方向键/Space/Shift/QuoteLeft/AsciiTilde/Esc/E/F3），统一 int 化规避 PySide6 枚举 hash 问题 |
 | 实例字段 | `_chunks/_occl/_occl_opaque/_occl_cache_*` | chunk 剔除数据 / 逐 section 可见性矩阵 / 阻挡格集合 / 眼 section BFS 缓存 |
 
 ---

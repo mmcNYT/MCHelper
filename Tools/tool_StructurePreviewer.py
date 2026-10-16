@@ -2027,8 +2027,15 @@ class StructurePreviewerWidget(BaseToolWidget, Ui_structurePreviewer):
     def _on_render_error(self, msg: str) -> None:
         self.infoLabel.setText(msg)
 
-    # ---------- ` 键全局兜底：焦点不在 3D 视口时也能开始控制视角 ----------
+    # ---------- ` / F3 键全局兜底：焦点不在 3D 视口时也可用 ----------
     def keyPressEvent(self, ev) -> None:  # noqa: N802
+        if ev.key() == Qt.Key.Key_F3 and self._view.isVisible() \
+                and not ev.isAutoRepeat():
+            # F3 高亮全部箱子：焦点在列表/输入框等控件时也生效
+            #（视口 keyPressEvent 只在视口有焦点时收到）
+            self._view.toggle_all_chests_highlight()
+            ev.accept()
+            return
         if ev.key() == Qt.Key.Key_QuoteLeft and self._view.isVisible() \
                 and self._view.is_spectator_mode() \
                 and not self._view.mouse_grabbed():
