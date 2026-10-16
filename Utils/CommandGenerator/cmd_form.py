@@ -128,14 +128,12 @@ class CommandForm(QWidget):
         dflt = fs.get("default")
 
         if kind == "targets":
-            cb = QComboBox()
-            cb.setEditable(True)
-            cb.addItem("")
-            cb.addItems(CS.TARGET_PRESETS)
-            cb.setCurrentText(dflt or "")
-            cb.currentTextChanged.connect(self._emit)
-            self._widgets[key] = ("text", cb)
-            return cb
+            from Utils.CommandGenerator.target_selector_ui import (
+                TargetSelectorBuilder)
+            w = TargetSelectorBuilder(dflt or "")
+            w.changed.connect(self._emit)
+            self._widgets[key] = ("target_selector", w)
+            return w
 
         if kind == "pos":
             cb = QComboBox()
@@ -329,7 +327,8 @@ class CommandForm(QWidget):
             return [(e["id"], f'{e["name"]}（{e["id"]}）')
                     for e in CE.enchants_data()]
         if source == "item":
-            return [(x, IL.ITEM_CN.get(x, x)) for x in IL.ITEM_IDS]
+            from Utils.CommandGenerator import item_filter as IF
+            return IF.item_items()
         entry = table.get(source)
         if not entry:
             return []
@@ -362,6 +361,8 @@ class CommandForm(QWidget):
                 out[key] = entry[1].currentText() if hasattr(
                     entry[1], "currentText") else entry[1].text()
             elif kind == "nbt":
+                out[key] = entry[1].text()
+            elif kind == "target_selector":
                 out[key] = entry[1].text()
             elif kind == "block_res":
                 cb = entry[1]

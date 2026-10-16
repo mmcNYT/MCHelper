@@ -189,14 +189,22 @@ class CommandGeneratorWidget(BaseToolWidget):
     def _build_item_combo(self):
         cb = self.ui.giveItemCombo
         cb.clear()
-        # 有图标的排前面（更常用），其次按 id
-        icons = IL.ITEM_ICONS
-        head = sorted(icons)
-        tail = [i for i in IL.ITEM_IDS if i not in icons]
+        # 只收录**真实物品 id**（item_filter.REAL_ITEM_IDS）。
+        #
+        # 两处历史坑：
+        #  1. IL.ITEM_IDS 含 928 个**翻译键**（banner.base.black、
+        #     potion.effect.awkward…），不是物品 id，且无中文名；
+        #  2. IL.ITEM_ICONS 是图标文件名集合，键空间又不同，里面有 132
+        #     个药水/箭图标变体（potion_awkward…）。
+        # 早先把 ITEM_ICONS 直接拼进下拉（head = sorted(icons)），
+        # 于是 2769 项里混着上述假条目，且一律显示不出译名。
+        # 现在统一走 item_filter，图标只用于「有图标的排前面」。
+        from Utils.CommandGenerator import item_filter as IF
+        icon_set = IL.ITEM_ICONS
+        head = sorted(i for i in IF.REAL_ITEM_IDS if i in icon_set)
+        tail = [i for i in IF.REAL_ITEM_IDS if i not in icon_set]
         for iid in head + tail:
-            cn = IL.ITEM_CN.get(iid, "")
-            label = f"{cn}（{iid}）" if cn else iid
-            cb.addItem(label, iid)
+            cb.addItem(f"{IF.item_label(iid)}（{iid}）", iid)
         # 默认钻石剑
         i = cb.findData("diamond_sword")
         if i >= 0:

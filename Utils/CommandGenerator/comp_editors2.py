@@ -37,6 +37,7 @@ _Editor = _base._Editor
 
 def resource_items(source: str):
     """(id, 显示名) 列表。"""
+    from Utils.CommandGenerator import item_filter as IF
     mapping = {
         "sound": lambda: [(x, RL.SOUND_CN.get(x, x)) for x in RL.SOUND_IDS],
         "instrument": lambda: [(x, RL.INSTRUMENT_CN.get(x, x))
@@ -57,7 +58,8 @@ def resource_items(source: str):
                           for x in RL.BIOME_IDS],
         "damage_type": lambda: [(x, RL.DAMAGE_TYPE_CN.get(x, x))
                                 for x in getattr(RL, "DAMAGE_TYPE_IDS", [])],
-        "item": lambda: [(x, IL.ITEM_CN.get(x, x)) for x in IL.ITEM_IDS],
+        # 物品：用过滤后的**真实** id（ITEM_IDS 含 928 个翻译键条目）
+        "item": IF.item_items,
     }
     fn = mapping.get(source)
     return fn() if fn else []

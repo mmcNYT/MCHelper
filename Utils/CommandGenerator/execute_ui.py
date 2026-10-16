@@ -133,6 +133,7 @@ for _op in list(OP_ARGS):
 
 
 def _resource_items(source):
+    from Utils.CommandGenerator import item_filter as IF
     m = {
         "entity": lambda: [(x, RL.ENTITY_CN.get(x, x))
                            for x in RL.ENTITY_IDS],
@@ -141,7 +142,8 @@ def _resource_items(source):
         "dimension": lambda: [("overworld", "主世界"),
                               ("the_nether", "下界"),
                               ("the_end", "末地")],
-        "item": lambda: [(x, IL.ITEM_CN.get(x, x)) for x in IL.ITEM_IDS],
+        # 物品：过滤后的真实 id（ITEM_IDS 含 928 个翻译键条目）
+        "item": IF.item_items,
     }
     fn = m.get(source)
     return fn() if fn else []

@@ -5613,32 +5613,88 @@ specialValueText 处理，可选浮点恒返回 0.0，导致
 `item.modifier`（数据包战利品修饰符）、`attribute.id`（修饰符自定 id）、
 选择器与坐标（预设 + 可编辑下拉已覆盖常见情形）。
 
-### NBT 编辑弹窗（nbt_dialog.py）
+### NBT 编辑弹窗（nbt_dialog.py）—— 全内联编辑版
 
-- **左：树形编辑**（键/类型/值三列；类型可下拉切换
-  compound/list/byte…；添加子项/删除/添加到根）
-- **右上：SNBT 原文**（随树实时同步；可粘贴外部 NBT 后点
+- **三列全部内联**：键（QLineEdit）、类型（QComboBox）、
+  值（随类型变化的控件）**直接操作**，不再「双击 → 弹窗 → 确定」
+  三步。值控件按类型分配：byte/short/int → QSpinBox（上下箭头）；
+  long → 输入框 + 19 位数字正则校验；float/double → 输入框 +
+  QDoubleValidator（C locale，接受小数点）；string → 输入框；
+  compound/list/数组 → 只读摘要（`{N 项}` / `[N 项]`）
+- **快速添加**：内置常用标签库 `QUICK_PRESETS`（通用实体 17 项 /
+  盔甲架 4 项 / 容器 3 项），每项带正确键名、类型、默认值，选中即
+  插入 —— `HandItems` 等直接带出 `{id,count}` 元素（1.20.5+ 的
+  **小写 count**）；值以 SNBT 文本书写、经 `parse_snbt` 得到结构，
+  与「粘贴解析」走同一条路
+- 右键菜单：添加子项 / 添加兄弟 / 复制节点 / 上移 / 下移 / 删除；
+  底部同名按钮；Del 键删除
+- 重复键与空键**红色高亮**（`_mark_bad_keys`）；查找框回车定位
+- 列表/数组子项自动重编号（删除中间元素后 0..n）
+- 左：树形编辑；右上：SNBT 原文（随树实时同步；可粘贴外部 NBT 后点
   「解析到树」反向进入树形编辑）
+- **键名中文说明**：所有英文键名（NoAI、Invulnerable、CustomName、
+  Health、HandItems 等 100+ 项）鼠标悬停时浮现中文说明
+  （`nbt_key_cn.py`），编辑键名时 tooltip 同步更新；
+  列表元素（无键名）与未知键名 tooltip 不报错
+- **药水与药水箭中文名**：`POTION_CN`（46 个，含长效/强烈变体）与
+  `ARROW_CN`（25 个）全部有中文译名，来源为 MC jar 的 `zh_cn.json`；
+  生成器 `gen_resources.py` 仅处理效果/实体/群系，药水/药水箭为手动维护
+  （因 ID 命名规则与 jar 的 `potion.effect.*` 键名不完全一致）
+- **物品清单过滤（item_filter.py）**：`item_list.ITEM_IDS` 取自 jar 的
+  lang 键全集，其中 **928 个是翻译键**（`banner.base.black`、
+  `potion.effect.awkward`、`tipped_arrow.effect.fire_resistance` 等），
+  **不是物品 id** 且无中文名。真实物品 id 不含 `.`，共 **1708 个**。
+  所有物品下拉统一走 `item_filter.REAL_ITEM_IDS` / `item_items()`。
+  另有 `ITEM_ICONS`（图标文件名集合）键空间又不同，含 132 个药水/箭
+  图标变体（`potion_awkward`…），只可用作「有图标的排前面」的排序权重，
+  **不可当物品 id**。早先把它直接并进 give 下拉，导致 2769 项里混着
+  假条目且显示不出译名（已修，现为 1708 项）。
+- **目标选择器可视化构建器**：所有 `targets` 字段（kill / effect / give / tp 等）
+  不再手写 `@e[type=zombie,distance=..10]` —— 用**下拉 + 参数行 + 实时预览**：
+  选择器类型（@p/@a/@e/@r/@s）+ 18 个预设（一键插入常用选择器）+ 20 种参数
+  （type/name/tag/team/x/y/z/distance/level/gamemode/limit 等），
+  参数值按类型分配控件（实体下拉 / 整数步进框 / 范围校验 / 游戏模式枚举），
+  实时预览 + 复制；解析与重建由 `target_selector.py` 统一处理
+- **参数标签格式**：改为 `key（中文）` 格式（如 `type（实体类型）`），
+  与 NBT key 显示格式统一
+- **可选字段标识**：可选参数值控件显示「可选」——
+  QLineEdit placeholder = `可选（提示）`、QSpinBox specialValueText =
+  `可选`、QComboBox 首项 = `可选`（data=""）
+- **NBT key 显示**：键列 QLineEdit 显示 `key（中文）` 格式（如
+  `NoAI（禁用 AI）`），序列化时自动提取 key 部分；
+  编辑键名时 tooltip 同步更新中文说明
 - SNBT 解析为**简化递归下降**（覆盖复合/列表/数组/带后缀标量/
   引号字符串/转义），不追求完整 NBT 规范
 
-**实现中的四个坑**（均有探针断言）：
+**实现中的坑**（均有探针断言）：
 
 1. **空后缀 `in` 陷阱**：`sfx in "bB"` 当 `sfx=""` 时恒 True，
    导致 `{a:1}` 被解析成 byte（`Pos:[1.5,2,3]` 全变 byte）。
    必须用 `==` 逐个判断。
-2. **int 无后缀**：SNBT 裸整数即 int，回写时漏了 int 分支落到
-   `_esc()` 变成 `"1"`。
+2. **int 无后缀**：SNBT 裸整数即 int；int 也在 `INT_RANGES` 里，
+   序列化时**必须先判 `int` 再查 `_NUM_SUFFIX`**，否则 KeyError。
 3. **数组 kind 大小写**：`to_tree_items` 写的是 `intarray`（小写），
    `tree_to_snbt` 却用 `startswith("intArray")`（驼峰）匹配，
    数组被当空标量输出 `""`。
 4. **根复合重复包层**：`load_text` 调 `to_tree_items(dict, root)`
    会再造一层 "{}" 节点（树显示 `{}:{id:...}`）——根本身就是复合，
    应把键值对直接挂到 root 下。
+5. **long 的精度**：解析 `9223372036854775807L` 走 `int(float(x))`
+   会丢精度变成 …808 —— 整数字符串必须 `int(num)` 直取。
+6. **`removeChild` 会销毁该 item 的 setItemWidget 控件**（Qt 接管
+   所有权）：「先 append 再 removeChild/insertChild 重排」的写法
+   会让重排后的行 **itemWidget 全变 None**。行必须**用 `at=` 直接
+   `insertChild` 到最终位置**，之后不再移动。
+7. **漏写槽方法 = 静默失效**：类型下拉 connect 到
+   `self._on_type_changed(item)` 而该方法没写，切换类型**不报错、
+   只是不生效**（PySide6 吞掉 AttributeError）。信号连接与方法
+   必须成对检查。
 
-`probe_nbt_parse.py`（幂等回写 + 错误输入报错）与
-`probe_nbt_e2e.py`（弹窗打开 → 树内改值/加子项 → 确定 → 回填 →
-give 输出联动）覆盖全部路径。
+`probe_nbt_parse.py`（幂等回写 + 错误输入报错）、
+`probe_nbt_easy.py`（快速添加 / 内联改值 / 类型切换 / 重复键标红 /
+重编号 / 上移下移 / 查找 / 真实按钮点击 / 端到端）与
+`probe_nbt_e2e.py`（summon 弹窗 → 内联改值 → 快速添加 → 确定 →
+回填 → 输出联动）覆盖全部路径。
 
 ### 关键语法结论（逐条核对 1.21.11 反编译源码）
 
