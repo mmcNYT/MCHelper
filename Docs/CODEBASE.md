@@ -3402,12 +3402,12 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 3. **程序化合成（5 键）**：`_PROC_BUILDERS` 分发表按原版形体规则合成——monument（58x58 基座 + 23 根 2x2 错列巨柱 y-8..-1 + 中央主体 23x22 + 前部高塔含南面 3x3 主入口与 penthouse 海晶灯顶 + 东西两翼及翼顶小塔 + 金块藏宝室示意）、swamp_hut（4 根橡木桩架空的 5x6 云杉板小屋 + 南门前平台 + 炼药锅/工作台）、village（中央水井：圆石框+砾石示意水+四角原木柱+石砖檐口顶盖；四角复用真实模板 `village__plains__houses__plains_medium_house_1.nbt` 平移拼入，整体 54x40）、trial_chambers（40x40x20 全封闭凝灰岩砖箱体 + 中央决斗室 + 三层柱廊 + 外墙铜格栅饰带 + 四角氧化铜方柱）、desert_pyramid（wiki 逐层蓝图数据驱动：`_DESERT_LAYERS` 存层号 -14..10 共 22 层 21x21 字符画，`_DESERT_CHAR_MAT` 字符→纹理键；羊毛字符按 wiki 生成规则替换——W=塌顶 25 块按 `(x*7+z*13)%3` 确定性 33% 砂岩/67% 沙、G=沙/砂岩互斥对不建、R=暗室埋沙 83 块→sand；含地下暗室 TNT9/箱4/压力板1）。
 4. **WorldEdit .schem（Sponge Schematic v2/v3，3 键）**：`_voxels_from_schem_file` 兼容 v2 平铺字段与 v3 `root["Schematic"]["Blocks"]` 收纳布局；方块数据为 YZX 顺序 varint palette 索引（`_read_schem_varint`：1..3 字节小端 7 位组，最大 21 位，-1 按 21 位补码解出 `0x1FFFFF` 自然查表跳过）；palette 名 `minecraft:xxx[k=v,...]` 由 `_schem_base_and_type` 拆基名与 props；`_MAT_MAP=None` 与 `_SCHEM_ENV_FILTER` 命名方块不保留也不参与包围盒；最后把保留体素的最小角平移到 `(0,0,0)`（框选"宁大勿小"混入的纯空边经重定基剔除）。文件存在时优先于程序化结果，缺失回退。
 
-**build_mesh 网格化流程**：把体素字典转为 `{"verts", "idx", "slots", "slot_mat", "quad_slot", "water_off", "water_count", "chunks", "occl"}`。要点：
+**build_mesh 网格化流程**：把体素字典转为 `{"verts", "idx", "slots", "slot_mat", "quad_slot", "trans_off", "trans_count", "chunks", "occl"}`。要点：
 - **形状感知面剔除**：面剔除采用"共面 + 投影覆盖"精确判据（`_rect` 投影 + `_covered` 覆盖判定，容差 1e-9）——只有本 AABB 贴格界、且邻居在同格界处有贴界面完全遮盖本面投影时才剔（修复半砖/楼梯下方看穿）；同方块内其他 AABB 同侧同平面完全覆盖时剔小面（内容相等者除外，避免完全重合面互剔全光）；透明材质 `_TRANSPARENT_MATS` 异材不剔（透过水/玻璃/冰可见）；ladder 作为邻居时不剔所贴墙面（否则梯子看似悬空）。
 - **性能优化**：体素值级缓存（`_mat_shape` 归一化、基础 AABB、邻居贴界面矩形，键均为可哈希体素值）；整格实心体素若六邻全为整格实心非透明则整体跳过（bastion 实测 ~60% 命中，面迭代 -60%）；post/pane/wall 连通臂随邻居变化逐位现算（`_boxes_with_arms` 用 `bs.connect_kind`/`bs.connect_arms`）。
 - **特殊形状路径**：plant（SHAPE_PLANT）走 `_PLANT_QUADS` 对角 X 四 quad 专用路径（绕序 CCW 正面、法线 (0,0,±1)、UV 世界平铺）；活塞头轴盒端面官方无 faces → `_SKIP_FACE` 哨兵完全不 emit。
-- **面级纹理分流**：每面经 `_face_mat`（→ 尾部委托 `_decor_face_mat`）返回 `(纹理键, rect)`：箱子（单箱朝向面基键 / 大箱左右半按 `big_end=((typ=="left")==(f in("n","e")))` 取半窗合成图）、barrel（顶/底专用图）、`col:<axis>`（`_COL_ENDS` 轴端面，原木年轮/玄武岩顶）、`fc:<f>[:lit]`（`_FC_FACES` 炉族前脸/亮前脸/竖直前脸）、`_FULL_FACES` 整格分面（草方块/书架/耕地等独立顶底图）、crafting table 特例（无朝向属性，north/west 固定前脸）、bell/composter 按盒特征（box 参数）区分柱/梁/钟体与壁/底板；装饰族（torch 三级台阶段、lantern 顶盖/主体、erod 底座/杆、brewing 三分窗、bed 枕带分区窗含 e/w swap、dhead 龙首 5 面、wsign 板盒正面窗、pist/pisth、candle、flowerpot、sculk、repeater/comparator、lamp、rswire）全部按官方模型 JSON uv 像素窗换算（`_RU`/`_RS`：up 面 v=(1-b,1-d)、down/侧面 v=(1-d,1-b)，u=(a,c)，像素/16 归一化）。
-- **输出组织**：同材质面聚合为绘制槽（slots = `(idx_start, idx_count)` 区间 + `slot_mat`），未知材质单独成槽（视口回退灰色）；水槽不注册常规槽、索引强制垫到尾部（`water_off/water_count`，视口半透明第二遍绘制；字母序下 water 插中部会让 quad_slot 物理对位错位，如 trial 的 water<white bed）；quad 按 16³ chunk 分桶重排（排序键 = chunk 首现序：`np.unique` + `np.argsort(first)` + `np.searchsorted` 稳定排序，chunk 序号与遮挡域共用一套物理序）；每 chunk AABB 由 quad 4 角顶点推出（必须取齐 4 角，两角会退化成一条线导致视锥剔除误删整 chunk）；每 quad 所在方块坐标（法线轴取朝面一侧 ceil-1/floor、其余轴 4 角 min floor，保证分桶与遮挡域体素格划分一致）；`quad_slot` 供烘焙，索引按总量选 uint16/uint32。
+- **面级纹理分流**：每面经 `_face_mat`（→ 尾部委托 `_decor_face_mat`）返回 `(纹理键, rect)`：箱子（单箱朝向面基键 / 大箱左右半按 `big_end=((typ=="left")==(f in("n","e")))` 取半窗合成图；大箱**顶面**另走显式 UV 窗 `" top double"`——官方 `normal_left/right` 图集的盖顶仅**接缝缘**无暗边，而世界平铺 UV 下接缝方向随朝向变（n/s 在列、e/w 在行）且两半接缝侧相反，同一张平铺图无解，故用 `_CHEST_TOP_ROT` 把接缝边钉到 u=0 木纹列、外侧边到 u=1 暗缘列，窗取半纹素内缩 `_CHEST_TOP_UV_INSET` 避免 `fract()` 在 u=1.0 折回列 0）、barrel（顶/底专用图）、`col:<axis>`（`_COL_ENDS` 轴端面，原木年轮/玄武岩顶）、`fc:<f>[:lit]`（`_FC_FACES` 炉族前脸/亮前脸/竖直前脸）、`_FULL_FACES` 整格分面（草方块/书架/耕地等独立顶底图）、crafting table 特例（无朝向属性，north/west 固定前脸）、bell/composter 按盒特征（box 参数）区分柱/梁/钟体与壁/底板；装饰族（torch 三级台阶段、lantern 顶盖/主体、erod 底座/杆、brewing 三分窗、bed 枕带分区窗含 e/w swap、dhead 龙首 5 面、wsign 板盒正面窗、pist/pisth、candle、flowerpot、sculk、repeater/comparator、lamp、rswire）全部按官方模型 JSON uv 像素窗换算（`_RU`/`_RS`：up 面 v=(1-b,1-d)、down/侧面 v=(1-d,1-b)，u=(a,c)，像素/16 归一化）。
+- **输出组织**：同材质面聚合为绘制槽（slots = `(idx_start, idx_count)` 区间 + `slot_mat`），未知材质单独成槽（视口回退灰色）；半透明材质槽不注册常规槽、索引强制垫到尾部（`trans_off/trans_count`，视口第二遍绘制；字母序下 water 插中部会让 quad_slot 物理对位错位，如 trial 的 water<white bed）；quad 按 16³ chunk 分桶重排（排序键 = chunk 首现序：`np.unique` + `np.argsort(first)` + `np.searchsorted` 稳定排序，chunk 序号与遮挡域共用一套物理序）；每 chunk AABB 由 quad 4 角顶点推出（必须取齐 4 角，两角会退化成一条线导致视锥剔除误删整 chunk）；每 quad 所在方块坐标（法线轴取朝面一侧 ceil-1/floor、其余轴 4 角 min floor，保证分桶与遮挡域体素格划分一致）；`quad_slot` 供烘焙，索引按总量选 uint16/uint32。
 - **build_occlusion**：逐 16³ section 可见性矩阵，移植自 1.21.11 反编译源码（VisGraph.resolve + SectionCompiler.compile 同款，MC 洞穴剔除构建期算法）：opaque 格标阻挡 → 从 6 个外表面边缘空格 flood fill → 每空域记录接触到的外表面方向 → 6×6 bool 矩阵（36 位 int，`face_from*6+face_to` 位，同空域接触的两面互相可见）；特例 opaque<256 全 true、≥4096 全 false；方向用原版 `Direction.values()` 序 (0=-Y,1=+Y,2=-Z,3=+Z,4=-X,5=+X)；输出附 `chunk_at`（section 键 → chunks 列表下标，键用"面所属格"而非 AABB min，避免跨层平面 quad 抢注键导致室内成片缺渲染）。
 
 **缓存机制**：两层。① `build_model` 层：模块级单条缓存 `_CACHE = {"key": None, "model": None}` + `threading.Lock`（`_CACHE_LOCK`），键 `(key, variant)`，切换零成本复用，返回 `{"key","variant","voxels","size","mesh","tex_keys"}`；② jigsaw_assembly 侧模板/池缓存独立（见下节）。另 `pool_max_yspan` 等在各自对象上缓存。
@@ -3459,14 +3459,14 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `build_model` | `build_model(key: str, variant: int \| None = None) -> dict` | 构建并返回模型 dict（`(key, variant)` 单条缓存 + 线程锁）：`build_voxels` → `build_mesh` → `tex_keys`（`_mat_shape` 取纹理位排序去重）。返回 `{"key","variant","voxels","size","mesh","tex_keys"}`。 |
 | `tex_keys_used` | `tex_keys_used(model: dict) -> list` | 模型用到的纹理键（`halfheight:` 前缀去前缀），排序返回。 |
 | `_mat_shape` | `_mat_shape(v) -> tuple` | 体素值 → (基纹理键, 形状码\|None)：元组直取（门上半 `door:u:*` 且基键以 `" door bottom"` 结尾时换 `" door top"`）；旧 `halfheight:` 前缀字符串 → (去前缀, SHAPE_SLAB_BOT)；非字符串 → UNKNOWN_MAT。 |
-| `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell（柱/梁/吊杆精确 uv + 钟体 32x32 实体盒窗）/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。 |
+| `_face_mat` | `_face_mat(mat: str, shape: str \| None, normal: tuple, box: tuple \| None = None) -> tuple` | 按面分流纹理，返回 (纹理键, rect)。rect = 图归一化窗 `(u0,v0,u1,v1[,swap[,rot]])`（官方 JSON uv 像素按 FaceInfo 顶点配对换算），None = 基键全图。依次处理 chest/barrel/col/fc 形状族、bell（柱/梁/吊杆精确 uv + 钟体 32x32 实体盒窗）/composter（按 box 特征）、crafting table 特例、`_FULL_FACES` 分面，装饰族委托 `_decor_face_mat`。大箱顶面（`typ in (left,right)` 且材质在 `_CHEST_DOUBLE_TOP`）返回 `" top double"` + 全图窗 + `_CHEST_TOP_ROT[(facing, typ)]` 的 rot，接缝边钉到 u=0。 |
 | `_RU` / `_RS` | `_RU(a,b,c,d)` / `_RS(a,b,c,d)` | 官方模型 JSON 像素窗 → 归一化窗换算：up 面 `v=(1-b,1-d)`；side/down 面 `v=(1-d,1-b)`；u=(a,c)；除以 16。 |
 | `_decor_face_mat` | `_decor_face_mat(mat, kind, rest, normal, box) -> tuple` | 装饰方块（新形状码族）按面分流：rswire（世界平铺自动命中）、thook（多盒按最小维度分流：0.5px 绊线段→tripwire / 0.8px 钩件→基键 tripwire hook / 1.4px 横臂与背板→oak planks）、repeater/comparator（底板 smooth stone / 火把柱 redstone torch off）、sculk（底座/触须）、lamp（lit 两态）、pist（platform/bottom/side）、brewing（底板三分窗+杆）、flowerpot（壁侧横带+内底 dirt）、candle、torch（立式 + 墙上斜杆三级台阶段按段等分杆身带）、lantern（顶盖/主体盒）、erod（底座/杆盒）、dhead（龙首 5 面）、bed（顶面枕带/毯区分区窗，e/w 走 swap）、wsign（板盒正面窗）、pisth（平台/轴盒；轴端面返回 `_SKIP_FACE` 不生成）、lectern。 |
 | `_rect` | `_rect(b: tuple, axis: int) -> tuple` | AABB 在 axis 法向平面上的投影矩形（x 面投影 (z,y)、y 面 (x,z)、z 面 (x,y)）。 |
 | `_covered` | `_covered(inner: tuple, outer: tuple) -> bool` | 投影矩形 inner 是否被 outer 完全覆盖（容差 1e-9）。 |
 | `_boxes_with_arms` | `_boxes_with_arms(vox: dict, pos: tuple, shape) -> list` | 某位置形状的完整 AABB 列表：post/pane/wall 按四向邻居 `bs.connect_kind` + `bs.connect_arms` 补连通臂；自身面生成与邻居贴界面矩形共用，保证接缝判定对称。 |
 | `build_occlusion` | `build_occlusion(vox: dict) -> dict` | 逐 16³ section 可见性矩阵（1.21.11 反编译 VisGraph/SectionCompiler 移植）。输出 `{"sections": {(sx,sy,sz)->matrix}, "bounds": (...)}`，matrix 为 36 位 int（`face_from*6+face_to` 位，1=可见）；opaque<256 全 true、全实心全 false；从 6 外表面边缘空格 flood fill，空域接触方向对双向置位。 |
-| `build_mesh` | `build_mesh(vox: dict, burial_volume: set \| None = None) -> dict` | 体素 → 绘制网格（流程见上文"功能"）。返回 verts（8 列 x,y,z,u,v,nx,ny,nz）、idx、slots/slot_mat、quad_slot、water_off/water_count、chunks（含 AABB）、occl（含 chunk_at）。`burial_volume` = 深埋结构的体积格集（试炼密室件盒并集）：邻格不在其中一律视作外围实心石层——结构外表面整片剔除、整格埋没体素走内部快速跳过，**不生成岩体几何**；缺省 None = 旧行为逐字节不变。 |
+| `build_mesh` | `build_mesh(vox: dict, burial_volume: set \| None = None) -> dict` | 体素 → 绘制网格（流程见上文"功能"）。返回 verts（8 列 x,y,z,u,v,nx,ny,nz）、idx、slots/slot_mat、quad_slot、trans_off/trans_count、chunks（含 AABB）、occl（含 chunk_at）。`burial_volume` = 深埋结构的体积格集（试炼密室件盒并集）：邻格不在其中一律视作外围实心石层——结构外表面整片剔除、整格埋没体素走内部快速跳过，**不生成岩体几何**；缺省 None = 旧行为逐字节不变。 |
 | `_box_face` | `_box_face(b: tuple, normal: tuple) -> tuple` | AABB 上法线为 normal 侧的面四角（世界相对本地坐标，绕序与 `_FACES` 角点布局同构 = 面法线朝外）。 |
 | `_emit_quad` | `_emit_quad(arr, idx, x, y, z, quad, normal, rect=None) -> None` | 四角 quad + 法线入槽 + 双三角索引。rect=None：UV 世界平铺（顶面 u=x,v=z；x 面 u=z,v=y；z 面 u=x,v=y）；非 None：窗内按面内归一化坐标线性插值（窗可反向；swap=True 轴交换，床顶 e/w 用）。 |
 
@@ -3678,6 +3678,9 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | （内联码）`thook:<贴边>[:a]` / `twire:<n>:<s>:<e>:<w>` / `vine:<dir>[+<dir>]` / `lever:<贴边\|up\|down>` | 无 SHAPE_ 常量（pyramid 等调用方逐方块生成） | 绊线钩（官方多盒几何 + `:a`=attached）/ 绊线 0.5px 细线 / 藤蔓贴边薄面片 / 拉杆官方底座+斜杆 |
 | `_FACING_ABBR` | dict | `north/south/east/west` → `n/s/e/w` |
 | `_CHEST_LEFT_OF` | `{"n":"w","e":"n","s":"e","w":"s"}` | 大箱 left 半所在方向（facing 逆时针 90°） |
+| `_CHEST_TOP_ROT` | `{(facing, half): rot}` | 大箱顶面 UV 窗的面内 rot（把接缝边钉到 u=0 木纹列）：n/left=1、n/right=0、s/left=0、s/right=1、e/left=3、e/right=2、w/left=2、w/right=3 |
+| `_CHEST_DOUBLE_TOP` | `frozenset({"chest", "trapped chest"})` | 走大箱专用顶面（显式 UV 窗）的材质键；末影箱无大箱形态故不在表内 |
+| `_CHEST_TOP_UV_INSET` | `0.5/16` | 大箱顶面 UV 窗半纹素内缩量（窗取满 (0,1) 会被着色器 `fract()` 在 u=1.0 折回列 0，致接缝与外侧同采木纹列） |
 | `_MIRROR_KIND_FACE` | dict | kind → 朝向字母在码中的下标（`bed`=1、`door`=2、多数=0；不在表 = 无朝向语义） |
 | `_ROT_FACE` | 4 元组 dict | 旋转 0..3 的 facing 映射（rot1: n→e/s→w/e→s/w→n，与 cubiomes 放置旋转一致） |
 | `_OPPOSITE` | `{"n":"s","s":"n","e":"w","w":"e"}` | 面板贴边反侧表 |
@@ -3725,7 +3728,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 ### 坐标与数据约定
 - 体素 `(x,y,z)` 直接作世界坐标：x 西→东、z 北→南、y 向上；`(0,0,0)` = 包围盒西北角底部 = cubiomes 生成锚点（monument 特例：锚点 = 结构中心）。y-up 右手系，`QMatrix4x4.perspective`。
-- 模型来自 `structure_models.build_model(key, variant)`（共享顶点网格 dict，含 `mesh/voxels/size/chests` 等），或由 `set_model` 低层注入（StructurePreviewer 的 `composition` 组装 `compose_display_model + build_mesh` 产物，可带 `anchor_local=(ax,az)` 与 `chunk_origin=(gx0,gz0)` 覆盖字段；深埋结构（试炼密室）的外壳面已在 `build_mesh` 阶段整片剔除，模型不再附加任何额外字段）。`mesh` 关键字段：`verts`（8 列 float：pos3+uv2+normal3）、`slots`（材质槽计数表）、`slot_mat`（槽→材质键）、`idx`（numpy uint16/uint32 索引，水索引在尾部）、`quad_slot`（quad→槽号表）、`chunks`（16³ chunk 重排 `[(idx_off, idx_count, AABB min3, max3)...]`）、`occl`（逐 section 可见性矩阵：`bounds/sections/chunk_at`）、`water_off/water_count`。
+- 模型来自 `structure_models.build_model(key, variant)`（共享顶点网格 dict，含 `mesh/voxels/size/chests` 等），或由 `set_model` 低层注入（StructurePreviewer 的 `composition` 组装 `compose_display_model + build_mesh` 产物，可带 `anchor_local=(ax,az)` 与 `chunk_origin=(gx0,gz0)` 覆盖字段；深埋结构（试炼密室）的外壳面已在 `build_mesh` 阶段整片剔除，模型不再附加任何额外字段）。`mesh` 关键字段：`verts`（8 列 float：pos3+uv2+normal3）、`slots`（材质槽计数表）、`slot_mat`（槽→材质键）、`idx`（numpy uint16/uint32 索引，水索引在尾部）、`quad_slot`（quad→槽号表）、`chunks`（16³ chunk 重排 `[(idx_off, idx_count, AABB min3, max3)...]`）、`occl`（逐 section 可见性矩阵：`bounds/sections/chunk_at`）、`trans_off/trans_count`。
 
 ### 渲染管线（paintGL 全流程）
 1. **视口与清屏**：`glViewport(width*dpr, height*dpr)`，`glClear(0x4100)`（COLOR|DEPTH），清屏色 `#2B2F36`。
@@ -3733,27 +3736,47 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 3. **惰性上传**：`_needs_upload` 且 `_render_failed` 为假时在 GL 上下文内调 `_upload_model()`；异常走 `_handle_render_failure`（停渲染 + 复位按钮 + 发 `render_error` 信号；强制 `glDepthMask(1)` 防水阶段失败后深度写入永久关闭；`_render_failed` 拦后续帧重试防刷屏，切结构/变种时重置）。
 4. **矩阵**：`proj.perspective(_SP_FOV=85°, aspect, 0.5, 4000.0)`；`view.lookAt`——旁观模式 `eye → eye+dir`（up=(0,1,0)），环绕模式 `eye_pos() → center+pan`。
 5. **模型主体** `_draw_model_body(mvp, occl_cells)`：
-   - 图集槽原点已烘焙进顶点属性 `aTile`（上传期 `_bake_tile_origin` 一次性 numpy 向量化），运行时无逐槽 uniform；`uModel`（恒单位阵）/`uLightDir` 状态驻留（initializeGL 写一次）。
+   - 图集槽号与帧数已烘焙进顶点属性 `aTile`（上传期 `_bake_tile_origin` 一次性 numpy 向量化），运行时无逐槽 uniform；每帧仅设 `uFrame`（流体帧号）；`uModel`（恒单位阵）/`uLightDir` 状态驻留（initializeGL 写一次）。
    - **深埋结构（试炼密室）**：不做任何渲染期特判——`build_mesh` 已按结构体积集把外壳面整片剔除（见下节），视口只画收到的网格；从任意位置（结构外/内）都直接看到内部。
    - **chunk 视锥剔除**：`mesh["chunks"]` 每帧做 6 平面 p-vertex 判定（平面 = MVP 行向量组合：`row_i±row_3`），全部 chunk 一次性 numpy 向量化（每帧 6×N 次点积）；视锥外 chunk 整段不提交——FS 有 alpha discard（树叶/玻璃）early-z 不可用，被剔 chunk 同时省顶点与填充。**可见连续 chunk 合并成一段 draw**（`np.diff` 找段边界，draw call 数 = 可见段数而非 chunk 数）。
    - **旁观模式遮挡剔除** `occl_cells`：`_occl_cells_for_eye()` 移植自 1.21.11 反编译源码 `SectionOcclusionGraph.runUpdates`（MC 洞穴剔除运行期同款）——眼在实心整格（`_occl_opaque`，整格且非 `sm._TRANSPARENT_MATS`）返回 None = 全渲染（游戏 `isSolidRender` 时 smartCull=false 同款）；眼在空气格从眼 section 做 section 级 BFS：种子无条件可见且 6 向传播（源码 initializeQueue 无 sourceDirection 跳过 facesCanSeeEachother 检查），后续传播到方向 e 要求存在来向 d 使当前 section 矩阵 `facesCanSeeEachother(d.opposite, e)`（bit = `OPP[d] + 6*e`，门窗空域自然连通）；界外 section 视作未加载阻断（否则沿界外空 section "高速路"绕过实心 section，密封房间剔除失效——视线管探针实证）；结果按眼 section 缓存。与视锥结果取交集（`np.isin`；满集跳过、空集全剔）。近→远排序绘制经真窗口 A/B 实测无收益甚至略亏，不采用。
    - draw 经 **ctypes 原生 `glDrawElements`**（见下节兼容性）：`0x0004`（GL_TRIANGLES）+ `self._idx_type` + `c_void_p` 字节偏移。
    - 无 chunk 数据（旧 mesh/低层注入）回退单次全量 draw（水区间在索引尾部被排除）。
 6. **线框层** `_draw_guide_lines(mvp)`（不受渲染开关影响，锚点/区块是逆推核心信息）：`_plain` 简写着色器（aPos+uMVP+uColor）画三组线——①区块黄框（`GL_LINES` 1.5px，y=min_y-0.02 贴地微降防 z-fighting；只画结构足迹覆盖的区块格，每格输出 16×16 矩形四边，`_seen` 键去重共享边；网格相位 gx0/gz0 由锚点口径 mod 16 决定：monument 取 `(w/2,d/2) mod 16`、ANCHOR_OFFSETS 键取偏移 mod 16、注入模型用 `chunk_origin`、其余 (0,0)，世界对齐语义 = 锚点 ≡ 所在区块西北角）；②锚点无限红线（2.0px，`ext = max(w,d,h)*8+64` 上下延伸 + 地面十字 1×1 标精确点；位置口径：`sm.ANCHOR_CENTER_KEYS`(monument)→结构中心、`sm.ANCHOR_OFFSETS`(village 水井/trial_chambers 入口两水池)→偏移、注入模型 `anchor_local`、缺省 (0,0)）；③箱子高亮琥珀描边（`set_chest_highlights` 注入的 12 棱包围盒，跨度 1.1 = 体素外扩 0.05 防 z-fighting，惰性上传 `_chest_vbo`）。
-7. **水第二遍** `_draw_water(mvp)`：`_FS_WATER` 同图集采样输出 alpha 0.62；`glDepthMask(0)` 深度只读 + 关 `GL_CULL_FACE(0x0B44)` 双面绘制（防水下/斜视水侧被背向剔除误裁）；在网格线之后绘制（水面混合叠在线上，与游戏内俯视观感一致）；索引区间 `[water_off, water_off+water_count)`。
+7. **半透明第二遍** `_draw_water(mvp)`：`_FS_TRANS` 同图集采样（含流体帧动画换算）、按贴图 alpha 混合；`glDepthMask(0)` 深度只读 + 关 `GL_CULL_FACE(0x0B44)` 双面绘制（防水下/斜视水侧被背向剔除误裁）；在网格线之后绘制（水面混合叠在线上，与游戏内俯视观感一致）；索引区间 `[trans_off, trans_off+trans_count)`。
 8. **2D overlay**（QOpenGLWidget 仅允许在 paintGL 内开 QPainter，覆写 paintEvent 画属未定义行为会随机 0xC0000409）：QPainter 画开箱准星、左上图例（"红线 = 锚点（结构中心/西北角）"、"黄框 = 覆盖区块 (16×16)"）、底部操作提示（按模式/准星/锁定/调速残显态切换文案；变种键显示 `变种 k/n`）、右上 FPS（帧间 `perf_counter` 滚动均值 0.5s 刷一次防闪烁；低于 `_FPS_BAD_TH=30` 显红 `_FPS_BAD` 否则暗绿 `_FPS_OK`）。文字/准星硬边无抗锯齿（像素风对齐 + 省全窗口 AA pass 开销）。
 9. **连续渲染自驱动**：旁观模式且 tick/pin 定时器活跃时 `QTimer.singleShot(0, self.update)` 让出事件循环再调度下一帧——帧率 = min(GPU 能力, 合成节奏)，摆脱定时器精度钳制；paintGL 内直接 `update()` 实测会把 tick 从 248Hz 挤到 139Hz。静止/非交互态条件不满足自然停转，不空烧 GPU。
 
-### 纹理图集 `_build_atlas()`
-纹理目录 `TEX_DIR`（= `sm.TEX_DIR` = `assets/SeedReverser/textures/block`）全部 png 按**文件名排序**拼入 16 列 × 32 行 = 512 槽 RGBA 图集（`_ATLAS_COLS=16, _ATLAS_ROWS=32, _ATLAS_TEX=16`，1:1 不缩放；非 16×16 源 `scaled` 兜底）；槽 0 固定未知材质灰 `#9AA0A6`；槽位超限抛 ValueError 提示扩 `_ATLAS_ROWS`（注释实证：原 16×16=256 槽被 tuff bricks 槽 267 击穿，越界采样回绕导致 trial 外壳渲染成暖褐）。返回 `(QImage, {纹理键: 槽索引})`；`QOpenGLTexture` 用 Nearest 过滤 + ClampToEdge（像素风）。
+### 纹理图集 `_build_atlas(max_rows=None)`
+纹理目录 `TEX_DIR`（= `sm.TEX_DIR` = `assets/SeedReverser/textures/block`）全部 png 按**文件名排序**拼入 16 列 × N 行 RGBA 图集（`_ATLAS_COLS=16` 固定，`_ATLAS_TEX=16`，1:1 不缩放；非 16×16 源 `scaled` 兜底）；槽 0 固定未知材质灰 `#9AA0A6`。返回 `(QImage, {纹理键: 槽索引}, {材质键: 帧数})`；`QOpenGLTexture` 用 Nearest 过滤 + ClampToEdge（像素风）。
 
-### 顶点烘焙 `_bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx, quad_slot)`
-8 列顶点 → 10 列（尾部追加图集槽原点 `aTile` 二分格 uv）：主路径按 `quad_slot` 每 quad 4 顶点同 tile 查表；`halfheight:` 前缀材质与基材质共纹理（半高变体）；越界/无归属顶点 tile 兜底 (0,0)（灰）；`idx` 仅用于尾段水区间——按索引位置（主体 6/quad 之后）取引用值把水顶点 tile 覆盖为 `water` 槽原点；兼容路径（`quad_slot` 缺省的旧 mesh/低层注入）按"非空槽顺序填满"推归属；空 verts 返回 (0,10) 数组。
+**行数自动扩容**（历史：16×16=256 槽被 tuff bricks 击穿 → 越界采样回绕让 trial 外壳渲染成暖褐；16×32=512 槽又被流体动画帧块击穿 → 改为自适应）：
+- `_plan_atlas()` 产出铺图计划（含**去重**与动画帧展开），是与 `_build_atlas` 共享的唯一口径；
+- `_fit_atlas_rows(needed, max_rows)`：行数 = `max(_ATLAS_ROWS 下限, 需求)`，按 `_ATLAS_ROWS_STEP=8` 行向上对齐（给新增纹理留缓冲，避免每加一张就重建图集），超 `max_rows`（= `GL_MAX_TEXTURE_SIZE/16`，由 `_gl_max_texture_size()` 查询、失败回退 `_ATLAS_ROWS_MAX=1024`）抛 ValueError；
+- **静态贴图去重**：`_tile_key()` 对**后处理之后**（群系染色/提亮/缩放归一）的像素取指纹，同内容贴图共享同一槽——官方资源存在大量同图异名（`chest`=`trapped chest`、`furnace side`=`furnace`、`cobblestone slab`=`stairs`=`wall` 等），实测省 **55 槽**。只做静态↔静态去重，动画帧块不参与（否则静态材质会被指到帧块中间、随帧号漂移）。
+- **着色器常量随之派生**：槽高 1/行数**不能走 uniform**（float 被 PySide6 6.11 截断，见下），故 `_FS`/`_FS_TRANS` 里用 `__SLOT_H__`/`__SLOT_W__`/`__COLS__` 占位符，由 `_build_shader_sources(rows)` 在编译前格式化。
+
+### GL 初始化异常保护（`initializeGL`）
+`initializeGL` 整体 try 包裹并委托 `_initialize_gl_impl()`：初始化阶段任何异常（图集槽位超 GPU 上限、shader 编译/链接失败、驱动不兼容）若直接上抛到 Qt，`initializeGL` 会被中断（后续 shader/图集/缓冲全未建）→ 视口**空白黑屏**，且 `render_error` **不会发出**（`_handle_render_failure` 原先只覆盖 paintGL 路径），属静默失败、极难排查。现统一转成明确的 `render_error` 文案（如「3D 渲染初始化失败：纹理槽需求 29 行（464 槽）超出 GPU 图集上限 16 行…」）+ 置 `_gl_ready=False`；`paintGL` 开头新增 `_gl_ready` 守卫——初始化半途失败时 `_native_glDrawElements` 等可能未建，继续绘制会二次崩溃（空指针调用），故直接返回、保持清屏色。shader 编译另用 `link()` 返回值校验并带出 `log()`。
+
+### 流体动态纹理
+官方流体贴图是**帧条**（`water_still` 16×512 共 32 帧、`lava_still` 16×320 共 20 帧，`.mcmeta` 均 `frametime=2` = 10 帧/秒）。旧实现对非 16×16 源一律 `copy(0,0,16,16)` 取首帧（本意是给 prismarine/海晶灯/切石机做静态展示），流体因此永远静止。
+
+实现要点：
+- **素材**：官方帧条原样提取为 `water still.png` / `lava still.png`（`_ANIM_STRIP_KEYS`），**不覆盖** 既有 16×16 `water.png`/`lava.png`（`structure_preview._tex_pixmap` 方块预览仍按 16×16 直读，替换会连带回归）。帧条源文件自身不单独占槽。
+- **帧块**：`_ANIM_MATS`（材质键 → (帧条键, 是否来回摆动)）把帧条按**连续槽**铺进图集，材质键的槽号 = 帧块**首槽**；`anim[材质] = 帧数`。岩浆官方帧序是显式 `[0..19,18..1]`（来回摆动 38 帧），由 `_anim_frame_order()` 在**烘培期展开**（shader 只做线性推进，不塞帧序表）。
+- **水色预染**：官方水帧条是**灰度**（游戏内按群系 tint），项目既有 `water.png` 已预染。逐像素反推实证 tint = `_WATER_TINT` = `#3F76E4`(63,118,228)：官方帧0 × tint/255 与项目图 250/256 像素相同、最大误差 1（纯取整差）。故动画帧在烘培期 `_tint_grayscale(frame, _WATER_TINT)`，否则水会失色成灰白。
+- **`aTile` 语义**：由「归一化槽原点」改为 `(基准槽号, 帧数)`——着色器按槽号自行换算行列，帧偏移才能在块内 `mod` 而不跨行回绕。帧数 0 = 静态（不做偏移）。
+- **着色器**：`_FS`/`_FS_TRANS` 均新增 `uniform int uFrame`，`slot = vTile.x + (vTile.y > 0.5 ? mod(float(uFrame), vTile.y) : 0)`，再 `tile = (mod(slot,COLS)*SLOT_W, floor(slot/COLS)*SLOT_H)`。`SLOT_H`（1/实际行数）、`SLOT_W`、`COLS` 为编译期常量占位符，由 `_build_shader_sources(rows)` 按自动扩容后的行数格式化。**`uFrame` 必须是 int**：PySide6 6.11 的 `setUniformValue(int, float)` 重载歧义会截断小数（与 `SLOT_H` 不走 uniform 同一根因）。
+- **时钟**：`_anim_timer`（`_ANIM_MS=100`）递增 `_anim_frame` 并 `update()`。**仅当模型含动态材质才启动**（`_anim_active` 在 `_upload_model` 里按 `slot_mat ∩ _ANIM_MATS` 判定），无流体不烧 CPU；`hideEvent → _stop_spin_timers` 停、`showEvent` 按 `_anim_active` 恢复、换模型重置帧号。性能实测：stone 237 FPS vs water 240 FPS（动画开销不可测）。
+
+### 顶点烘焙 `_bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx, quad_slot, anim)`
+8 列顶点 → 10 列（尾部追加 `aTile`）：主路径按 `quad_slot` 每 quad 4 顶点同 tile 查表；`halfheight:` 前缀材质与基材质共纹理（半高变体）且**帧数取基材质的动画配置**；越界/无归属顶点 tile 兜底 (0,0)（灰）；兼容路径（`quad_slot` 缺省的旧 mesh/低层注入）按"非空槽顺序填满"推归属；空 verts 返回 (0,10) 数组。**`aTile = (基准槽号, 帧数)`**（`anim` 表由 `_build_atlas` 提供；静态材质帧数 0）——旧实现存归一化槽原点，改为槽号是为了让着色器能在帧块内做 `mod` 取帧而不跨行回绕。
 
 ### 着色器（GLSL 120）
 - `_VS`：attribute `aPos/aUV/aNor/aTile`（显式 `bindAttributeLocation` 绑 0/1/2/3——不绑则驱动分配顺序不保证，环境变化会让 `_upload_model` 硬编码 index 3 错位），varying `vUV/vNor/vTile`；`vNor = mat3(uModel) * aNor`。
-- `_FS`：`fract(vUV)` 世界坐标平铺 → 半像素 clamp（pad = 0.5/16 防渗色）→ `vTile + (tileUV.x*SLOT_W, (1-tileUV.y)*SLOT_H)` 映射槽内采样；`tex.a < 0.5` discard（树叶/玻璃镂空）；光照 = `max(dot(N, L), 0)` 方向光 + 环境项 0.42（`col = tex.rgb * (0.42 + 0.58*diff)`）。`SLOT_W=0.0625`/`SLOT_H=0.03125` 硬编码进 shader 不走 uniform——PySide6 6.11 `setUniformValue(int, float)` 重载歧义会把小数截断成 int 写入（`.temp/result_probe_uni.out` 实证 T_wh 全黑）。
-- `_FS_WATER`：同 `_FS` 但固定输出 `alpha=0.62`。
+- `_FS`：由 `aTile` 换算有效槽号（动态材质加 `mod(uFrame, 帧数)`）→ 槽内采样（`fract(vUV)` 世界坐标平铺 → 半像素 clamp，pad = 0.5/16 防渗色）；`tex.a < 0.5` discard（树叶/玻璃镂空）；光照 = `max(dot(N, L), 0)` 方向光 + 环境项 0.42（`col = tex.rgb * (0.42 + 0.58*diff)`）。`SLOT_W=1/_ATLAS_COLS`、`SLOT_H=1/行数`、`COLS=_ATLAS_COLS` 为**编译期常量**（占位符在 `_build_shader_sources` 填入）不走 uniform——PySide6 6.11 `setUniformValue(int, float)` 重载歧义会把小数截断成 int 写入（`.temp/result_probe_uni.out` 实证 T_wh 全黑）；**同一根因要求 `uFrame` 用 int**。
+- `_FS_TRANS`：半透明第二遍（水/冰/染色玻璃/传送门/绊线），同 `_FS` 的帧动画换算 + 按贴图 alpha 混合输出。
 - `_plain`：线框用 `aPos + uMVP + uColor` 最简着色器。
 
 ### ctypes 调用点与软件 OpenGL 兼容说明
@@ -3811,27 +3834,29 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | | `_spectator_update_crosshair` / `_draw_crosshair(p)` | slab 法准星命中重判 / 屏幕中心十字绘制（fillRect 双层） |
 | | `_spectator_apply_refresh_rate` | 记录所在屏刷新率（仅诊断展示，不再节流定时器） |
 | 轮播 | `_pause_rotation` / `_resume_rotation` / `_cycle_variant` / `_stop_spin_timers` | 交互暂停 + 4s 单发恢复 / 到点切下一变种（保持方位适配） / 停定时器 |
-| GL | `initializeGL` | 取 `context().functions()`；ctypes 解析原生 glDrawElements；编译 `_VS+_FS`/`_VS+_FS_WATER`/`_plain` 三套 shader（显式绑属性 0..3）；建 VAO/VBO/IBO/锚点/区块 VBO；`_build_atlas` 上传图集；缓存 uniform 定位；设静态状态与静态 uniform（uModel 单位阵、uLightDir=(-0.45,0.85,0.28)、清屏色） |
-| | `_upload_model` | 材质槽→图集槽号表；水区间参数；`_bake_tile_origin` 顶点 8→10 列烘焙；chunk/occl 数据注入（含 `_occl_opaque` 由 `sm._mat_shape` + `sm._TRANSPARENT_MATS` 判定）；销毁重建缓冲；numpy tobytes 直传 VBO/IBO（dtype 定 GL 类型）；设属性指针；计算锚点/区块线几何并上传两个线框 VBO |
+| GL | `initializeGL` | 取 `context().functions()`；ctypes 解析原生 glDrawElements；编译 `_VS+_FS`/`_VS+_FS_TRANS`/`_plain` 三套 shader（显式绑属性 0..3）；建 VAO/VBO/IBO/锚点/区块 VBO；`_build_atlas` 上传图集（含流体动画帧块）；缓存 uniform 定位（含 `uFrame`）；设静态状态与静态 uniform（uModel 单位阵、uLightDir=(-0.45,0.85,0.28)、清屏色） |
+| | `_upload_model` | 材质槽→图集槽号表；半透明区间参数；`_bake_tile_origin` 顶点 8→10 列烘焙（含 `anim` 帧数表）；判定 `_anim_active` 并按需启停动画定时器；chunk/occl 数据注入（含 `_occl_opaque` 由 `sm._mat_shape` + `sm._TRANSPARENT_MATS` 判定）；销毁重建缓冲；numpy tobytes 直传 VBO/IBO（dtype 定 GL 类型）；设属性指针；计算锚点/区块线几何并上传两个线框 VBO |
 | | `_occl_cells_for_eye` | MC 洞穴剔除 BFS 移植（详见渲染管线第 5 步），返回允许 chunk 序号集或 None |
 | | `_draw_model_body(mvp, occl_cells)` / `_draw_guide_lines(mvp)` / `_draw_water(mvp)` | 见渲染管线第 5/6/7 步 |
 | | `_handle_render_failure(msg)` / `paintGL` | 错误统一处理 / 渲染主循环（详见渲染管线） |
 | | `resizeEvent` / `showEvent` / `hideEvent` / `event` | 按钮重定位 / 恢复轮播 + 刷新率记录 / 停轮播 + 旁观者还原鼠标 / ScreenChangeInternal 记录刷新率 |
-| 模块级 | `_build_atlas()` / `_bake_tile_origin(...)` / `_VOIDP(off)` / `_seq_len(seq)` | 图集拼装 / 顶点烘焙 / ctypes 偏移包装 / numpy 安全 len |
+| 模块级 | `_build_atlas(max_rows)` / `_plan_atlas()` / `_fit_atlas_rows(need, max)` / `_build_shader_sources(rows)` / `_load_tile(name)` / `_tile_key(img)` / `_bake_tile_origin(...)` / `_VOIDP(off)` / `_seq_len(seq)` | 图集拼装（自动扩容+去重+动画帧块）/ 铺图计划 / 行数自适应 / shader 占位符填充 / 单张贴图加载与后处理 / 内容指纹 / 顶点烘焙 / ctypes 偏移包装 / numpy 安全 len |
 
 **接口**（grep 核实）：被 2 个工具模块 import：
 - `Tools/tool_SeedReverser.py:65`（批量 import）→ line 436 实例化 `self._anchor_view = structure_3dview.Structure3DView()`，连接 `render_error`（line 439），`set_structure(key, name)`（line 1262/1269），退出时 `stop_variant_timer()`（line 2386）——SeedReverser 主界面的锚点 3D 视口（环绕模式）；
 - `Tools/tool_StructurePreviewer.py:56` → line 1100 实例化 `self._view`，连接三个信号（1102-1105），`set_spectator_mode(True)`（1107）、`set_spectator_sensitivity`（1296）、`set_model`（1637）、`set_chest_highlights`（1640/1866）、`set_interact_chests`（1645）、`note_chest_gui_closed`（1799）、`set_spectator_input_locked`（1831/1848）、`is_spectator_mode`/`spectator_toggle_grab`（1875/1880）——StructurePreviewer 的 FP 飞行 + 开箱场景。
 - 另 `Utils/StructurePreviewer/composition.py:2806` docstring 说明其输出格式即 `structure_3dview.set_model` 格式（数据契约，非代码 import）。
-- 对外提供：`Structure3DView` 类（上述全部公开方法与信号）、模块级 `_build_atlas`/`_bake_tile_origin`、`TEX_DIR`（转出 `sm.TEX_DIR`）。
+- 对外提供：`Structure3DView` 类（上述全部公开方法与信号）、模块级 `_build_atlas`/`_plan_atlas`/`_bake_tile_origin`/`_build_shader_sources`、`TEX_DIR`（转出 `sm.TEX_DIR`）。
 
 **关键变量/常量**：
 
 | 名称 | 值 | 说明 |
 |---|---|---|
 | `TEX_DIR` | `sm.TEX_DIR` | 方块纹理目录（`assets/SeedReverser/textures/block`），`_build_atlas` 扫描源 |
-| `_ATLAS_COLS` / `_ATLAS_ROWS` / `_ATLAS_TEX` | 16 / 32 / 16 | 图集 16×32=512 槽（原 256 槽被 272 张纹理击穿后扩容，注释留有越界回绕实证）；每纹理边长 |
-| `_VS` / `_FS` / `_FS_WATER` | GLSL 120 源码 | 顶点 / 主体片元（discard+光照）/ 水片元（alpha 0.62）；SLOT_W/H 硬编码 |
+| `_ATLAS_COLS` / `_ATLAS_ROWS` / `_ATLAS_TEX` | 16 / 48 / 16 | 图集列数 / **下限**行数 / 每纹理边长；实际行数由 `_fit_atlas_rows` 按需求自动扩容（历史：256 槽被纹理击穿、512 槽被流体帧块击穿） |
+| `_ATLAS_ROWS_STEP` / `_ATLAS_ROWS_MAX` | 8 / 1024 | 扩容对齐步长（128 槽）/ 查询 GL 上限失败时的兜底上限 |
+| `_ANIM_MATS` / `_ANIM_STRIP_KEYS` / `_ANIM_MS` / `_WATER_TINT` | 流体动画配置 | 材质→(帧条键,来回摆动) / 帧条源键（不单独占槽）/ 帧间隔 100ms（官方 frametime=2）/ 水帧条预染色 #3F76E4 |
+| `_VS` / `_FS` / `_FS_TRANS` | GLSL 120 源码（含占位符） | 顶点 / 主体片元（discard+光照+帧动画）/ 半透明片元（按贴图 alpha + 帧动画）；`__SLOT_W__`/`__SLOT_H__`/`__COLS__` 由 `_build_shader_sources(rows)` 编译前格式化 |
 | `_ANCHOR_RED` / `_CHUNK_YELLOW` / `_CHEST_AMBER` | `#E5484D` / `(255,214,0)` / `#F1C40F` | 锚点红线 / 区块黄框 / 箱子高亮描边 |
 | `_FPS_OK` / `_FPS_BAD` / `_FPS_BAD_TH` | 暗绿 / 红 / 30.0 | FPS 显示配色与掉帧预警阈值 |
 | `_SP_FLY_MIN` / `_SP_FLY_MAX` | 1.0 / 120.0 | 飞行速度限位（格/秒） |

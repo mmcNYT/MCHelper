@@ -2246,6 +2246,46 @@ _FACE_N = {"n": (0, 0, -1), "s": (0, 0, 1),
            "e": (1, 0, 0), "w": (-1, 0, 0)}
 
 
+# 大箱顶面 UV 窗的 rot 码表（(facing, half) -> rot）。
+#
+# 大箱两半的盖顶在接缝缘不能有暗边（官方 normal_left/right 图集实测：
+# 接缝侧列均亮 107/108 = 木纹，外侧列 46.6 = 暗缘），否则两半的暗缘
+# 在拼合处叠成 2px 深色竖带。
+#
+# 世界平铺 UV 下接缝恒落在格界，但 n/s 时是**列**、e/w 时是**行**，
+# 且两半的接缝侧相反——同一张平铺纹理无法兼顾（列 0 需同时是
+# left 的木纹缘与 right 的暗缘，自相矛盾）。故顶面改走显式 UV 窗
+# （_emit_quad 的 rect 分支，与中继器顶面同机制）：把整块盖顶映射到
+# 图窗，用 rot 把接缝边钉到 u=0（木纹列）、外侧边到 u=1（暗缘列）。
+#
+# 接缝边在面内归一化坐标 (pu 沿 x, pv 沿 z) 的位置由 _chest 占格
+# 几何决定（left 半占 facing 左手侧格、接缝侧贴格界，见 block_shapes
+# ._CHEST_LEFT_OF）；rot 变换见 _emit_quad：
+#     rot0=(pu,1-pv) rot1=(1-pu,pv) rot2=(pv,pu) rot3=(1-pv,1-pu)
+# 取「使接缝 pu' 或 pv' = 0」的 rot：
+#     seam pu=1 -> rot1    seam pu=0 -> rot0
+#     seam pv=1 -> rot3    seam pv=0 -> rot2
+_CHEST_TOP_ROT = {
+    ("n", "left"): 1, ("n", "right"): 0,     # 接缝沿 x：left 贴 maxX
+    ("s", "left"): 0, ("s", "right"): 1,     # 接缝沿 x：left 贴 minX
+    ("e", "left"): 3, ("e", "right"): 2,     # 接缝沿 z：left 贴 maxZ
+    ("w", "left"): 2, ("w", "right"): 3,     # 接缝沿 z：left 贴 minZ
+}
+
+# 走大箱专用顶面（显式 UV 窗）的材质键：普通箱 / 陷阱箱。末影箱
+# 无大箱形态，故不在表内（其 " top" 键仍走平铺路径）。
+_CHEST_DOUBLE_TOP = frozenset({"chest", "trapped chest"})
+
+# 大箱顶面 UV 窗的内缩量（半纹素 = 0.5/16）。
+#
+# 窗**不能**取满 (0,1)：着色器入口是 `tileUV = fract(vUV)`，u=1.0 会被
+# fract 折回 0.0，于是外侧边与接缝边同时采到列 0（实测 8/8 FAIL：接缝
+# 与外侧列号全为 [0]）。改取半纹素内缩后，pu'=0 -> u=0.5/16（列 0 中心，
+# 木纹）、pu'=1 -> u=15.5/16（列 15 中心，暗缘），跨距恰 15/16 = 15 列，
+# 与大箱半宽 15/16 格一一对应。
+_CHEST_TOP_UV_INSET = 0.5 / 16.0
+
+
 def _face_mat(mat: str, shape: str | None, normal: tuple,
               box: tuple | None = None) -> tuple:
     """按面分流纹理：返回 (纹理键, rect)。
@@ -2260,7 +2300,8 @@ def _face_mat(mat: str, shape: str | None, normal: tuple,
       单箱朝向面用基键（chest.png 带锁扣正面）；大箱左右半朝向
       面用半窗合成图（chest big left/right：锁扣列贴接缝缘，
       两半拼合复原整锁扣；图名指锁扣在图中的位置——大端窗
-      u∈[1/16,1] 采样到图右缘故用 big right），顶面盖顶木纹，
+      u∈[1/16,1] 采样到图右缘故用 big right），顶面盖顶木纹
+      （大箱顶面走显式 UV 窗 " top double"，见 _CHEST_TOP_ROT），
       其余面侧面拼合（视口无背剔除，底面开口可见顶面背面）；
     - 桶（barrel）：顶盖/底专用图，侧面用基键；
     - 轴心方块（col:<axis>）：±轴两端用端面图（原木年轮/玄武
@@ -2285,7 +2326,21 @@ def _face_mat(mat: str, shape: str | None, normal: tuple,
                 return (None, None)
             parts = rest.split(":")
             face_n = _FACE_N.get(parts[0])
+            typ = parts[1] if len(parts) > 1 else "single"
             if normal == (0, 1, 0):
+                # 大箱盖顶走显式 UV 窗：官方 normal_left/right 图集的盖顶
+                # 仅**接缝缘**无暗边（实测接缝列均亮 107/108 = 木纹，
+                # 外侧列 46.6 = 暗缘），而项目顶面若用世界平铺 UV，接缝
+                # 落在格界、n/s 时是列 / e/w 时是行，且两半接缝侧相反
+                # ——同一张平铺图无解（列 0 需同时是 left 的木纹缘与
+                # right 的暗缘）。改把整块盖顶映射到图窗，用 rot 将接缝
+                # 边钉到 u=0（木纹缘）、外侧边到 u=1（暗缘），一张图即
+                # 覆盖两半 × 四朝向。rot 表见 _CHEST_TOP_ROT。
+                if typ in ("left", "right") and mat in _CHEST_DOUBLE_TOP:
+                    rot = _CHEST_TOP_ROT.get((parts[0], typ), 0)
+                    e = _CHEST_TOP_UV_INSET
+                    return (mat + " top double",
+                            (e, e, 1.0 - e, 1.0 - e, False, rot))
                 return (mat + " top", None)
             if face_n is not None and normal != face_n:
                 return (mat + " plain", None)
@@ -2295,7 +2350,6 @@ def _face_mat(mat: str, shape: str | None, normal: tuple,
             # left 半占 facing 左手侧格，其接缝缘在 u 大端的情形：
             # n=西格（x 窗）/ e=北格（z 窗）-> 大端窗；s/w 为小端
             # 窗。right 半互补。几何见 _CHEST_LEFT_OF 占格表。
-            typ = parts[1] if len(parts) > 1 else "single"
             if typ in ("left", "right"):
                 f = parts[0]
                 big_end = ((typ == "left") == (f in ("n", "e")))

@@ -30,6 +30,7 @@
 锚点 = 结构中心，wiki：1.13+ 神殿生成于区块角上）。相机初始位于
 西北上空看向结构中心（y-up 右手系，QMatrix4x4.perspective）。
 """
+import hashlib
 import math
 import os
 import struct
@@ -51,11 +52,20 @@ from Utils.SeedReverser import structure_models as sm
 
 TEX_DIR = sm.TEX_DIR
 
-_ATLAS_COLS = 16         # 16x32 = 512 槽：当前 272 张 + 未知灰；
-                         # 16x16=256 已被新增纹理击穿（tuff bricks 槽 267
-                         # 越界采样回绕 → trial 外壳渲染成暖褐，实证）
-_ATLAS_ROWS = 32
+_ATLAS_COLS = 16         # 16 列固定（256px 宽，方形像素槽）
+_ATLAS_ROWS = 48         # **初始/下限**行数：实际行数由 _fit_atlas_rows
+                         # 按纹理需求自动扩容（16x48 = 768 槽起步）；
+                         # 历史：16x16=256 曾被纹理击穿（tuff bricks 槽
+                         # 267 越界采样回绕 → trial 外壳渲染成暖褐），
+                         # 16x32=512 后被流体动画帧块击穿 → 改用自动扩容
+_ATLAS_ROWS_STEP = 8     # 扩容对齐步长（8 行 = 128 槽），给新增纹理留缓冲
+_ATLAS_ROWS_MAX = 1024   # 兜底上限（16x1024 = 16384px，与常见
+                         # GL_MAX_TEXTURE_SIZE 一致；实际以运行时查询为准）
 _ATLAS_TEX = 16          # 每纹理边长（源 16x16，1:1）
+
+# 流体动画帧间隔（毫秒）：官方 water_still/lava_still 的 .mcmeta
+# 均为 frametime=2 tick = 0.1s = 100ms，即 10 帧/秒
+_ANIM_MS = 100
 
 _ANCHOR_RED = QColor("#E5484D")
 _CHUNK_YELLOW = QColor(255, 214, 0)     # 区块边界线（琥珀黄）
@@ -94,15 +104,17 @@ _SP_START_SMALL = 5.0
 # （方向点积下限，约 60° 锥角——距离够但箱子在背后/余光不显示）
 _SP_CHEST_DIST = 4.0
 
-# 槽宽高 1/16 硬编码进 shader（与 _ATLAS_COLS/_ATLAS_ROWS 同步）：
+# 槽宽高写死进 shader 源码（编译期常量）：
 # PySide6 6.11 setUniformValue(int, float) 重载歧义会把小数截断成
-# int 写入（实证 .temp/result_probe_uni.out T_wh 全黑），float 一律
-# 不走 uniform。
+# int 写入（实证 .temp/result_probe_uni.out T_wh 全黑），**float 一律
+# 不走 uniform**；而图集行数会随纹理增长自动扩容（见 _fit_atlas_rows），
+# 故槽高不能固定字面量，改用 __SLOT_H__/__COLS__ 占位符，在
+# _build_shader_sources() 里按实际行数格式化后再编译。
 _VS = """#version 120
 attribute vec3 aPos;
 attribute vec2 aUV;
 attribute vec3 aNor;
-attribute vec2 aTile;      // 图集槽原点（上传期烘焙，同 quad 内恒定）
+attribute vec2 aTile;      // (基准槽号, 帧数)；帧数 0 = 静态（上传期烘焙）
 uniform mat4 uMVP;
 uniform mat4 uModel;
 varying vec2 vUV;
@@ -118,20 +130,33 @@ void main() {
 
 # 注意：#version 必须是源码首行（前导空行会报错）；桌面 GLSL 不支持
 # ES 专用的 precision 语句（NVIDIA 宽松能过，Mesa/llvmpipe 直接拒编）。
+#
+# 流体动画：aTile.x 是**基准槽号**（非归一化原点），aTile.y 是帧数
+# （0 = 静态）。动态材质实际槽号 = 基准槽 + mod(uFrame, 帧数)，从而
+# 在烘培好的连续帧块内循环。uFrame 由宿主定时器递增。
+#
+# uFrame 必须是 **int**：PySide6 6.11 的 setUniformValue(int, float)
+# 重载歧义会把小数截断成 int 写入（见上方 _VS 注释的实证），故帧号
+# 用整数 uniform，GLSL 侧再显式转 float。
 _FS = """#version 120
 varying vec2 vUV;
 varying vec3 vNor;
 varying vec2 vTile;
 uniform sampler2D uAtlas;
 uniform vec3 uLightDir;
-const float SLOT_W = 0.0625;   // 1/16 图集 16 列，勿改单一处
-const float SLOT_H = 0.03125;  // 1/32 图集 32 行（与 _ATLAS_ROWS 同步）
+uniform int uFrame;
+const float SLOT_W = __SLOT_W__;   // 1/_ATLAS_COLS
+const float SLOT_H = __SLOT_H__;   // 1/_ATLAS_ROWS（随自动扩容变化）
+const float COLS = __COLS__;       // 图集列数 _ATLAS_COLS
 void main() {
     vec2 tileUV = fract(vUV);
     vec2 pad = vec2(0.5) / vec2(16.0, 16.0);
     tileUV = clamp(tileUV, pad, 1.0 - pad);
-    vec2 uv = vTile + vec2(tileUV.x * SLOT_W,
-                           (1.0 - tileUV.y) * SLOT_H);
+    float slot = vTile.x;
+    if (vTile.y > 0.5) slot += mod(float(uFrame), vTile.y);
+    vec2 tile = vec2(mod(slot, COLS) * SLOT_W, floor(slot / COLS) * SLOT_H);
+    vec2 uv = tile + vec2(tileUV.x * SLOT_W,
+                          (1.0 - tileUV.y) * SLOT_H);
     vec4 tex = texture2D(uAtlas, uv);
     if (tex.a < 0.5) discard;
     float diff = max(dot(normalize(vNor), normalize(uLightDir)), 0.0);
@@ -149,14 +174,19 @@ varying vec3 vNor;
 varying vec2 vTile;
 uniform sampler2D uAtlas;
 uniform vec3 uLightDir;
-const float SLOT_W = 0.0625;
-const float SLOT_H = 0.03125;
+uniform int uFrame;
+const float SLOT_W = __SLOT_W__;
+const float SLOT_H = __SLOT_H__;
+const float COLS = __COLS__;
 void main() {
     vec2 tileUV = fract(vUV);
     vec2 pad = vec2(0.5) / vec2(16.0, 16.0);
     tileUV = clamp(tileUV, pad, 1.0 - pad);
-    vec2 uv = vTile + vec2(tileUV.x * SLOT_W,
-                           (1.0 - tileUV.y) * SLOT_H);
+    float slot = vTile.x;
+    if (vTile.y > 0.5) slot += mod(float(uFrame), vTile.y);
+    vec2 tile = vec2(mod(slot, COLS) * SLOT_W, floor(slot / COLS) * SLOT_H);
+    vec2 uv = tile + vec2(tileUV.x * SLOT_W,
+                          (1.0 - tileUV.y) * SLOT_H);
     vec4 tex = texture2D(uAtlas, uv);
     if (tex.a < 0.1) discard;
     float diff = max(dot(normalize(vNor), normalize(uLightDir)), 0.0);
@@ -204,6 +234,49 @@ _TINTED_MATS = frozenset({
 # 亮白可辨）。
 _BRIGHTEN_MATS = {"tripwire": 1.6}
 
+# ---------------------------------------------------------------------------
+# 流体动态纹理（26.2 官方 water_still / lava_still 多帧帧条）
+#
+# 官方贴图是**帧条**：水 16x512（32 帧）、岩浆 16x320（20 帧），
+# .mcmeta 均为 frametime=2（10 帧/秒）。旧实现 _build_atlas 对非
+# 16x16 源一律 copy(0,0,16,16) 取首帧（本意是给 prismarine /
+# sea lantern / stonecutter saw 做静态展示），流体因此永远静止。
+#
+# 现改为把帧条按**连续槽**铺进图集，材质键指向该块首槽，片元着色器
+# 按全局帧计数取「首槽 + 帧内偏移」。
+#
+# 水的官方贴图是灰度（游戏内按群系 tint），而项目既有 water.png 已
+# 预染为下列水色——反推实证：官方帧0 × tint/255 与项目图 250/256
+# 像素完全相同、最大误差 1（纯取整差）。故动画帧须施加同一染色，
+# 否则水会失色（变灰白）。
+_WATER_TINT = (63, 118, 228)        # #3F76E4（多数群系水色）
+# 需施加 _WATER_TINT 的动画材质：官方贴图为灰度、须预染
+_WATER_TINTED = frozenset({"water"})
+
+# 帧条源纹理键：不参与通用静态入槽（否则会被当作 16x16 取首帧）
+_ANIM_STRIP_KEYS = frozenset({"water still", "lava still"})
+
+# 材质键 -> (帧条纹理键, 是否来回摆动)
+# 岩浆官方帧序是显式的 [0..19, 18..1]（来回摆动，共 38 帧），在
+# 烘培期展开成 38 个连续槽（shader 只做线性推进，不塞帧序表）；
+# 水为顺序 0..31。
+_ANIM_MATS = {
+    "water": ("water still", False),
+    "lava": ("lava still", True),
+}
+
+
+def _anim_frame_order(frames: int, pingpong: bool) -> list:
+    """帧序展开：pingpong 复刻官方岩浆的 [0..n-1, n-2..1] 来回摆动。
+
+    官方 lava_still.png.mcmeta 的 frames 字段即
+    [0,1,...,19,18,...,1]（38 项）；此处等价生成，避免硬编码表。
+    """
+    seq = list(range(frames))
+    if pingpong and frames > 2:
+        seq = seq + list(range(frames - 2, 0, -1))
+    return seq
+
 
 def _brighten(img: QImage, factor: float) -> QImage:
     """整幅按倍率提亮（clamp 255，保留 alpha；原地修改）。"""
@@ -231,56 +304,188 @@ def _tint_grayscale(img: QImage, rgb) -> QImage:
     return img
 
 
-def _build_atlas():
-    """纹理目录全部 png 拼 RGBA 图集；返回 (QImage, {纹理键: 槽索引})。
+def _tile_key(img: QImage):
+    """贴图内容指纹（去重用）：尺寸 + 原始像素字节的哈希。
 
-    槽 0 固定灰（未知材质回退）；纹理按文件名排序入槽。
+    在所有后处理（群系染色/提亮/缩放归一）**之后**计算，故两张指纹
+    相同的贴图在视觉上完全等价、可共享同一图集槽。
+    """
+    return (img.width(), img.height(), hashlib.md5(
+        bytes(img.constBits())).hexdigest())
+
+
+def _plan_atlas():
+    """扫描纹理目录，产出铺图计划（含去重与动画帧展开）。
+
+    返回 (entries, slots, anim)：
+      - entries：[(slot, QImage), ...] 待绘制项（顺序即最终槽位）；
+      - slots：{纹理键: 槽索引}（静态 = 自身槽；动态材质 = 帧块**首槽**）；
+      - anim：{材质键: 帧数}（0/缺省 = 静态）。
+
+    去重（`_dedup`）：内容完全相同的**静态**贴图共享同一槽。官方资源里
+    存在大量同图异名（chest=trapped chest、furnace side=furnace、
+    cobblestone slab=stairs=wall 等），实测 22 组 / 可省 33 槽。只做
+    静态↔静态去重：动画帧块不参与（避免静态材质被指到帧块中间、
+    语义随帧号漂移）。
+
+    动画帧块：`_ANIM_MATS` 的贴图改为铺设**整条帧条**（连续槽），
+    片元着色器按全局帧号在块内循环；帧条源文件（`_ANIM_STRIP_KEYS`）
+    自身不单独入槽。水的官方帧条是灰度，按 `_WATER_TINT` 逐帧预染，
+    与项目既有 water.png 的预染口径一致（否则水会失色）。
     """
     names = sorted(fn[:-4] for fn in os.listdir(TEX_DIR)
                    if fn.endswith(".png"))
-    if len(names) + 1 > _ATLAS_COLS * _ATLAS_ROWS:
+    entries: list = []
+    slots: dict = {"__unknown__": 0}
+    anim: dict = {}
+    # 槽 0 = 未知灰
+    unknown = QImage(_ATLAS_TEX, _ATLAS_TEX, QImage.Format.Format_RGBA8888)
+    unknown.fill(QColor(0x9A, 0xA0, 0xA6))
+    entries.append((0, unknown))
+    nxt = 1
+    dedup: dict = {}                # 内容指纹 -> 已分配的静态槽号
+    dup_saved = 0
+
+    for name in names:
+        if name in _ANIM_STRIP_KEYS:
+            continue                # 帧条内容由所属材质的帧块表达
+        # ---- 动态材质：铺整条帧块（不参与去重）----
+        if name in _ANIM_MATS:
+            strip_key, pingpong = _ANIM_MATS[name]
+            src = os.path.join(TEX_DIR, strip_key + ".png")
+            if not os.path.exists(src):
+                tile = _load_tile(name)
+                entries.append((nxt, tile))
+                slots[name] = nxt
+                nxt += 1
+                continue
+            strip = QImage(src).convertToFormat(
+                QImage.Format.Format_RGBA8888)
+            n_src = max(1, strip.height() // _ATLAS_TEX)
+            order = _anim_frame_order(n_src, pingpong)
+            base = nxt
+            for fi in order:
+                frame = strip.copy(0, fi * _ATLAS_TEX, _ATLAS_TEX,
+                                   _ATLAS_TEX)
+                if name in _WATER_TINTED:
+                    frame = _tint_grayscale(frame, _WATER_TINT)
+                entries.append((nxt, frame))
+                nxt += 1
+            slots[name] = base
+            anim[name] = len(order)
+            continue
+        # ---- 静态纹理（去重）----
+        tile = _load_tile(name)
+        key = _tile_key(tile)
+        prev = dedup.get(key)
+        if prev is not None:
+            slots[name] = prev       # 复用已有槽
+            dup_saved += 1
+            continue
+        dedup[key] = nxt
+        entries.append((nxt, tile))
+        slots[name] = nxt
+        nxt += 1
+    return entries, slots, anim, dup_saved
+
+
+def _fit_atlas_rows(needed_rows: int, max_rows: int | None = None) -> int:
+    """所需行数 -> 实际行数：下限取配置值，按 8 行对齐，受 GPU 上限钳制。
+
+    - 下限 `_ATLAS_ROWS`（初始值同时也是「不缩容」保证，避免小纹理集
+      时图集尺寸缩水导致行为随环境漂移）；
+    - 按 `_ATLAS_ROWS_STEP`（8 行 = 128 槽）向上对齐：给后续新增纹理
+      留缓冲，避免每加一张纹理就重新分配整张图集；
+    - 上限 `max_rows`（调用方传入 GL_MAX_TEXTURE_SIZE/16；None 用
+      `_ATLAS_ROWS_MAX` 兜底）。超出即抛错，由 initializeGL 统一转成
+      明确的 render_error 提示（而非静默黑屏）。
+    """
+    cap = max_rows if max_rows else _ATLAS_ROWS_MAX
+    rows = max(_ATLAS_ROWS, needed_rows)
+    step = _ATLAS_ROWS_STEP
+    rows = -(-rows // step) * step
+    if rows > cap:
         raise ValueError(
-            f"纹理数 {len(names) + 1} 超出图集槽位 "
-            f"{_ATLAS_COLS}x{_ATLAS_ROWS}，需扩 _ATLAS_ROWS")
-    img = QImage(_ATLAS_COLS * _ATLAS_TEX, _ATLAS_ROWS * _ATLAS_TEX,
+            f"纹理槽需求 {needed_rows} 行（{needed_rows * _ATLAS_COLS} 槽）"
+            f"超出 GPU 图集上限 {cap} 行（{cap * _ATLAS_COLS} 槽，"
+            f"GL_MAX_TEXTURE_SIZE={cap * _ATLAS_TEX}）——"
+            f"需先压缩纹理尺寸或降低图集槽位需求")
+    return rows
+
+
+def _build_shader_sources(rows: int):
+    """按实际图集行数实例化 shader 源码。
+
+    槽高/列数必须是**编译期常量**（float 走 uniform 会被 PySide6 6.11
+    的 setUniformValue(int, float) 重载歧义截断成 int，见 _VS 上方
+    注释），而行数会随纹理增长自动扩容，故用占位符在编译前格式化。
+    返回 (vs, fs, fs_trans)。
+    """
+    sub = {"__SLOT_W__": repr(1.0 / _ATLAS_COLS),
+           "__SLOT_H__": repr(1.0 / rows),
+           "__COLS__": repr(float(_ATLAS_COLS))}
+
+    def _fill(src: str) -> str:
+        out = src
+        for k, v in sub.items():
+            out = out.replace(k, v)
+        return out
+    return _fill(_VS), _fill(_FS), _fill(_FS_TRANS)
+
+
+def _build_atlas(max_rows: int | None = None):
+    """纹理目录全部 png 拼 RGBA 图集（含去重与流体帧块）。
+
+    返回 (QImage, {纹理键: 槽索引}, {材质键: 帧数})：
+      - slots：静态纹理为单槽（同图异名共享槽）；动态材质为帧块**首槽**；
+      - anim：动态材质 -> 帧数（0/缺省 = 静态，着色器不做帧偏移）。
+
+    行数**按需自动扩容**（`_fit_atlas_rows`）：先按 `_plan_atlas` 得出
+    去重后的真实槽需求，再定行数、建图、落图。实际行数可由
+    `img.height() // _ATLAS_TEX` 反推（着色器常量由此派生）。
+    """
+    entries, slots, anim, _dup = _plan_atlas()
+    needed_rows = -(-(max(s for s, _t in entries) + 1) // _ATLAS_COLS)
+    rows = _fit_atlas_rows(needed_rows, max_rows)
+    img = QImage(_ATLAS_COLS * _ATLAS_TEX, rows * _ATLAS_TEX,
                  QImage.Format.Format_RGBA8888)
     img.fill(0)
     p = QPainter(img)
-    p.fillRect(0, 0, _ATLAS_TEX, _ATLAS_TEX, QColor(0x9A, 0xA0, 0xA6))
+    for slot, tile in entries:
+        p.drawImage((slot % _ATLAS_COLS) * _ATLAS_TEX,
+                    (slot // _ATLAS_COLS) * _ATLAS_TEX, tile)
     p.end()
-    slots = {"__unknown__": 0}
-    for i, name in enumerate(names, start=1):
-        tile = QImage(os.path.join(TEX_DIR, name + ".png")).convertToFormat(
-            QImage.Format.Format_RGBA8888)
-        if name in _TINTED_MATS:
-            tile = _tint_grayscale(tile, _TINT_GRASS)
-        f = _BRIGHTEN_MATS.get(name)
-        if f is not None:
-            tile = _brighten(tile, f)
-        if tile.width() != _ATLAS_TEX or tile.height() != _ATLAS_TEX:
-            if tile.width() == _ATLAS_TEX and tile.height() % _ATLAS_TEX == 0:
-                # 垂直多帧纹理（如 prismarine 16x64 / sea_lantern 16x80 /
-                # stonecutter_saw 16x48）：整条压扁会丢失内容、显得糊，
-                # 直接取顶部第一个 16x16 帧（静态展示用单帧，最清晰）
-                tile = tile.copy(0, 0, _ATLAS_TEX, _ATLAS_TEX)
-            else:
-                # 其余非 16x16 源（end_portal 256x256 等）：最近邻缩放
-                # 保持像素风硬边（QImage.scaled 默认双线性平滑会插值糊化）
-                tile = tile.scaled(_ATLAS_TEX, _ATLAS_TEX,
-                                   Qt.AspectRatioMode.IgnoreAspectRatio,
-                                   Qt.TransformationMode.FastTransformation)
-        cx = (i % _ATLAS_COLS) * _ATLAS_TEX
-        cy = (i // _ATLAS_COLS) * _ATLAS_TEX
-        p = QPainter(img)
-        p.drawImage(cx, cy, tile)
-        p.end()
-        slots[name] = i
-    return img, slots
+    return img, slots, anim
+
+
+def _load_tile(name: str) -> QImage:
+    """静态纹理加载 + 既有后处理（群系染色 / 提亮 / 非 16x16 归一）。"""
+    tile = QImage(os.path.join(TEX_DIR, name + ".png")).convertToFormat(
+        QImage.Format.Format_RGBA8888)
+    if name in _TINTED_MATS:
+        tile = _tint_grayscale(tile, _TINT_GRASS)
+    f = _BRIGHTEN_MATS.get(name)
+    if f is not None:
+        tile = _brighten(tile, f)
+    if tile.width() != _ATLAS_TEX or tile.height() != _ATLAS_TEX:
+        if tile.width() == _ATLAS_TEX and tile.height() % _ATLAS_TEX == 0:
+            # 垂直多帧纹理（如 prismarine 16x64 / sea_lantern 16x80 /
+            # stonecutter_saw 16x48）：整条压扁会丢失内容、显得糊，
+            # 直接取顶部第一个 16x16 帧（静态展示用单帧，最清晰）。
+            # 流体已由 _ANIM_MATS 走帧块路径，不落到这里。
+            tile = tile.copy(0, 0, _ATLAS_TEX, _ATLAS_TEX)
+        else:
+            # 其余非 16x16 源（end_portal 256x256 等）：最近邻缩放
+            # 保持像素风硬边（QImage.scaled 默认双线性平滑会插值糊化）
+            tile = tile.scaled(_ATLAS_TEX, _ATLAS_TEX,
+                               Qt.AspectRatioMode.IgnoreAspectRatio,
+                               Qt.TransformationMode.FastTransformation)
+    return tile
 
 
 def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
-                      quad_slot=None) -> np.ndarray:
-    """8 列顶点 -> 10 列（尾部追加图集槽原点 aTile）。
+                      quad_slot=None, anim=None) -> np.ndarray:
+    """8 列顶点 -> 10 列（尾部追加 aTile = (基准槽号, 帧数)）。
 
     - 主路径（quad_slot 提供）：quad→槽号直接查表，每 quad 4 顶点
       同 tile；空槽（count=0）不占 quad，槽号 = slots 下标；
@@ -289,6 +494,12 @@ def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
     - halfheight: 前缀材质与基材质共纹理（半高变体）；
     - list/numpy 输入先 numpy 化（低层注入旧格式兼容）；
     - 空 verts 返回 (0,10) 数组；无归属顶点（防御）tile=(0,0)。
+
+    aTile 语义（流体动画）：x = 基准槽号（**归一化前的槽序号**，着色
+    器自己换算行列），y = 帧数。静态材质 y=0（着色器不做帧偏移）；
+    动态材质 y=n，实际槽号 = x + mod(uFrame, n)，在帧块内循环。
+    旧实现把 x 存成归一化槽原点，着色器直接相加——现改为传槽号，
+    帧偏移才能在块内取模（避免跨行回绕）。
     """
     v8 = np.asarray(verts, dtype=np.float32)
     n8 = v8.size
@@ -318,13 +529,14 @@ def _bake_tile_origin(verts, slots, slot_mat, atlas_slots, idx=None,
             tsel = np.concatenate(
                 (tsel, np.full(n_v - tsel.size, -1, dtype=np.int64)))
         tsel = tsel[:n_v]
+    anim = anim or {}
     m2t = []
     for m in slot_mat:
         base = m[len("halfheight:"):] if m.startswith("halfheight:") \
             else m
         s = atlas_slots.get(base, atlas_slots.get("__unknown__", 0))
-        m2t.append(((s % _ATLAS_COLS) / _ATLAS_COLS,
-                    (s // _ATLAS_COLS) / _ATLAS_ROWS))
+        # 帧数：优先取**基材质**的动画配置（halfheight: 前缀同纹理）
+        m2t.append((float(s), float(anim.get(base, 0))))
     while len(m2t) < len(slots):        # 防御：slot_mat 缺项走灰
         m2t.append((0.0, 0.0))
     m2t.append((0.0, 0.0))              # 无归属（-1）兜底槽
@@ -435,6 +647,14 @@ class Structure3DView(QOpenGLWidget):
         self._idle_timer.setSingleShot(True)
         self._idle_timer.setInterval(_INTERACT_RESUME_MS)
         self._idle_timer.timeout.connect(self._resume_rotation)
+        # 流体动画时钟：帧号递增 + 触发重绘。仅当当前模型含动态材质
+        # 时运行（_anim_active），无流体不占 CPU/GPU；换模型时在
+        # _load_model 里按需启停。间隔 = 官方 frametime=2 tick = 100ms。
+        self._anim_frame = 0
+        self._anim_active = False
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(_ANIM_MS)
+        self._anim_timer.timeout.connect(self._anim_tick)
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self._stop_spin_timers)
@@ -546,6 +766,20 @@ class Structure3DView(QOpenGLWidget):
                 self._spectator_recenter(reset_base=True)
         # GL 上传只能在上下文就绪时执行（paintGL），此处只标记
         self._needs_upload = bool(self._model)
+        # 换模型：动画时钟按新模型是否含动态材质启停（_anim_active
+        # 在 _upload_model 里定；上传前先按静态处理，避免空转）
+        self._anim_active = False
+        self._anim_timer.stop()
+        self._anim_frame = 0
+        self.update()
+
+    def _anim_tick(self) -> None:
+        """流体动画时钟：帧号自增并重绘。
+
+        仅在有动态材质时运行（_anim_active）。帧号用 int 送 uniform
+        （PySide6 6.11 的 float 重载会截断小数，见 _VS 上方注释）。
+        """
+        self._anim_frame = (self._anim_frame + 1) & 0xFFFF
         self.update()
 
     def stop_variant_timer(self) -> None:
@@ -783,9 +1017,10 @@ class Structure3DView(QOpenGLWidget):
                              min(_SP_FLY_MAX, self._radius * 1.2))
 
     def _stop_spin_timers(self) -> None:
-        """轮播 + 交互空闲定时器一并停（aboutToQuit/退出钩子共用）。"""
+        """轮播 + 交互空闲 + 流体动画定时器一并停（aboutToQuit/退出钩子共用）。"""
         self._variant_timer.stop()
         self._idle_timer.stop()
+        self._anim_timer.stop()
 
     def _pause_rotation(self) -> None:
         """拖动/缩放期间暂停轮播；停手 _INTERACT_RESUME_MS 后恢复。
@@ -932,6 +1167,9 @@ class Structure3DView(QOpenGLWidget):
     def showEvent(self, ev) -> None:  # noqa: N802
         if self._variant_n and not self._variant_timer.isActive():
             self._variant_timer.start()
+        # 流体动画：从隐藏恢复时重启（hideEvent -> _stop_spin_timers 已停）
+        if self._anim_active and not self._anim_timer.isActive():
+            self._anim_timer.start()
         self._idle_timer.stop()          # 交互暂停态不跨隐藏保留
         self._spectator_apply_refresh_rate()
         super().showEvent(ev)
@@ -1380,6 +1618,42 @@ class Structure3DView(QOpenGLWidget):
     # GL 生命周期
     # ------------------------------------------------------------------
     def initializeGL(self) -> None:  # noqa: N802
+        """GL 初始化。
+
+        整体 try 包裹：初始化阶段任何异常（图集槽位不足、shader 编译
+        失败、驱动不兼容）若直接向上传播到 Qt，`initializeGL` 会被
+        中断（后续 shader/图集/缓冲全未建），视口表现为**空白黑屏**，
+        且 `render_error` 不会发出（_handle_render_failure 原先只在
+        paintGL 路径）——用户看不到任何中文提示，属静默失败、极难
+        排查。此处统一转成明确的 render_error 提示 + 停止渲染。
+        """
+        try:
+            self._initialize_gl_impl()
+        except Exception as exc:
+            self._gl_ready = False
+            self._handle_render_failure(f"3D 渲染初始化失败：{exc}")
+
+    def _gl_max_texture_size(self) -> int:
+        """查询 GL_MAX_TEXTURE_SIZE（图集自动扩容的硬上限）。
+
+        取不到（软件 GL 缺扩展/返回值异常）时回退 `_ATLAS_ROWS_MAX`
+        兜底，保证扩容逻辑始终有明确上限而不是无限增长。
+        """
+        try:
+            fn = getattr(self, "_glf", None)
+            if fn is None:
+                return _ATLAS_ROWS_MAX * _ATLAS_TEX
+            v = fn.glGetIntegerv(0x0D33)          # GL_MAX_TEXTURE_SIZE
+            if isinstance(v, (list, tuple)):
+                v = v[0] if v else 0
+            v = int(v)
+            # 合理性校验：驱动可能返回 0/负值（查询失败）
+            return v if v >= 1024 else _ATLAS_ROWS_MAX * _ATLAS_TEX
+        except Exception:
+            return _ATLAS_ROWS_MAX * _ATLAS_TEX
+
+    def _initialize_gl_impl(self) -> None:
+        """GL 初始化实现体（异常由 initializeGL 统一兜底）。"""
         self._glf = self.context().functions()
         # PySide6 6.11 的 QOpenGLFunctions.glDrawElements 包装在
         # "IBO + c_void_p 偏移"形态下静默不画（llvmpipe 上 A/B 实证，
@@ -1391,27 +1665,40 @@ class Structure3DView(QOpenGLWidget):
         _proto = _ct.CFUNCTYPE(None, _ct.c_uint, _ct.c_int, _ct.c_uint,
                                _ct.c_void_p)
         self._native_glDrawElements = _proto(int(_addr))
+        # ---- 图集（先建，行数决定 shader 的槽高常量）----
+        # 纹理数目增长会触发自动扩容行数；GL_MAX_TEXTURE_SIZE 作硬上限，
+        # 超限在此抛出 -> initializeGL 统一兜成明确 render_error。
+        max_tex = self._gl_max_texture_size()
+        atlas_img, self._atlas_slots, self._atlas_anim = _build_atlas(
+            max_rows=max_tex // _ATLAS_TEX)
+        atlas_rows = atlas_img.height() // _ATLAS_TEX
+        self._atlas_rows = atlas_rows
+        vs_src, fs_src, fs_trans_src = _build_shader_sources(atlas_rows)
         self._shader = QOpenGLShaderProgram()
         self._shader.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit.Vertex, _VS)
+            QOpenGLShader.ShaderTypeBit.Vertex, vs_src)
         self._shader.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit.Fragment, _FS)
+            QOpenGLShader.ShaderTypeBit.Fragment, fs_src)
         self._shader.bindAttributeLocation("aPos", 0)
         self._shader.bindAttributeLocation("aUV", 1)
         self._shader.bindAttributeLocation("aNor", 2)
         self._shader.bindAttributeLocation("aTile", 3)   # 显式绑定：不绑则由驱动分配（实测 NVIDIA 顺序分配到 3，但不保证），环境变化会让 _upload_model 的硬编码 index 3 错位
-        self._shader.link()
+        if not self._shader.link():
+            raise RuntimeError(
+                f"主体着色器链接失败：{self._shader.log()}")
         # 半透明第二遍着色器：顶点同 _VS，片元按贴图 alpha 混合
         self._wshader = QOpenGLShaderProgram()
         self._wshader.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit.Vertex, _VS)
+            QOpenGLShader.ShaderTypeBit.Vertex, vs_src)
         self._wshader.addShaderFromSourceCode(
-            QOpenGLShader.ShaderTypeBit.Fragment, _FS_TRANS)
+            QOpenGLShader.ShaderTypeBit.Fragment, fs_trans_src)
         self._wshader.bindAttributeLocation("aPos", 0)
         self._wshader.bindAttributeLocation("aUV", 1)
         self._wshader.bindAttributeLocation("aNor", 2)
         self._wshader.bindAttributeLocation("aTile", 3)
-        self._wshader.link()
+        if not self._wshader.link():
+            raise RuntimeError(
+                f"半透明着色器链接失败：{self._wshader.log()}")
         self._vao = QOpenGLVertexArrayObject()
         self._vao.create()
         self._vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
@@ -1438,8 +1725,7 @@ class Structure3DView(QOpenGLWidget):
         self._chunk_vbo.create()
         self._chest_vbo = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         self._chest_vbo.create()
-        # 纹理图集
-        atlas_img, self._atlas_slots = _build_atlas()
+        # 纹理图集上传（图集本体已在着色器编译前构建，见上）
         self._qtex = QOpenGLTexture(atlas_img)
         self._qtex.setMinMagFilters(QOpenGLTexture.Filter.Nearest,
                                     QOpenGLTexture.Filter.Nearest)
@@ -1451,7 +1737,7 @@ class Structure3DView(QOpenGLWidget):
         self._shader.bind()
         self._u = {n: self._shader.uniformLocation(n)
                    for n in ("uMVP", "uModel", "uAtlas", "uLightDir",
-                             "uSlotOrigin")}
+                             "uSlotOrigin", "uFrame")}
         # 静态渲染状态 + 静态 uniform 一次设置（paintGL 不再每帧
         # 重复）：深度测试/背向剔除（面绕序 = 面法线朝外，_FACES
         # 与 _box_face 绕序一致）/混合/清屏色，uModel 恒单位阵，
@@ -1477,7 +1763,7 @@ class Structure3DView(QOpenGLWidget):
         self._wshader.bind()
         self._wu = {n: self._wshader.uniformLocation(n)
                     for n in ("uMVP", "uModel", "uAtlas", "uLightDir",
-                              "uSlotOrigin")}
+                              "uSlotOrigin", "uFrame")}
         self._wshader.setUniformValue(self._wu["uModel"], QMatrix4x4())
         self._wshader.setUniformValue(
             self._wu["uLightDir"], QVector3D(-0.45, 0.85, 0.28))
@@ -1514,7 +1800,13 @@ class Structure3DView(QOpenGLWidget):
         vdata = _bake_tile_origin(mesh["verts"], mesh["slots"],
                                   mesh["slot_mat"], self._atlas_slots,
                                   idx=mesh["idx"],
-                                  quad_slot=mesh.get("quad_slot"))
+                                  quad_slot=mesh.get("quad_slot"),
+                                  anim=self._atlas_anim)
+        # 本模型是否含动态材质（决定是否启动动画时钟：无流体不烧 GPU）
+        used = set(mesh["slot_mat"])
+        norm = {m[len("halfheight:"):] if m.startswith("halfheight:")
+                else m for m in used}
+        self._anim_active = bool(norm & set(self._atlas_anim))
         # chunk 空间重排数据（MC 式视锥剔除）：无则整体单 draw
         self._chunks = mesh.get("chunks") or []
         # numpy 矩阵化：draw 期向量化视锥判定（避免逐 chunk Python 循环）
@@ -1693,6 +1985,16 @@ class Structure3DView(QOpenGLWidget):
             vbo.allocate(struct.pack(f"<{len(verts)}f", *verts),
                          len(verts) * 4)
             vbo.release()
+        # 动画时钟：模型含动态材质（水/岩浆）才启动，否则保持停止
+        # （无流体不占 CPU；上传成功后 _anim_active 才可信）
+        if self._anim_active:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+            self.update()
+        else:
+            self._anim_timer.stop()
+            self._anim_frame = 0
+
     def _occl_cells_for_eye(self) -> set | None:
         """旁观模式眼语义（MC 洞穴剔除运行期同款）-> 允许 chunk 序号集。
 
@@ -1826,6 +2128,9 @@ class Structure3DView(QOpenGLWidget):
         self._shader.setUniformValue(self._u["uMVP"], mvp)
         self._qtex.bind(0)
         self._shader.setUniformValue(self._u["uAtlas"], 0)
+        if self._u.get("uFrame", -1) >= 0:
+            self._shader.setUniformValue(self._u["uFrame"],
+                                         int(self._anim_frame))
         self._vao.bind()
         if self._chunks:
             # 6 视锥平面 = MVP 行向量组合（p_clip = M·p 语义）：
@@ -1967,6 +2272,9 @@ class Structure3DView(QOpenGLWidget):
         self._wshader.setUniformValue(self._wu["uMVP"], mvp)
         self._qtex.bind(0)
         self._wshader.setUniformValue(self._wu["uAtlas"], 0)
+        if self._wu.get("uFrame", -1) >= 0:
+            self._wshader.setUniformValue(self._wu["uFrame"],
+                                          int(self._anim_frame))
         self._vao.bind()
         byte_off = self._trans_off * (2 if self._idx_type == 0x1403
                                       else 4)
@@ -1997,6 +2305,12 @@ class Structure3DView(QOpenGLWidget):
         self.render_error.emit(msg)
 
     def paintGL(self) -> None:  # noqa: N802
+        # GL 初始化未完成（initializeGL 抛异常，已发 render_error）：
+        # 此时 _shader/_glf/_qtex 等可能只建了一半，继续走 paintGL 会
+        # 二次崩溃（原生 glDrawElements 指针未建 -> 空指针调用）。
+        # 直接返回，视口保持清屏色，错误提示已由 render_error 送达。
+        if not self._gl_ready:
+            return
         glf = self._glf
         dpr = self.devicePixelRatioF()
         glf.glViewport(0, 0, int(self.width() * dpr),
