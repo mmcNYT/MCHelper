@@ -351,9 +351,10 @@ class NbtDialog(QDialog):
         ll.setSpacing(4)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["键", "类型", "值"])
-        # 列宽：类型列 150px 容纳最长标签「长整数数组 [L;]」
-        # （108px 会截断中文标签 —— QComboBox 不自动展开）
-        self.tree.setColumnWidth(0, 170)
+        # 列宽：键 190（长键名+中文注释如 CustomNameVisible（名字常显）
+        # 需 240px，但 QLineEdit 可横向滚动，190 是不滚动也能看全大部分
+        # 的平衡值）；类型 150 容纳「长整数数组 [L;]」（108 会截断）
+        self.tree.setColumnWidth(0, 190)
         self.tree.setColumnWidth(1, 150)
         self.tree.setSelectionMode(
             QTreeWidget.SelectionMode.SingleSelection)
@@ -771,6 +772,30 @@ class NbtDialog(QDialog):
 
     def _accept(self):
         self._sync()
+        # 空键条目会被序列化**静默丢弃**（早先直接确定，用户发现
+        # 条目消失却不知原因）。确定前明确告知，给取消回去补名的机会。
+        empty_rows = []
+        for i in range(self.root.childCount()):
+            ch = self.root.child(i)
+            w = self.tree.itemWidget(ch, 0)
+            if isinstance(w, QLineEdit) and not w.text().strip():
+                empty_rows.append(ch)
+        if empty_rows:
+            ret = QMessageBox.warning(
+                self, "有空键名的条目",
+                f"有 {len(empty_rows)} 个条目的键名是空的（红底标出），"
+                "确定后会被丢弃。\n\n"
+                "「丢弃」继续；「取消」回去补键名。",
+                QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel)
+            if ret != QMessageBox.StandardButton.Discard:
+                # 取消：选中并聚焦第一个空键名，直接补
+                self.tree.setCurrentItem(empty_rows[0])
+                w = self.tree.itemWidget(empty_rows[0], 0)
+                if isinstance(w, QLineEdit):
+                    w.setFocus()
+                    w.selectAll()
+                return
         self.result_text = self.text.text().strip()
         self.accept()
 
