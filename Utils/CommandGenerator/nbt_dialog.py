@@ -194,6 +194,24 @@ _NUM_SUFFIX = {"byte": "b", "short": "s", "long": "L",
                "float": "f", "double": "d"}
 _ELEM_KIND = {"bytearray": "byte", "intarray": "int", "longarray": "long"}
 
+# 类型下拉的中文标签（data 仍是英文 kind，序列化不变）。
+# 「傻瓜式」：新手面对 13 个英文术语无从下手；中文 + 用途提示后
+# 一眼可辨（整数（32 位）vs 长整数（64 位）…）。
+KIND_LABELS = {
+    "compound": "复合标签 {键:值}",
+    "list": "列表 [a,b,c]",
+    "bytearray": "字节数组 [B;1,2]",
+    "intarray": "整数数组 [I;1,2]",
+    "longarray": "长整数数组 [L;1,2]",
+    "byte": "整数（-128~127）",
+    "short": "整数（±3.2万）",
+    "int": "整数（±21亿）",
+    "long": "长整数（64 位）",
+    "float": "小数（32 位）",
+    "double": "小数（64 位）",
+    "string": "文本",
+}
+
 _KEY_OK = re.compile(r'^[A-Za-z0-9_.\-+/]+$')
 
 
@@ -325,11 +343,16 @@ class NbtDialog(QDialog):
         self.tree.customContextMenuRequested.connect(self._menu)
         ll.addWidget(self.tree, 1)
         brow = QHBoxLayout()
-        for txt, fn in (("添加子项", self._add_child),
-                        ("添加兄弟", self._add_sibling),
-                        ("复制节点", self._duplicate),
-                        ("删除", self._delete)):
+        for txt, fn, tip in (
+            ("＋ 添加条目", self._add_child,
+             "加到「当前选中」里面；选中的若是普通值则加到它旁边"),
+            ("＋ 同级再添一条", self._add_sibling,
+             "在选中条目旁再加一条同类型的"),
+            ("复制", self._duplicate, "复制选中的条目（含全部内容）"),
+            ("删除", self._delete, "删除选中的条目"),
+        ):
             b = QPushButton(txt)
+            b.setToolTip(tip)
             b.clicked.connect(fn)
             brow.addWidget(b)
         brow.addStretch(1)
@@ -342,18 +365,21 @@ class NbtDialog(QDialog):
         rl = QVBoxLayout(right)
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(4)
-        rl.addWidget(QLabel("SNBT 原文（可粘贴后点「解析到树」反向编辑）"))
+        rl.addWidget(QLabel("SNBT 原文（粘贴现成的可反向编辑）"))
         self.text = QLineEdit()
+        self.text.setPlaceholderText("粘贴 {键:值,…} 后回车或点下方按钮")
+        self.text.returnPressed.connect(self._parse_text)
         rl.addWidget(self.text)
-        pb = QPushButton("解析到树")
+        pb = QPushButton("⤴ 解析到树")
         pb.clicked.connect(self._parse_text)
         rl.addWidget(pb)
         rl.addStretch(1)
         split.addWidget(right)
         split.setSizes([560, 340])
 
-        hint = QLabel("左侧键 / 类型 / 值均可直接修改；「快速添加」内置常用标签；"
-                      "重复或空的键名会标红")
+        hint = QLabel("三步上手：① 从「快速添加」选一个常用标签（或点根行的 ＋）"
+                      "→ ② 改键名和值 → ③ 确定。键名重复/留空会标红；"
+                      "右侧 SNBT 可粘贴现成的命令反向解析。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#888;font-size:11px;")
         lay.addWidget(hint)
@@ -369,16 +395,26 @@ class NbtDialog(QDialog):
         lay.addLayout(brow2)
 
     def _init_root(self, kind="compound"):
-        """根行：类型锁定（compound 或 list），键列显示 {} / []。"""
+        """根行：类型锁定（compound 或 list），键列显示 {} / []。
+
+        值格做成可点击的「＋ 添加第一项」—— 新手面对空树 + 一排
+        英文按钮的第一反应是「我从哪开始？」；根行直接给出入口。
+        """
         self._root_kind = kind
         self.root = QTreeWidgetItem(self.tree)
         k = QLabel("{}" if kind == "compound" else "[]")
         k.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.tree.setItemWidget(self.root, 0, k)
-        t = QLabel(kind)
+        t = QLabel(KIND_LABELS.get(kind, kind))
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.tree.setItemWidget(self.root, 1, t)
-        s = QLabel("{0 项}" if kind == "compound" else "[0 项]")
+        s = QLabel("＋ 点击添加第一项")
+        s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        s.setStyleSheet("color:#4a9eff;")
+        s.setCursor(Qt.CursorShape.PointingHandCursor)
+        s.setToolTip("或从上方「快速添加」选一个常用标签")
+        s.mousePressEvent = lambda ev: (self._add_child())
+        self._root_add_label = s
         self.tree.setItemWidget(self.root, 2, s)
 
     # ------------------------------------------------------------------
@@ -391,7 +427,14 @@ class NbtDialog(QDialog):
         if isinstance(w, QComboBox):
             return w.currentData() or "string"
         if isinstance(w, QLabel):
-            return w.text()
+            # 锁定类型的 QLabel 显示中文标签（KIND_LABELS）——
+            # 必须反查回英文 kind，否则中文泄进序列化分支
+            # （实测 intarray 子元素回写为 ""）。
+            text = w.text()
+            for k, lab in KIND_LABELS.items():
+                if lab == text:
+                    return k
+            return text if text in KINDS else "string"
         return "string"
 
     def _add_row(self, parent_item, key, struct=None, kind=None,
@@ -437,13 +480,13 @@ class NbtDialog(QDialog):
         # 数组元素类型锁定（bytearray 的子必须是 byte…），其余可换
         locked = pk in _ELEM_KIND
         if locked:
-            t = QLabel(_ELEM_KIND[pk])
+            t = QLabel(KIND_LABELS.get(_ELEM_KIND[pk], _ELEM_KIND[pk]))
             t.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tree.setItemWidget(item, 1, t)
         else:
             cb = QComboBox()
             for k in KINDS:
-                cb.addItem(k, k)
+                cb.addItem(KIND_LABELS.get(k, k), k)
             cb.setCurrentIndex(max(0, cb.findData(kind)))
             cb.currentIndexChanged.connect(
                 lambda *_: self._on_type_changed(item))
@@ -633,6 +676,11 @@ class NbtDialog(QDialog):
             self._renumber(item.child(i))
 
     def _summaries(self, item):
+        # 根行的值格是「＋ 添加」入口，不参与摘要覆写
+        if item is self.root:
+            for i in range(item.childCount()):
+                self._summaries(item.child(i))
+            return
         k = self._kind_of(item)
         w = self.tree.itemWidget(item, 2)
         if isinstance(w, QLabel):
@@ -899,10 +947,10 @@ class NbtDialog(QDialog):
     def _menu(self, pos):
         it = self.tree.itemAt(pos)
         m = QMenu(self)
-        m.addAction("添加子项", self._add_child)
+        m.addAction("＋ 添加条目", self._add_child)
         if it is not None and it is not self.root:
-            m.addAction("添加兄弟", self._add_sibling)
-            m.addAction("复制节点", self._duplicate)
+            m.addAction("＋ 同级再添一条", self._add_sibling)
+            m.addAction("复制", self._duplicate)
             p = it.parent()
             if p is not None and self._kind_of(p) in \
                     ("list",) + tuple(_ELEM_KIND):
