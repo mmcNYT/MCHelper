@@ -22,9 +22,10 @@ from PySide6.QtCore import QLocale, QRegularExpression, Qt, Signal  # noqa: E402
 from PySide6.QtGui import (QDoubleValidator, QKeySequence, QRegularExpressionValidator,
                            QShortcut)
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QSizePolicy, QSpinBox, QToolButton,
-                               QVBoxLayout, QWidget)
+                               QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QPushButton, QSizePolicy,
+                               QSpinBox, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from Utils.CommandGenerator import item_list as IL
 from Utils.CommandGenerator import resource_lists as RL
@@ -41,13 +42,13 @@ class _ParamRow(QWidget):
     def __init__(self, key=None, value=None, parent=None):
         super().__init__(parent)
         self._key = key
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
+        # 键左值右（两列网格：参数键列固定宽与顶部对齐，值列 stretch）
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
 
-        # 参数下拉
+        # 参数下拉（键）
         self.combo = QComboBox()
-        self.combo.setMinimumWidth(110)
         self.combo.addItem("选择参数…", "")
         for k, label, kind, default, extra in SELECTOR_ARGS:
             self.combo.addItem(f"{k}（{label}）", k)
@@ -56,17 +57,28 @@ class _ParamRow(QWidget):
             if i >= 0:
                 self.combo.setCurrentIndex(i)
         self.combo.currentIndexChanged.connect(self._on_key_changed)
-        lay.addWidget(self.combo)
 
-        # 值控件
+        # 值单元容器：_build_value 只替换其中的值控件
+        # （网格没有 insertWidget，切换参数类型时清空重建容器内容）
+        self._value_host = QWidget()
+        self._value_lay = QHBoxLayout(self._value_host)
+        self._value_lay.setContentsMargins(0, 0, 0, 0)
+        self._value_lay.setSpacing(4)
         self.value = None
         self._build_value(value)
 
-        # 删除
+        # 删除按钮与值控件并排在值单元内
         rm = QToolButton()
         rm.setText("✕")
         rm.clicked.connect(lambda: self.remove_requested.emit(self))
-        lay.addWidget(rm)
+        self._value_lay.addWidget(rm)
+
+        grid.addWidget(self.combo, 0, 0)
+        grid.addWidget(self._value_host, 0, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        # 键下拉宽度与顶部「选择器/预设/添加参数」列对齐
+        self.combo.setMinimumWidth(110)
 
     def _on_key_changed(self):
         self._key = self.combo.currentData()
@@ -146,7 +158,9 @@ class _ParamRow(QWidget):
             w.textChanged.connect(lambda *_: self.changed.emit())
             self.value = w
         if self.value is not None:
-            self.layout().insertWidget(self.layout().count() - 1, self.value)
+            # 插到删除按钮之前（删除按钮是该 HBox 的最后一项）
+            self._value_lay.insertWidget(
+                self._value_lay.count() - 1, self.value, 1)
 
     def key(self):
         return self._key
@@ -180,47 +194,48 @@ class TargetSelectorBuilder(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
 
-        # 顶部：选择器类型 + 预设
-        top = QHBoxLayout()
-        top.addWidget(QLabel("选择器"))
+        # 顶部（键左值右两列网格：选择器 / 预设 / 添加参数 三行对齐）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+
         self.selector = QComboBox()
         self.selector.setMinimumWidth(120)
         for label, val in SELECTOR_TYPES:
             self.selector.addItem(label, val)
         self.selector.currentIndexChanged.connect(self._on_changed)
-        top.addWidget(self.selector)
-        top.addStretch(1)
-        lay.addLayout(top)
+        grid.addWidget(QLabel("选择器"), 0, 0)
+        grid.addWidget(self.selector, 0, 1)
 
         # 预设下拉（早先是 18 个按钮横排挤成数行 —— 太臃肿；
         # 收进一个下拉，一步选中）
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("预设"))
         self.preset_combo = QComboBox()
         self.preset_combo.addItem("选择常用选择器…", "")
         for label, val in PRESETS:
             self.preset_combo.addItem(label, val)
         self.preset_combo.currentIndexChanged.connect(self._on_preset)
-        preset_row.addWidget(self.preset_combo, 1)
-        lay.addLayout(preset_row)
-
-        # 参数行
-        self.param_host = QWidget()
-        self.param_lay = QVBoxLayout(self.param_host)
-        self.param_lay.setContentsMargins(0, 0, 0, 0)
-        self.param_lay.setSpacing(2)
-        lay.addWidget(self.param_host)
+        grid.addWidget(QLabel("预设"), 1, 0)
+        grid.addWidget(self.preset_combo, 1, 1)
 
         # 添加参数
-        add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("添加参数"))
         self.add_combo = QComboBox()
         self.add_combo.addItem("选择参数…", "")
         for k, label, kind, default, extra in SELECTOR_ARGS:
             self.add_combo.addItem(f"{k}（{label}）", k)
         self.add_combo.currentIndexChanged.connect(self._on_add)
-        add_row.addWidget(self.add_combo, 1)
-        lay.addLayout(add_row)
+        grid.addWidget(QLabel("添加参数"), 2, 0)
+        grid.addWidget(self.add_combo, 2, 1)
+
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        lay.addLayout(grid)
+
+        # 参数行（已添加的条件；每行 = 键下拉 + 值控件 + 删除）
+        self.param_host = QWidget()
+        self.param_lay = QVBoxLayout(self.param_host)
+        self.param_lay.setContentsMargins(0, 0, 0, 0)
+        self.param_lay.setSpacing(2)
+        lay.addWidget(self.param_host)
 
         # 预览
         self.preview = QLabel()
