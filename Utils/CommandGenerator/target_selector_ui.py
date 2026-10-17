@@ -30,16 +30,21 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog,
 from Utils.CommandGenerator import item_list as IL
 from Utils.CommandGenerator import resource_lists as RL
 from Utils.CommandGenerator.target_selector import (  # noqa: E402
-    PRESETS, SELECTOR_ARGS, SELECTOR_TYPES, build_selector, parse_selector)
+    PRESETS, SELECTOR_ARGS, SELECTOR_TYPES, args_for_selector,
+    build_selector, parse_selector)
 
 
 class _ParamRow(QWidget):
-    """一行参数：参数下拉 + 值控件 + 删除按钮。"""
+    """一行参数：参数下拉 + 值控件 + 删除按钮。
+
+    参数下拉按当前选择器类型过滤（level/gamemode 仅玩家类、
+    type 仅 @e…），切换选择器时由构建器重建各行。
+    """
 
     changed = Signal()
     remove_requested = Signal(object)
 
-    def __init__(self, key=None, value=None, parent=None):
+    def __init__(self, key=None, value=None, selector="@e", parent=None):
         super().__init__(parent)
         self._key = key
         # 键左值右（两列网格：参数键列固定宽与顶部对齐，值列 stretch）
@@ -47,10 +52,10 @@ class _ParamRow(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(6)
 
-        # 参数下拉（键）
+        # 参数下拉（键）—— 只列该选择器下有效的参数
         self.combo = QComboBox()
         self.combo.addItem("选择参数…", "")
-        for k, label, kind, default, extra in SELECTOR_ARGS:
+        for k, label, kind, default, extra in args_for_selector(selector):
             self.combo.addItem(f"{k}（{label}）", k)
         if key:
             i = self.combo.findData(key)
@@ -217,10 +222,11 @@ class TargetSelectorBuilder(QWidget):
         grid.addWidget(QLabel("预设"), 1, 0)
         grid.addWidget(self.preset_combo, 1, 1)
 
-        # 添加参数
+        # 添加参数（按当前选择器过滤；切换选择器时重建）
         self.add_combo = QComboBox()
         self.add_combo.addItem("选择参数…", "")
-        for k, label, kind, default, extra in SELECTOR_ARGS:
+        for k, label, kind, default, extra in args_for_selector(
+                self.selector.currentData() or "@e"):
             self.add_combo.addItem(f"{k}（{label}）", k)
         self.add_combo.currentIndexChanged.connect(self._on_add)
         grid.addWidget(QLabel("添加参数"), 2, 0)
@@ -253,6 +259,23 @@ class TargetSelectorBuilder(QWidget):
             self._update_preview()
 
     def _on_changed(self):
+        """选择器类型变化：重建添加下拉 + 清除对新选择器无效的参数行。
+
+        如 @e 切到 @s：type/limit/sort 行会被移除（对 @s 无意义）。
+        """
+        sel = self.selector.currentData() or "@e"
+        # 重建「添加参数」候选
+        self.add_combo.blockSignals(True)
+        self.add_combo.clear()
+        self.add_combo.addItem("选择参数…", "")
+        for k, label, kind, default, extra in args_for_selector(sel):
+            self.add_combo.addItem(f"{k}（{label}）", k)
+        self.add_combo.blockSignals(False)
+        # 移除对新选择器无效的已有参数行
+        valid = {a[0] for a in args_for_selector(sel)}
+        for r in list(self._rows):
+            if r.key() not in valid:
+                self._remove_row(r)
         self._update_preview()
         self.changed.emit()
 
@@ -263,7 +286,8 @@ class TargetSelectorBuilder(QWidget):
         # 检查是否已存在
         if any(r.key() == key for r in self._rows):
             return
-        row = _ParamRow(key=key)
+        sel = self.selector.currentData() or "@e"
+        row = _ParamRow(key=key, selector=sel)
         row.changed.connect(self._on_changed)
         row.remove_requested.connect(self._remove_row)
         self.param_lay.addWidget(row)
@@ -295,9 +319,9 @@ class TargetSelectorBuilder(QWidget):
         # 清空现有行
         for r in list(self._rows):
             self._remove_row(r)
-        # 添加参数
+        # 添加参数（按预设的选择器过滤）
         for k, v in args.items():
-            row = _ParamRow(key=k, value=v)
+            row = _ParamRow(key=k, value=v, selector=selector)
             row.changed.connect(self._on_changed)
             row.remove_requested.connect(self._remove_row)
             self.param_lay.addWidget(row)
@@ -326,7 +350,7 @@ class TargetSelectorBuilder(QWidget):
         for r in list(self._rows):
             self._remove_row(r)
         for k, v in args.items():
-            row = _ParamRow(key=k, value=v)
+            row = _ParamRow(key=k, value=v, selector=selector)
             row.changed.connect(self._on_changed)
             row.remove_requested.connect(self._remove_row)
             self.param_lay.addWidget(row)

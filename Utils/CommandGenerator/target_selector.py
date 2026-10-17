@@ -68,6 +68,31 @@ SELECTOR_ARGS = [
      {"hint": "记分板条件，如 {obj:1..}"}),
 ]
 
+# 参数对选择器类型的适用性（游戏实际规则）：
+#   - type 仅 @e 有意义（其他选择器本身就是玩家/自己）
+#   - level/gamemode 仅玩家类选择器（@a/@p/@r）有效；@s 是自己也可
+#   - limit 对 @s 无意义（只选自己一个）
+#   - sort 对 @s 无意义
+# 未列出的参数默认全选择器可用。
+_ARG_SELECTORS = {
+    "type": {"@e"},                     # 仅实体选择器
+    "level": {"@a", "@p", "@r", "@s"},
+    "gamemode": {"@a", "@p", "@r", "@s"},
+    "limit": {"@a", "@p", "@r", "@e"},  # @s 除外
+    "sort": {"@a", "@p", "@r", "@e"},   # @s 除外
+    "team": {"@a", "@p", "@r", "@s"},   # 队伍仅玩家
+}
+
+
+def args_for_selector(selector: str) -> list:
+    """该选择器类型下**有效**的参数定义列表（SELECTOR_ARGS 子集）。
+
+    过滤规则见 _ARG_SELECTORS；未受限的参数全部返回。
+    """
+    return [a for a in SELECTOR_ARGS
+            if _ARG_SELECTORS.get(a[0], None) is None
+            or selector in _ARG_SELECTORS[a[0]]]
+
 # 预设（常用选择器，一键插入）
 PRESETS = [
     ("@p 最近玩家", "@p"),
