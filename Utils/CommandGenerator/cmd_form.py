@@ -118,8 +118,60 @@ class CommandForm(QWidget):
                     h.setWordWrap(True)
                     h.setStyleSheet("color: #888; font-size: 11px;")
                     self._form.addRow("", h)
+            self._apply_visibility()
         finally:
             self._busy = False
+
+    # ------------------------------------------------------------------
+    def _controller_values(self) -> dict:
+        """被 show_when 引用的控制字段当前值快照。"""
+        out = {}
+        for fs in self._fields:
+            sw = fs.get("show_when")
+            if sw:
+                ctrl = sw[0]
+                entry = self._widgets.get(ctrl)
+                if entry and entry[0] == "enum":
+                    out[ctrl] = entry[1].currentData()
+        return out
+
+    def _apply_visibility(self):
+        """按 show_when 显隐字段（label 行与 hint 行一起）。
+
+        同 execute_ui 的机制：**不能用 isVisible()** 判断「是否被条件
+        隐藏」—— 页未显示时全 False；必须显式记隐藏集合。
+        QFormLayout 的行没有独立 widget，需 labelForField 定位行号。
+        """
+        cur = self._controller_values()
+        self._hidden = set()
+        # 行号 -> 字段映射（label/hint 各占一行）
+        row_of = {}
+        row = 0
+        for fs in self._fields:
+            row_of[row] = fs          # 字段行
+            n = 1
+            if fs.get("hint"):
+                n = 2                 # hint 占额外一行
+            row += n
+        for fs in self._fields:
+            sw = fs.get("show_when")
+            if not sw:
+                continue
+            ctrl, allowed = sw
+            if cur.get(ctrl) not in allowed:
+                self._hidden.add(fs["key"])
+        # 批量显隐（用 QFormLayout 的 setRowVisible）
+        form = self._form
+        for r, fs in row_of.items():
+            key = fs["key"]
+            vis = key not in self._hidden
+            if hasattr(form, "setRowVisible"):
+                form.setRowVisible(r, vis)
+
+    def _on_control_changed(self):
+        """控制字段变更 -> 只重算显隐，不重建控件。"""
+        self._apply_visibility()
+        self._emit()
 
     # ------------------------------------------------------------------
     def _make_widget(self, fs: dict) -> QWidget:
@@ -221,7 +273,15 @@ class CommandForm(QWidget):
                 i = cb.findData(dflt)
                 if i >= 0:
                     cb.setCurrentIndex(i)
-            cb.currentIndexChanged.connect(self._emit)
+            # 被其他字段的 show_when 引用 -> 变更时重算显隐
+            controllers = {f.get("show_when", (None,))[0]
+                            for f in self._fields
+                            if f.get("show_when")}
+            if key in controllers:
+                cb.currentIndexChanged.connect(
+                    lambda *_: self._on_control_changed())
+            else:
+                cb.currentIndexChanged.connect(self._emit)
             self._widgets[key] = ("enum", cb)
             return cb
 
@@ -362,11 +422,17 @@ class CommandForm(QWidget):
 
     # ------------------------------------------------------------------
     def params(self) -> dict:
-        """收集参数字典（含分支名）。"""
+        """收集参数字典（含分支名）。
+
+        **被 show_when 隐藏的字段不进参数**（否则序列化会带上
+        与当前子分支矛盾的默认值）。
+        """
         out = {}
         if self._branch_combo is not None:
             out[self.spec.get("branch_key", "branch")] = self.branch()
         for key, entry in self._widgets.items():
+            if key in getattr(self, "_hidden", ()):
+                continue          # 子分支隐藏的字段跳过
             kind = entry[0]
             if kind == "text":
                 out[key] = entry[1].currentText() if hasattr(
