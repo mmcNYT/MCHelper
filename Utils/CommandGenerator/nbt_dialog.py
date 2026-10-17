@@ -325,20 +325,26 @@ class NbtDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.setSpacing(6)
 
-        # 快速添加 + 查找
+        # 添加标签：全部 793 个 NBT 键（nbt_all_keys，含中文与类型推断）。
+        # 下拉自带搜索（输入子串即过滤）—— 替代旧的独立查找框。
+        # **itemData 只存 key 字符串**：PySide6 把 tuple 包成 QVariant 后
+        # findData(同内容 tuple) 匹配不上（实测 -1），字符串无此问题。
         top = QHBoxLayout()
-        top.addWidget(QLabel("快速添加"))
+        top.addWidget(QLabel("添加标签"))
         self.quick = QComboBox()
-        self.quick.addItem("选择常用标签…", None)
-        for label, key, _snbt in QUICK_PRESETS:
-            self.quick.addItem(label, None if key is None else (key, _snbt))
+        self.quick.setEditable(True)
+        self.quick.addItem("输入搜索全部 793 个 NBT 键…", None)
+        from Utils.CommandGenerator.nbt_all_keys import ALL_KEYS
+        self._all_keys = {k: (t, s) for k, t, s in ALL_KEYS}
+        for key, kind, sample in ALL_KEYS:
+            cn = KEY_CN.get(key, "")
+            label = f"{key}（{cn}）" if cn else key
+            self.quick.addItem(label, key)
         self.quick.currentIndexChanged.connect(self._on_quick)
+        # 可搜索：中英文子串实时过滤
+        from Utils.CommandGenerator.combo_complete import attach_search
+        attach_search(self.quick)
         top.addWidget(self.quick, 1)
-        self.find_edit = QLineEdit()
-        self.find_edit.setPlaceholderText("查找键（回车定位）")
-        self.find_edit.setMaximumWidth(180)
-        self.find_edit.returnPressed.connect(self._find_next)
-        top.addWidget(self.find_edit)
         lay.addLayout(top)
 
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -398,8 +404,8 @@ class NbtDialog(QDialog):
         split.addWidget(right)
         split.setSizes([560, 340])
 
-        hint = QLabel("三步上手：① 从「快速添加」选一个常用标签（或点根行的 ＋）"
-                      "→ ② 改键名和值 → ③ 确定。键名重复/留空会标红；"
+        hint = QLabel("三步上手：① 从「添加标签」搜索并选一个键（793 个全部 NBT 键，"
+                      "含中文）→ ② 改键名和值 → ③ 确定。键名重复/留空会标红；"
                       "右侧 SNBT 可粘贴现成的命令反向解析。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#888;font-size:11px;")
@@ -434,7 +440,7 @@ class NbtDialog(QDialog):
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         s.setStyleSheet("color:#4a9eff;")
         s.setCursor(Qt.CursorShape.PointingHandCursor)
-        s.setToolTip("或从上方「快速添加」选一个常用标签")
+        s.setToolTip("或从上方「添加标签」搜索选一个键")
         s.mousePressEvent = lambda ev: (self._add_child())
         self._root_add_label = s
         self.tree.setItemWidget(self.root, 2, s)
@@ -940,19 +946,19 @@ class NbtDialog(QDialog):
         self._sync()
 
     # ------------------------------------------------------------------
-    # 快速添加 / 查找 / 右键菜单
+    # 添加标签（793 键下拉）/ 右键菜单
     # ------------------------------------------------------------------
     def _on_quick(self, idx):
         if self._busy:
             return
-        data = self.quick.itemData(idx)
-        if not data:
+        key = self.quick.itemData(idx)
+        if not key:
             return
-        key, snbt = data
+        kind, sample = self._all_keys.get(key, ("string", '""'))
         try:
-            struct = parse_snbt(snbt)
+            struct = parse_snbt(sample)
         except ValueError:
-            return
+            struct = sample
         # 落点：选中项若是复合标签 -> 其内；否则 -> 其父复合（或根）
         it = self._sel() or self.root
         k = self._kind_of(it)
@@ -961,41 +967,13 @@ class NbtDialog(QDialog):
         row = self._add_row(it, key, struct)
         self.tree.expandItem(it)
         self.tree.setCurrentItem(row)
+        # 键名列选中文本，回车即确认（或直接改键名）
+        self._focus_key(row)
         self._sync()
         # 复位下拉，便于重复添加同一标签
         self._busy = True
         self.quick.setCurrentIndex(0)
         self._busy = False
-
-    def _find_next(self):
-        q = self.find_edit.text().strip().lower()
-        if not q:
-            return
-        items = []
-
-        def walk(it):
-            for i in range(it.childCount()):
-                ch = it.child(i)
-                items.append(ch)
-                walk(ch)
-
-        walk(self.root)
-        if not items:
-            return
-        cur = self._sel()
-        start = items.index(cur) + 1 if cur in items else 0
-        for off in range(len(items)):
-            it = items[(start + off) % len(items)]
-            w = self.tree.itemWidget(it, 0)
-            txt = w.text() if w is not None else ""
-            if q in txt.lower():
-                p = it.parent()
-                while p is not None:
-                    self.tree.expandItem(p)
-                    p = p.parent()
-                self.tree.setCurrentItem(it)
-                self.tree.scrollToItem(it)
-                return
 
     def _menu(self, pos):
         it = self.tree.itemAt(pos)
