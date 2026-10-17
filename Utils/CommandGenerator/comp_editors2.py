@@ -18,10 +18,10 @@ comp_editors._Editor（提供 changed 信号与 cid），保证与
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QPushButton,
-                               QSpinBox, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QGridLayout,
+                                QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                                QPushButton, QSpinBox, QTableWidget,
+                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from Utils.CommandGenerator import comp_editors as _base
 from Utils.CommandGenerator import resource_lists as RL
@@ -274,18 +274,21 @@ class ContainerEditor(_ListTableEditor):
 
     def __init__(self, cid, parent=None):
         super().__init__(cid, parent, add_label="添加槽位")
-        # 键左值右：槽位（键）+ 物品（值）
-        row = QHBoxLayout()
-        row.addWidget(QLabel("槽位"))
+        # 键左值右（两列网格：键列/值列各自等宽）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.slot_spin = QSpinBox()
         self.slot_spin.setRange(0, 255)
         self.slot_spin.setPrefix("槽 ")
-        row.addWidget(self.slot_spin)
-        row.addWidget(QLabel("物品"))
         self.item_combo = _combo("item", allow_empty=True)
         self.item_combo.setMinimumWidth(200)
-        row.addWidget(self.item_combo, 1)
-        self._lay.insertLayout(self._lay.count() - 1, row)
+        grid.addWidget(QLabel("槽位"), 0, 0)
+        grid.addWidget(self.slot_spin, 0, 1)
+        grid.addWidget(QLabel("物品"), 1, 0)
+        grid.addWidget(self.item_combo, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        self._lay.addLayout(grid)
 
     def _add(self, val=None):
         if isinstance(val, dict):
@@ -338,18 +341,21 @@ class StewEditor(_ListTableEditor):
 
     def __init__(self, cid, parent=None):
         super().__init__(cid, parent, add_label="添加效果")
-        # 键左值右：效果（键）+ 时长（值）
-        row = QHBoxLayout()
-        row.addWidget(QLabel("效果"))
+        # 键左值右（两列网格：键列/值列各自等宽）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.fx_combo = _combo("effect", allow_empty=True)
         self.fx_combo.setMinimumWidth(200)
-        row.addWidget(self.fx_combo, 1)
-        row.addWidget(QLabel("时长(秒)"))
         self.dur_spin = QSpinBox()
         self.dur_spin.setRange(1, 3600)
         self.dur_spin.setValue(160)      # 官方默认（源码 lenientOptionalFieldOf("duration", 160)）
-        row.addWidget(self.dur_spin)
-        self._lay.insertLayout(self._lay.count() - 1, row)
+        grid.addWidget(QLabel("效果"), 0, 0)
+        grid.addWidget(self.fx_combo, 0, 1)
+        grid.addWidget(QLabel("时长(秒)"), 1, 0)
+        grid.addWidget(self.dur_spin, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        self._lay.addLayout(grid)
 
     def _add(self, val=None):
         # Entry 键名以源码为准：**id**（不是 effect）+ duration
@@ -420,9 +426,9 @@ class BannerEditor(_ListTableEditor):
 
     def __init__(self, cid, parent=None):
         super().__init__(cid, parent, add_label="添加图案")
-        # 键左值右：图案（键）+ 颜色（值）
-        row = QHBoxLayout()
-        row.addWidget(QLabel("图案"))
+        # 键左值右（两列网格：键列/值列各自等宽）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.pat_combo = _combo("trim_pattern", allow_empty=True)
         # 旗帜图案是独立注册表，用 BANNER_PATTERN 清单
         self.pat_combo.clear()
@@ -434,13 +440,16 @@ class BannerEditor(_ListTableEditor):
                                    rid)
         self.pat_combo.setCurrentIndex(0)
         self.pat_combo.setMinimumWidth(200)
-        row.addWidget(self.pat_combo, 1)
-        row.addWidget(QLabel("颜色"))
         self.color_combo = QComboBox()
         for c in self.DYE_COLORS:
             self.color_combo.addItem(c, c)
-        row.addWidget(self.color_combo)
-        self._lay.insertLayout(self._lay.count() - 1, row)
+        grid.addWidget(QLabel("图案"), 0, 0)
+        grid.addWidget(self.pat_combo, 0, 1)
+        grid.addWidget(QLabel("颜色"), 1, 0)
+        grid.addWidget(self.color_combo, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        self._lay.addLayout(grid)
 
     def _add(self, val=None):
         if isinstance(val, dict):
@@ -520,20 +529,23 @@ class BlockStateEditor(_Editor):
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         lay.addWidget(self.table)
-        # 键（属性名）左、值右 —— 与全工具统一
-        row = QHBoxLayout()
-        row.addWidget(QLabel("属性名"))
+        # 键左值右（两列网格：键列/值列各自等宽；添加按钮独占一行）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.k_edit = QLineEdit()
         self.k_edit.setPlaceholderText("如 facing")
-        row.addWidget(self.k_edit, 1)
-        row.addWidget(QLabel("值"))
         self.v_edit = QLineEdit()
         self.v_edit.setPlaceholderText("如 north")
-        row.addWidget(self.v_edit, 1)
+        grid.addWidget(QLabel("属性名"), 0, 0)
+        grid.addWidget(self.k_edit, 0, 1)
+        grid.addWidget(QLabel("值"), 1, 0)
+        grid.addWidget(self.v_edit, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
         ab = QPushButton("添加")
         ab.clicked.connect(self._add)
-        row.addWidget(ab)
-        lay.addLayout(row)
+        grid.addWidget(ab, 2, 0, 1, 2)
+        lay.addLayout(grid)
 
     def _add(self, val=None):
         if isinstance(val, (list, tuple)) and len(val) == 2:
@@ -604,21 +616,24 @@ class MapDecoEditor(_Editor):
         for i in (2, 3, 4):
             self.table.setColumnWidth(i, 64)
         lay.addWidget(self.table)
-        # 键左值右：标记 id（键）+ 类型（值）
-        row = QHBoxLayout()
-        row.addWidget(QLabel("标记 id"))
+        # 键左值右（两列网格：键列/值列各自等宽；添加按钮独占一行右对齐）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.id_edit = QLineEdit()
         self.id_edit.setPlaceholderText("标记 id（自定）")
-        row.addWidget(self.id_edit, 1)
-        row.addWidget(QLabel("类型"))
         self.type_combo = QComboBox()
         for t in self.DECO_TYPES:
             self.type_combo.addItem(t, t)
-        row.addWidget(self.type_combo)
+        grid.addWidget(QLabel("标记 id"), 0, 0)
+        grid.addWidget(self.id_edit, 0, 1)
+        grid.addWidget(QLabel("类型"), 1, 0)
+        grid.addWidget(self.type_combo, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
         ab = QPushButton("添加")
         ab.clicked.connect(self._add)
-        row.addWidget(ab)
-        lay.addLayout(row)
+        grid.addWidget(ab, 2, 0, 1, 2)
+        lay.addLayout(grid)
 
     def _add(self, val=None):
         if isinstance(val, dict) and "type" in val:
@@ -693,24 +708,23 @@ class ProfileEditor(_Editor):
 
     def __init__(self, cid, parent=None):
         super().__init__(cid, parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
-        r0 = QHBoxLayout()
-        # 键左值右
-        r0.addWidget(QLabel("玩家名（最简形式）"))
+        # 键左值右（两列网格：键列/值列各自等宽）
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("如 Notch；填了名字可留空 UUID")
         self.name_edit.textChanged.connect(self._emit)
-        r0.addWidget(self.name_edit, 1)
-        lay.addLayout(r0)
-        r1 = QHBoxLayout()
-        r1.addWidget(QLabel("UUID（可选）"))
+        grid.addWidget(QLabel("玩家名（最简形式）"), 0, 0)
+        grid.addWidget(self.name_edit, 0, 1)
         self.uuid_edit = QLineEdit()
         self.uuid_edit.setPlaceholderText("如 069a79f4-44e9-4726-a5be-fca90e38aaf5")
         self.uuid_edit.textChanged.connect(self._emit)
-        r1.addWidget(self.uuid_edit, 1)
-        lay.addLayout(r1)
+        grid.addWidget(QLabel("UUID（可选）"), 1, 0)
+        grid.addWidget(self.uuid_edit, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
 
     def value(self):
         name = self.name_edit.text().strip()
@@ -745,23 +759,25 @@ class ItemStackEditor(_Editor):
 
     def __init__(self, cid, parent=None, with_count=True):
         super().__init__(cid, parent)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        # 键左值右：物品（值）+ 数量（值）—— 两个键标签都放各自值左侧
+        # 键左值右（两列网格：键列/值列各自等宽）
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
         self.combo = _combo("item", allow_empty=True)
         self.combo.currentIndexChanged.connect(self._emit)
         self.combo.editTextChanged.connect(self._emit)
-        lay.addWidget(QLabel("物品"))
-        lay.addWidget(self.combo, 1)
+        grid.addWidget(QLabel("物品"), 0, 0)
+        grid.addWidget(self.combo, 0, 1)
         self.count_spin = None
         if with_count:
-            lay.addWidget(QLabel("数量"))
             self.count_spin = QSpinBox()
             self.count_spin.setRange(1, 99)
             self.count_spin.setValue(1)
             self.count_spin.valueChanged.connect(self._emit)
-            lay.addWidget(self.count_spin)
+            grid.addWidget(QLabel("数量"), 1, 0)
+            grid.addWidget(self.count_spin, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
 
     def value(self):
         iid = _strip_shell(self.combo.currentText())
@@ -940,21 +956,24 @@ class BeesEditor(_Editor):
         hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(2, 64)
         lay.addWidget(self.table)
-        # 键左值右：蜜蜂实体 + 在巢刻数
-        row = QHBoxLayout()
-        row.addWidget(QLabel("蜜蜂实体"))
+        # 键左值右（两列网格：键列/值列各自等宽；添加按钮独占一行）
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
         self.bee_combo = _combo("entity", allow_empty=True)
         self.bee_combo.setMinimumWidth(200)
-        row.addWidget(self.bee_combo, 1)
-        row.addWidget(QLabel("在巢刻数"))
         self.ticks_spin = QSpinBox()
         self.ticks_spin.setRange(0, 100000000)
         self.ticks_spin.setValue(0)
-        row.addWidget(self.ticks_spin)
+        grid.addWidget(QLabel("蜜蜂实体"), 0, 0)
+        grid.addWidget(self.bee_combo, 0, 1)
+        grid.addWidget(QLabel("在巢刻数"), 1, 0)
+        grid.addWidget(self.ticks_spin, 1, 1)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
         ab = QPushButton("添加蜜蜂")
         ab.clicked.connect(self._add)
-        row.addWidget(ab)
-        lay.addLayout(row)
+        grid.addWidget(ab, 2, 0, 1, 2)
+        lay.addLayout(grid)
 
     def _add(self, val=None):
         if isinstance(val, dict):
