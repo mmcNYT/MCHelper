@@ -248,7 +248,17 @@ class CommandForm(QWidget):
             cb = QComboBox()
             cb.setEditable(True)
             cb.addItem("")
-            for rid, label in self._resource_items(fs.get("source")):
+            src = fs.get("source")
+            for rid, label in self._resource_items(src):
+                # 实体源加图标（assets/CommandGenerator/entities）
+                if src == "entity":
+                    from Utils.CommandGenerator.entity_icons import (
+                        entity_icon_path)
+                    from PySide6.QtGui import QIcon
+                    ip = entity_icon_path(rid)
+                    if ip:
+                        cb.addItem(QIcon(ip), label, rid)
+                        continue
                 cb.addItem(label, rid)
             if dflt:
                 i = cb.findData(dflt)

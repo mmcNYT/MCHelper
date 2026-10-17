@@ -71,7 +71,17 @@ def _combo(source: str, allow_empty=True, editable=True):
     if allow_empty:
         cb.addItem("（不填）", "")
     for rid, label in resource_items(source):
-        cb.addItem(label if label == rid else f"{label}（{rid}）", rid)
+        text = label if label == rid else f"{label}（{rid}）"
+        # 实体源加图标（assets/CommandGenerator/entities）
+        if source == "entity":
+            from PySide6.QtGui import QIcon
+            from Utils.CommandGenerator.entity_icons import (
+                entity_icon_path)
+            ip = entity_icon_path(rid)
+            if ip:
+                cb.addItem(QIcon(ip), text, rid)
+                continue
+        cb.addItem(text, rid)
     cb.setCurrentIndex(0 if allow_empty else -1)
     # 可搜索：声音 1600+/物品 1708/实体 215 等大清单靠输入子串
     # 过滤（同 MapPreviewer 群系定位下拉的效果）

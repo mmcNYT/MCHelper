@@ -104,9 +104,17 @@ class _ParamRow(QWidget):
             w = QComboBox()
             w.setEditable(True)
             w.setPlaceholderText("可选")
+            from PySide6.QtGui import QIcon
+            from Utils.CommandGenerator.entity_icons import (
+                entity_icon_path)
             for eid in RL.ENTITY_IDS:
                 cn = RL.ENTITY_CN.get(eid, eid)
-                w.addItem(f"{cn}（{eid}）" if cn != eid else eid, eid)
+                label = f"{cn}（{eid}）" if cn != eid else eid
+                ip = entity_icon_path(eid)
+                if ip:
+                    w.addItem(QIcon(ip), label, eid)
+                else:
+                    w.addItem(label, eid)
             if value:
                 i = w.findData(value)
                 w.setCurrentIndex(i if i >= 0 else 0)

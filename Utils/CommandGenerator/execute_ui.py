@@ -380,8 +380,18 @@ class ChainRow(QWidget):
         if kind == "resource":
             w = QComboBox()
             w.setEditable(True)
-            for rid, label in _resource_items(extra.get("source")):
-                w.addItem(f"{label}（{rid}）" if label != rid else rid, rid)
+            src = extra.get("source")
+            from PySide6.QtGui import QIcon
+            from Utils.CommandGenerator.entity_icons import (
+                entity_icon_path)
+            for rid, label in _resource_items(src):
+                text = f"{label}（{rid}）" if label != rid else rid
+                # 实体源加图标
+                ip = entity_icon_path(rid) if src == "entity" else None
+                if ip:
+                    w.addItem(QIcon(ip), text, rid)
+                else:
+                    w.addItem(text, rid)
             i = w.findData(value)
             w.setCurrentIndex(i if i >= 0 else 0)
             w.currentIndexChanged.connect(lambda *_: self.changed.emit())
