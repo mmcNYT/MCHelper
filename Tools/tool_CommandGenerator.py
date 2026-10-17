@@ -18,7 +18,7 @@
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QGroupBox, QHBoxLayout,
                                QMessageBox, QPushButton, QTreeWidgetItem,
@@ -674,6 +674,9 @@ class CommandGeneratorWidget(BaseToolWidget):
     def _update_generic_preview(self, cmd: str, params: dict):
         """通用页预览：按指令给出有意义的摘要。"""
         u = self.ui
+        # 非 particle 指令：恢复 64x64 常规图标布局（粒子模式曾解限）
+        if cmd != "particle" and getattr(self, "_particle_full", False):
+            self._stop_particle_movie()
         name, sub, icon = cmd, "", ""
         lines = []
 
@@ -734,32 +737,38 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(sub)
         u.previewEnch.setText("\n".join(x for x in lines if x))
 
-        # 粒子指令：预览框播放 Wiki 渲染动图（QMovie）
+        # 粒子指令：预览框顶满播放 Wiki 渲染动图 + 下方标注粒子名
         if cmd == "particle":
+            self._particle_full = True
             pid = params.get("name") or ""
+            from Utils.CommandGenerator import resource_lists as RL
             from Utils.CommandGenerator.particle_preview import (
                 particle_media)
             media, is_gif = particle_media(pid)
             self._stop_particle_movie()
+            # 粒子名标注到预览框底部（复用 previewEnch 行）
+            cn = RL.PARTICLE_CN.get(pid, "")
+            u.previewEnch.setText(f"粒子：{cn}（{pid}）" if cn
+                                  else f"粒子：{pid}")
             if media:
+                # 解除 64x64 限制，铺满预览框
+                u.previewIcon.setMinimumSize(0, 0)
+                u.previewIcon.setMaximumSize(16777215, 16777215)
+                u.previewIcon.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 if is_gif:
                     from PySide6.QtGui import QMovie
                     self._particle_movie = QMovie(media)
                     self._particle_movie.setCacheMode(
                         QMovie.CacheMode.CacheAll)
-                    # 64x64 预览框内按比例铺满
                     m = self._particle_movie
                     m.frameChanged.connect(
-                        lambda *_: u.previewIcon.setPixmap(
-                            m.currentPixmap().scaled(
-                                64, 64,
-                                Qt.AspectRatioMode.KeepAspectRatio,
-                                Qt.TransformationMode.SmoothTransformation)))
+                        lambda *_: self._scale_particle_frame(m))
                     u.previewIcon.setText("")
                     m.start()
                     return
                 u.previewIcon.setPixmap(QPixmap(media).scaled(
-                    64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                    u.previewIcon.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation))
                 return
             u.previewIcon.setPixmap(QPixmap())
@@ -778,13 +787,39 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setPixmap(QPixmap())
             u.previewIcon.setText("—")
 
+    def _scale_particle_frame(self, movie):
+        """粒子动画帧铺满预览框（按右栏宽度缩放，不依赖瞬时布局态）。
+
+        QMovie 首帧可能在布局把 previewIcon 撑开**之前**送达，
+        此时控件 size() 仍是旧的 64x39 —— 改用右栏（rightCol）
+        宽度推导目标尺寸，布局前也稳定。
+        """
+        u = self.ui
+        pm = movie.currentPixmap()
+        if pm.isNull():
+            return
+        # 目标宽 = 右栏内容宽（预览框内左右 margin ~20）
+        col_w = u.rightCol.width()
+        if col_w < 80:                        # 布局未定时兜底
+            col_w = u.rightCol.minimumSize().width() or 250
+        target = QSize(max(160, col_w - 20), 160)
+        u.previewIcon.setPixmap(pm.scaled(
+            target, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+
     def _stop_particle_movie(self):
-        """停掉正在播放的粒子动画（切指令/物品时调用）。"""
+        """停掉正在播放的粒子动画，并恢复图标 64x64 常规布局。"""
         m = getattr(self, "_particle_movie", None)
         if m is not None:
             m.stop()
             m.deleteLater()
             self._particle_movie = None
+        if m is not None or getattr(self, "_particle_full", False):
+            u = self.ui
+            u.previewIcon.setMinimumSize(64, 64)
+            u.previewIcon.setMaximumSize(64, 64)
+            u.previewIcon.setPixmap(QPixmap())
+            self._particle_full = False
 
     def _update_generic_checks(self, cmd: str, text: str, params: dict,
                                ver: str):
