@@ -358,6 +358,9 @@ class ChainRow(QWidget):
             w.currentIndexChanged.connect(lambda *_: self.changed.emit())
             w.editTextChanged.connect(lambda *_: self.changed.emit())
             self._widgets[key] = ("resource", w)
+            # 可搜索：1053 个方块靠输入子串过滤
+            from Utils.CommandGenerator.combo_complete import attach_search
+            attach_search(w)
             return w
         if kind == "resource":
             w = QComboBox()
@@ -369,6 +372,9 @@ class ChainRow(QWidget):
             w.currentIndexChanged.connect(lambda *_: self.changed.emit())
             w.editTextChanged.connect(lambda *_: self.changed.emit())
             self._widgets[key] = ("resource", w)
+            # 可搜索：实体/群系/物品等大清单靠输入子串过滤
+            from Utils.CommandGenerator.combo_complete import attach_search
+            attach_search(w)
             return w
         # 兜底
         w = QLineEdit()

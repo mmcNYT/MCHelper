@@ -166,6 +166,9 @@ class CommandForm(QWidget):
             cb.currentIndexChanged.connect(self._emit)
             cb.editTextChanged.connect(self._emit)
             self._widgets[key] = ("block_res", cb)
+            # 可搜索：1053 个方块靠输入子串过滤
+            from Utils.CommandGenerator.combo_complete import attach_search
+            attach_search(cb)
             return cb
 
         if kind == "loot_table_res":
@@ -184,6 +187,9 @@ class CommandForm(QWidget):
             cb.currentIndexChanged.connect(self._emit)
             cb.editTextChanged.connect(self._emit)
             self._widgets[key] = ("resource", cb)
+            # 可搜索：119 个战利品表靠输入子串过滤
+            from Utils.CommandGenerator.combo_complete import attach_search
+            attach_search(cb)
             return cb
 
         if kind == "resource":
@@ -201,6 +207,9 @@ class CommandForm(QWidget):
             cb.currentIndexChanged.connect(self._emit)
             cb.editTextChanged.connect(self._emit)
             self._widgets[key] = ("resource", cb)
+            # 可搜索：实体/群系/声音/结构等大清单靠输入子串过滤
+            from Utils.CommandGenerator.combo_complete import attach_search
+            attach_search(cb)
             return cb
 
         if kind == "enum":

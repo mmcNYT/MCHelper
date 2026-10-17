@@ -5661,6 +5661,22 @@ specialValueText 处理，可选浮点恒返回 0.0，导致
   **信号 arity 坑**：`textChanged`/`valueChanged` 是带参信号，不可直连
   0 参的 `changed` —— 必须 `lambda *_: sig.emit()` 包一层，否则编辑
   文本值时 TypeError 被 Qt 吞掉、预览静默不更新（已修 7 处）
+- **可搜索下拉补全（combo_complete.py）**：所有可输入的下拉统一挂
+  「输入即过滤」补全 —— 效果同 MapPreviewer 群系定位下拉：获得焦点
+  或输入任意字符即弹出**完整候选列表**，并按输入子串**实时过滤**
+  （中英文、任意位置、大小写不敏感；空项/「（不填）」占位/禁用的
+  分组标题不进候选）。一处实现（`attach_search(combo)` 一行接入），
+  覆盖：give 页物品 1708/组件 79/目标、通用表单 resource/block/
+  loot_table、execute 链行 block/resource、组件编辑器 `_combo`
+  工厂（声音 1638/物品 1708/实体 215 等 11 类资源）、目标选择器
+  Field 与实体值下拉。候选项从 combo 自身逐项读取，combo 增删项时
+  经 model 的 rowsInserted/rowsRemoved 信号自动跟随。
+  **注意**：`completer.completionModel()` 返回 Qt 内部包装（非
+  QSortFilterProxyModel），定制/测试须经 `completer.filter_proxy`
+- **物品图标（独立 PNG）**：1708 个物品全部有图标。
+  现有 361 个独立 PNG 直接复用，其余 1480 个自动生成占位图标
+  （灰底 + 物品 id 首字母 + 中文名首字），下拉框每项加图标，
+  补全弹窗也同步显示图标。
 - **参数标签格式**：改为 `key（中文）` 格式（如 `type（实体类型）`），
   与 NBT key 显示格式统一
 - **可选字段标识**：可选参数值控件显示「可选」——

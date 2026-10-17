@@ -19,7 +19,7 @@
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QGroupBox, QHBoxLayout,
                                QMessageBox, QPushButton, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
@@ -28,11 +28,14 @@ from .tool_base import BaseToolWidget
 from CodesUI.CommandGenerator import Ui_commandGenerator
 from Utils.CommandGenerator import cmd_form as CF
 from Utils.CommandGenerator import cmd_specs as CS
+from Utils.CommandGenerator import combo_complete
 from Utils.CommandGenerator import commands as K
 from Utils.CommandGenerator import components as C
 from Utils.CommandGenerator import comp_editors as CE
 from Utils.CommandGenerator import give as G
 from Utils.CommandGenerator import item_list as IL
+
+attach_search = combo_complete.attach_search
 
 # 指令分组（对应 UI 设计：5 个语义分组）
 CMD_GROUPS = [
@@ -185,6 +188,8 @@ class CommandGeneratorWidget(BaseToolWidget):
         cb.clear()
         cb.addItems(TARGET_PRESETS)
         cb.setCurrentText("@p")
+        # 可搜索：输入任意子串过滤（同 MapPreviewer 群系定位下拉）
+        attach_search(cb)
 
     def _build_item_combo(self):
         cb = self.ui.giveItemCombo
@@ -203,12 +208,28 @@ class CommandGeneratorWidget(BaseToolWidget):
         icon_set = IL.ITEM_ICONS
         head = sorted(i for i in IF.REAL_ITEM_IDS if i in icon_set)
         tail = [i for i in IF.REAL_ITEM_IDS if i not in icon_set]
+        # 每项加图标（参考 StructurePreviewer 的下拉图标）
+        # 图标统一缩放至 32x32（下拉框标准图标尺寸）
+        ICON_SIZE = 32
         for iid in head + tail:
-            cb.addItem(f"{IF.item_label(iid)}（{iid}）", iid)
+            label = f"{IF.item_label(iid)}（{iid}）"
+            icon_path = os.path.join(_ICON_DIR, f"{iid}.png")
+            if os.path.exists(icon_path):
+                pm = QPixmap(icon_path)
+                if not pm.isNull():
+                    pm = pm.scaled(ICON_SIZE, ICON_SIZE,
+                                   Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+                    icon = QIcon(pm)
+                    cb.addItem(icon, label, iid)
+                    continue
+            cb.addItem(label, iid)
         # 默认钻石剑
         i = cb.findData("diamond_sword")
         if i >= 0:
             cb.setCurrentIndex(i)
+        # 可搜索：1708 项靠输入子串过滤（同 MapPreviewer 群系定位）
+        attach_search(cb)
 
     def _build_comp_combo(self):
         """「添加组件」下拉：按分组插入不可选的分隔标题。
@@ -234,6 +255,8 @@ class CommandGeneratorWidget(BaseToolWidget):
         # 默认停在第一个**可选**组件上，避免初始落在分组标题
         # （标题 data 为 None，此时点「添加」会取不到组件）
         self._select_first_real_component()
+        # 可搜索：79 个组件靠输入子串过滤（分组标题不进候选）
+        attach_search(cb)
 
     def _select_first_real_component(self):
         """把下拉定位到第一个真实组件（跳过分组标题）。"""
@@ -555,7 +578,7 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(f"{en} · minecraft:{iid}" if cn else
                              f"minecraft:{iid}")
 
-        # 图标
+        # 图标：独立 PNG（assets/StructurePreviewer/items/<id>.png）
         p = os.path.join(_ICON_DIR, f"{iid}.png")
         if os.path.exists(p):
             pm = QPixmap(p).scaled(

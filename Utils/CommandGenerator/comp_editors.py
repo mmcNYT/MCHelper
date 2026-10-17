@@ -115,9 +115,11 @@ class TextEditor(_Editor):
 
         row = QHBoxLayout()
         row.setSpacing(6)
+        # 键左值右：文本（值）在前，「颜色」键 + 其下拉（值）成对
         self.edit = QLineEdit()
         self.edit.setPlaceholderText("文本内容")
         self.edit.textChanged.connect(self._emit)
+        row.addWidget(QLabel("文本"))
         row.addWidget(self.edit, 1)
 
         row.addWidget(QLabel("颜色"))
@@ -251,6 +253,9 @@ class EnchantEditor(_Editor):
             self.add_combo.addItem(f'{e["name"]}（{e["id"]}）', e["id"])
         self.add_combo.setCurrentIndex(-1)
         self.add_combo.setMinimumWidth(220)
+        # 可搜索：附魔清单靠输入子串过滤
+        from Utils.CommandGenerator.combo_complete import attach_search
+        attach_search(self.add_combo)
         row.addWidget(self.add_combo, 1)
         self.add_btn = QPushButton("添加附魔")
         self.add_btn.clicked.connect(self._add)
@@ -392,13 +397,14 @@ class IntEditor(_Editor):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
+        # 键左值右：suffix（键说明）在左，数值（值）在右
+        if suffix:
+            lay.addWidget(QLabel(suffix))
         self.spin = QSpinBox()
         self.spin.setRange(minimum, maximum)
         self.spin.setValue(default)
         self.spin.valueChanged.connect(self._emit)
         lay.addWidget(self.spin)
-        if suffix:
-            lay.addWidget(QLabel(suffix))
         lay.addStretch(1)
 
     def value(self):
@@ -474,6 +480,8 @@ class ColorEditor(_Editor):
         self.hex_edit.textChanged.connect(self._on_text)
         btn = QPushButton("选色…")
         btn.clicked.connect(self._pick)
+        # 键左值右：颜色键在左，色块 + hex + 选色按钮（值）在右
+        lay.addWidget(QLabel("颜色"))
         lay.addWidget(self.swatch)
         lay.addWidget(self.hex_edit)
         lay.addWidget(btn)
