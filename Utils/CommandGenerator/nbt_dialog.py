@@ -197,19 +197,37 @@ _ELEM_KIND = {"bytearray": "byte", "intarray": "int", "longarray": "long"}
 # 类型下拉的中文标签（data 仍是英文 kind，序列化不变）。
 # 「傻瓜式」：新手面对 13 个英文术语无从下手；中文 + 用途提示后
 # 一眼可辨（整数（32 位）vs 长整数（64 位）…）。
+# **保持短**：类型列宽有限（~150px），过长的标签会被 QComboBox
+# 截断；完整说明放 tooltip（见 _add_row 的注释列）。
 KIND_LABELS = {
-    "compound": "复合标签 {键:值}",
-    "list": "列表 [a,b,c]",
-    "bytearray": "字节数组 [B;1,2]",
-    "intarray": "整数数组 [I;1,2]",
-    "longarray": "长整数数组 [L;1,2]",
-    "byte": "整数（-128~127）",
-    "short": "整数（±3.2万）",
-    "int": "整数（±21亿）",
-    "long": "长整数（64 位）",
-    "float": "小数（32 位）",
-    "double": "小数（64 位）",
+    "compound": "复合 {键:值}",
+    "list": "列表 [a,b]",
+    "bytearray": "字节数组 [B;]",
+    "intarray": "整数数组 [I;]",
+    "longarray": "长整数数组 [L;]",
+    "byte": "小整数 ±127",
+    "short": "整数 ±3.2万",
+    "int": "整数 ±21亿",
+    "long": "长整数 64位",
+    "float": "小数 32位",
+    "double": "小数 64位",
     "string": "文本",
+}
+
+# 类型下拉的完整说明（QComboBox setToolTip / 行 tooltip 用）
+KIND_TOOLTIPS = {
+    "compound": "复合标签 {键:值}：可以嵌套更多键值对",
+    "list": "列表 [a,b,c]：有序集合，元素按顺序排列",
+    "bytearray": "字节数组 [B;1,2]：每项 -128~127 的字节数",
+    "intarray": "整数数组 [I;1,2]：每项 ±21 亿的整数",
+    "longarray": "长整数数组 [L;1,2]：每项 64 位大数",
+    "byte": "字节整数：-128 ~ 127（SNBT 后缀 b）",
+    "short": "短整数：-32768 ~ 32767（后缀 s）",
+    "int": "整数：±21 亿（SNBT 裸数字）",
+    "long": "64 位长整数：±922 京（后缀 L）",
+    "float": "32 位小数（后缀 f）",
+    "double": "64 位小数，最常用（后缀 d）",
+    "string": "文本字符串",
 }
 
 _KEY_OK = re.compile(r'^[A-Za-z0-9_.\-+/]+$')
@@ -333,8 +351,10 @@ class NbtDialog(QDialog):
         ll.setSpacing(4)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["键", "类型", "值"])
-        self.tree.setColumnWidth(0, 190)
-        self.tree.setColumnWidth(1, 108)
+        # 列宽：类型列 150px 容纳最长标签「长整数数组 [L;]」
+        # （108px 会截断中文标签 —— QComboBox 不自动展开）
+        self.tree.setColumnWidth(0, 170)
+        self.tree.setColumnWidth(1, 150)
         self.tree.setSelectionMode(
             QTreeWidget.SelectionMode.SingleSelection)
         self.tree.setEditTriggers(
@@ -407,6 +427,7 @@ class NbtDialog(QDialog):
         self.tree.setItemWidget(self.root, 0, k)
         t = QLabel(KIND_LABELS.get(kind, kind))
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t.setToolTip(KIND_TOOLTIPS.get(kind, ""))
         self.tree.setItemWidget(self.root, 1, t)
         s = QLabel("＋ 点击添加第一项")
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -482,12 +503,15 @@ class NbtDialog(QDialog):
         if locked:
             t = QLabel(KIND_LABELS.get(_ELEM_KIND[pk], _ELEM_KIND[pk]))
             t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            t.setToolTip(KIND_TOOLTIPS.get(_ELEM_KIND[pk], ""))
             self.tree.setItemWidget(item, 1, t)
         else:
             cb = QComboBox()
             for k in KINDS:
                 cb.addItem(KIND_LABELS.get(k, k), k)
             cb.setCurrentIndex(max(0, cb.findData(kind)))
+            # 悬停选项看完整说明（列表展开时逐项提示）
+            cb.setToolTip(KIND_TOOLTIPS.get(kind, ""))
             cb.currentIndexChanged.connect(
                 lambda *_: self._on_type_changed(item))
             self.tree.setItemWidget(item, 1, cb)
@@ -761,6 +785,10 @@ class NbtDialog(QDialog):
         if kind not in CONTAINER_KINDS:
             item.takeChildren()
         self._set_value_cell(item, kind, None)
+        # tooltip 随类型更新（悬停可见完整说明）
+        tw = self.tree.itemWidget(item, 1)
+        if isinstance(tw, QComboBox):
+            tw.setToolTip(KIND_TOOLTIPS.get(kind, ""))
         self._sync()
 
     def _sel(self):
