@@ -5649,12 +5649,18 @@ specialValueText 处理，可选浮点恒返回 0.0，导致
   图标变体（`potion_awkward`…），只可用作「有图标的排前面」的排序权重，
   **不可当物品 id**。早先把它直接并进 give 下拉，导致 2769 项里混着
   假条目且显示不出译名（已修，现为 1708 项）。
-- **目标选择器可视化构建器**：所有 `targets` 字段（kill / effect / give / tp 等）
-  不再手写 `@e[type=zombie,distance=..10]` —— 用**下拉 + 参数行 + 实时预览**：
-  选择器类型（@p/@a/@e/@r/@s）+ 18 个预设（一键插入常用选择器）+ 20 种参数
-  （type/name/tag/team/x/y/z/distance/level/gamemode/limit 等），
-  参数值按类型分配控件（实体下拉 / 整数步进框 / 范围校验 / 游戏模式枚举），
-  实时预览 + 复制；解析与重建由 `target_selector.py` 统一处理
+- **目标选择器可视化构建器（下拉 + 统一弹窗）**：所有 `targets` 字段
+  （kill / effect / give / tp / execute 链行 等）是**可编辑下拉框**：
+  常用选择器（@s/@p/@a/@e/@r + 精选组合）一步选中，也可直接手输
+  玩家名或粘贴选择器原文；复杂条件点「编辑…」在统一弹窗里
+  **一步一步添加**。弹窗内：选择器类型（@p/@a/@e/@r/@s）+ 预设
+  **下拉**（18 个，一键插入；早先是按钮横排 —— 太臃肿已收进下拉）+
+  20 种参数（type/name/tag/team/x/y/z/distance/level/gamemode/limit
+  等），参数值按类型分配控件（实体下拉 / 整数步进框 / 范围校验 /
+  游戏模式枚举），实时预览。解析与重建由 `target_selector.py` 统一处理。
+  **信号 arity 坑**：`textChanged`/`valueChanged` 是带参信号，不可直连
+  0 参的 `changed` —— 必须 `lambda *_: sig.emit()` 包一层，否则编辑
+  文本值时 TypeError 被 Qt 吞掉、预览静默不更新（已修 7 处）
 - **参数标签格式**：改为 `key（中文）` 格式（如 `type（实体类型）`），
   与 NBT key 显示格式统一
 - **可选字段标识**：可选参数值控件显示「可选」——

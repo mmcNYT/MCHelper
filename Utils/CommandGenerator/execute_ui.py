@@ -288,6 +288,8 @@ class ChainRow(QWidget):
                 out[key] = w.currentData()
             elif kind == "resource":
                 out[key] = w.currentData()
+            elif kind == "target_sel":
+                out[key] = w.text()
             elif kind == "text":
                 out[key] = (w.currentText() if hasattr(w, "currentText")
                             else w.text())
@@ -315,14 +317,14 @@ class ChainRow(QWidget):
             self._widgets[key] = ("text", w)
             return w
         if kind == "targets":
-            w = QComboBox()
-            w.setEditable(True)
-            w.addItems(["@s", "@p", "@a", "@e", "@r",
-                        "@e[type=zombie]", "@a[team=red]"])
-            w.setCurrentText(str(value) if value is not None
-                             else (default or "@s"))
-            w.currentTextChanged.connect(lambda *_: self.changed.emit())
-            self._widgets[key] = ("text", w)
+            # 统一弹窗编辑（与通用表单同一 TargetSelectorField）
+            from Utils.CommandGenerator.target_selector_ui import (
+                TargetSelectorField)
+            w = TargetSelectorField(
+                str(value) if value is not None
+                else (default or "@s"))
+            w.changed.connect(lambda *_: self.changed.emit())
+            self._widgets[key] = ("target_sel", w)
             return w
         if kind == "enum":
             w = QComboBox()
@@ -392,6 +394,8 @@ class ChainRow(QWidget):
                 v = w.currentText() if hasattr(w, "currentText") \
                     else w.text()
                 v = v.strip()
+            elif kind == "target_sel":
+                v = w.text()
             elif kind == "enum":
                 v = w.currentData()
             elif kind == "resource":

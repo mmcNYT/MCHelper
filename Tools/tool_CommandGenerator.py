@@ -810,14 +810,17 @@ class CommandGeneratorWidget(BaseToolWidget):
         self._refresh()
 
     def _selector_dialog(self):
-        """简易选择器构造（在文本框中直接编辑）。"""
-        from PySide6.QtWidgets import QInputDialog
-        cur = self.ui.giveTargetCombo.currentText()
-        txt, ok = QInputDialog.getText(
-            self, "选择器", "目标选择器（例：@e[type=zombie,limit=3]）：",
-            text=cur)
-        if ok and txt.strip():
-            self.ui.giveTargetCombo.setCurrentText(txt.strip())
+        """目标选择器统一弹窗（与其他所有入口同一编辑器）。"""
+        from Utils.CommandGenerator.target_selector_ui import (
+            TargetSelectorDialog)
+        cur = self.ui.giveTargetCombo.currentText().strip()
+        dlg = TargetSelectorDialog(cur, title="give 目标选择器",
+                                   parent=self)
+        if dlg.exec():
+            txt = dlg.result_text
+            if txt:
+                self.ui.giveTargetCombo.setCurrentText(txt)
+                self._refresh()
 
     def _pick_item(self):
         """按中文名/英文 id 搜索物品。"""
@@ -855,4 +858,4 @@ class CommandGeneratorWidget(BaseToolWidget):
     # ------------------------------------------------------------------
     @classmethod
     def tool_name(cls) -> str:
-        return "指令生成器"
+        return "CommandGenerator"

@@ -128,9 +128,11 @@ class CommandForm(QWidget):
         dflt = fs.get("default")
 
         if kind == "targets":
+            # 统一弹窗编辑：表单里只占一行（只读行 + 编辑按钮），
+            # 复杂选择器在弹窗里构造（与 NBT 字段同一模式）。
             from Utils.CommandGenerator.target_selector_ui import (
-                TargetSelectorBuilder)
-            w = TargetSelectorBuilder(dflt or "")
+                TargetSelectorField)
+            w = TargetSelectorField(dflt or "")
             w.changed.connect(self._emit)
             self._widgets[key] = ("target_selector", w)
             return w
