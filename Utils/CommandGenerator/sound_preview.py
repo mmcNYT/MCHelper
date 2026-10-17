@@ -7,6 +7,10 @@ assets/sounds/block/stone/hit.ogg（gen_sound_assets.py 生成）。
 播放器用 **QMediaPlayer**（FFmpeg 后端）而非 QSoundEffect ——
 QSoundEffect 只支持 wav/aiff（实测 ogg 报 Error decoding source），
 Minecraft 的音效全部是 ogg/vorbis。
+
+FFmpeg 诊断日志（Input #0/vorbis 时间戳提示）已在 main.py 入口以
+QT_LOGGING_RULES=qt.multimedia.*=false 静音 —— 那些是无害的解码器
+噪声，不影响出声；必须在 QApplication 创建前设置才生效。
 """
 from __future__ import annotations
 

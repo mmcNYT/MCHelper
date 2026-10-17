@@ -1,4 +1,11 @@
+import os
 import sys
+
+# 必须在 QApplication 创建**之前**设置：静音 QtMultimedia/FFmpeg 的
+# 无害诊断日志（「Using Qt multimedia with FFmpeg」「Input #0, ogg…」
+# 「vorbis Could not update timestamps」等），否则每次试听音效都会
+# 刷到控制台。FFmpeg 的时间戳提示是解码器噪声，不影响实际出声。
+os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=false")
 
 from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtGui import QOpenGLContext, QOffscreenSurface, QSurfaceFormat
