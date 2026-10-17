@@ -5731,7 +5731,7 @@ ITEM_CN = {
     "zombified_piglin_spawn_egg": "僵尸猪灵刷怪蛋",
 }
 
-# 有图标（assets/StructurePreviewer/items/<id>.png）的 id
+# 有图标（assets/Public/items/<id>.png）的 id
 ITEM_ICONS = frozenset([
     "acacia_planks", "acacia_sapling", "amethyst_shard", "ancient_debris", "apple", "arrow",
     "baked_potato", "bamboo", "bamboo_hanging_sign", "bamboo_planks", "barrel", "beef",

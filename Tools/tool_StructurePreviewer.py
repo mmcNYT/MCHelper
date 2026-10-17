@@ -247,7 +247,7 @@ _HIGHLIGHT_AMBER = QColor(0xF1, 0xC4, 0x0F)
 # 方块物品/新版物品定义/重命名物品已在提取阶段折算为 <物品短名>.png）
 _ICON_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(
-        __file__))), "assets", "StructurePreviewer", "items")
+        __file__))), "assets", "Public", "items")
 
 # 附魔光效纹理（游戏原版 enchanted_glint_item，128x128 透明底紫白流纹；
 # 与 EnchantCaculator 共用同一份，已归入公共资源 assets/Public）
@@ -714,7 +714,7 @@ def _draw_pixel_text(p: "QPainter", x: int, y: int, text: str,
 class _GlintItemDelegate(QStyledItemDelegate):
     """战利品子行委托：行首绘制物品图标；附魔物品图标叠加流光。
 
-    - 图标：assets/StructurePreviewer/items/<物品短名>.png（16x16 原版
+    - 图标：assets/Public/items/<物品短名>.png（16x16 原版
     纹理），绘制在文本左侧（图标在名称前）；
     - 流光：附魔物品每帧在图标不透明区内加法混合两层反向滚动的
     光效纹理（CompositionMode_Plus 只提亮不遮盖，观感同游戏内

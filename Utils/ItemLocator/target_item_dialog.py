@@ -23,10 +23,10 @@ from . import catalog, search
 # 搜索半径（方块；与预览器 _LOCATE_RADIUS 一致）
 _RADIUS = 4096
 
-# 物品图标目录（16x16 原版纹理，与 StructurePreviewer 展示同源）
+# 物品图标目录（16x16 原版纹理，多工具公用：assets/Public/items）
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-_ITEM_ICON_DIR = os.path.join(_ROOT, "assets", "StructurePreviewer", "items")
+_ITEM_ICON_DIR = os.path.join(_ROOT, "assets", "Public", "items")
 
 
 def _item_icon(item_full: str) -> QIcon:

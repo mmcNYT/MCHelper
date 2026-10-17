@@ -112,7 +112,7 @@ TARGET_PRESETS = ["@p", "@a", "@e", "@r", "@s",
 
 _ICON_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "assets", "StructurePreviewer", "items")
+    "assets", "Public", "items")
 
 MAX_CMD_LEN = 25600
 
@@ -585,7 +585,7 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(f"{en} · minecraft:{iid}" if cn else
                              f"minecraft:{iid}")
 
-        # 图标：独立 PNG（assets/StructurePreviewer/items/<id>.png）
+        # 图标：独立 PNG（assets/Public/items/<id>.png）
         p = os.path.join(_ICON_DIR, f"{iid}.png")
         if os.path.exists(p):
             pm = QPixmap(p).scaled(

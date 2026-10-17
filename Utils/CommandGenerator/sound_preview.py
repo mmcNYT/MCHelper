@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""音效试听：assets/sounds/<id 按点分段>/<id>.ogg + QMediaPlayer。
+"""音效试听：assets/CommandGenerator/sounds/<id 按点分段>/<id>.ogg。
 
 音效 id（如 block.stone.hit）的 ogg 存于
-assets/sounds/block/stone/hit.ogg（gen_sound_assets.py 生成）。
+assets/CommandGenerator/sounds/block/stone/hit.ogg
+（gen_sound_assets.py 生成）。
 
 播放器用 **QMediaPlayer**（FFmpeg 后端）而非 QSoundEffect ——
 QSoundEffect 只支持 wav/aiff（实测 ogg 报 Error decoding source），
@@ -18,7 +19,7 @@ import os
 
 _DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "assets", "sounds")
+    "assets", "CommandGenerator", "sounds")
 
 _player = None      # 复用单实例（QMediaPlayer 创建开销大）
 _output = None

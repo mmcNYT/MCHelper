@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """粒子预览动图（Java 版 Wiki 渲染 GIF）。
 
-资源：assets/particles/*.gif|png（来自中文 Minecraft Wiki「Java版粒子」
-页面的渲染动图，120+ 个）。粒子 id（game 命令 /particle 的参数名）
-与 Wiki 文件名不完全一致，本模块提供 id -> 文件名 映射与回退规则。
+资源：assets/CommandGenerator/particles/*.gif|png（来自中文 Minecraft
+Wiki「Java版粒子」页面的渲染动图，120+ 个）。粒子 id（game 命令
+/particle 的参数名）与 Wiki 文件名不完全一致，本模块提供
+id -> 文件名 映射与回退规则。
 
 用法（预览框播放）：
     from Utils.CommandGenerator.particle_preview import particle_media
@@ -15,7 +16,7 @@ import os
 
 _DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "assets", "particles")
+    "assets", "CommandGenerator", "particles")
 
 # 粒子 id（不含 minecraft: 前缀）-> Wiki 文件名（不含扩展名）
 # 仅列不一致者；一致的（flame->flame.gif）由 _direct 推断。
