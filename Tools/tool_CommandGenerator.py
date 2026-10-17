@@ -737,7 +737,8 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(sub)
         u.previewEnch.setText("\n".join(x for x in lines if x))
 
-        # 粒子指令：预览框顶满播放 Wiki 渲染动图 + 下方标注粒子名
+        # 粒子指令：预览框顶满播放 Wiki 渲染动图 + 底部标注粒子名
+        # （隐藏 name/sub 文本列，图片顶格独占整行）
         if cmd == "particle":
             self._particle_full = True
             pid = params.get("name") or ""
@@ -746,7 +747,11 @@ class CommandGeneratorWidget(BaseToolWidget):
                 particle_media)
             media, is_gif = particle_media(pid)
             self._stop_particle_movie()
-            # 粒子名标注到预览框底部（复用 previewEnch 行）
+            # 顶格：隐藏标题/副标题（文本一并清空），粒子名放底部
+            u.previewName.setText("")
+            u.previewSub.setText("")
+            u.previewName.setVisible(False)
+            u.previewSub.setVisible(False)
             cn = RL.PARTICLE_CN.get(pid, "")
             u.previewEnch.setText(f"粒子：{cn}（{pid}）" if cn
                                   else f"粒子：{pid}")
@@ -767,7 +772,7 @@ class CommandGeneratorWidget(BaseToolWidget):
                     m.start()
                     return
                 u.previewIcon.setPixmap(QPixmap(media).scaled(
-                    u.previewIcon.size(),
+                    self._particle_target(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation))
                 return
@@ -787,28 +792,31 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setPixmap(QPixmap())
             u.previewIcon.setText("—")
 
+    def _particle_target(self):
+        """粒子动图的目标尺寸（右栏宽度推导，布局前也稳定）。"""
+        u = self.ui
+        col_w = u.rightCol.width()
+        if col_w < 80:                        # 布局未定时兜底
+            col_w = u.rightCol.minimumSize().width() or 250
+        return QSize(max(160, col_w - 20), 160)
+
     def _scale_particle_frame(self, movie):
-        """粒子动画帧铺满预览框（按右栏宽度缩放，不依赖瞬时布局态）。
+        """粒子动画帧铺满预览框（顶格，按右栏宽度缩放）。
 
         QMovie 首帧可能在布局把 previewIcon 撑开**之前**送达，
-        此时控件 size() 仍是旧的 64x39 —— 改用右栏（rightCol）
-        宽度推导目标尺寸，布局前也稳定。
+        此时控件 size() 仍是旧的 64x39 —— 故不依赖瞬时控件尺寸。
         """
         u = self.ui
         pm = movie.currentPixmap()
         if pm.isNull():
             return
-        # 目标宽 = 右栏内容宽（预览框内左右 margin ~20）
-        col_w = u.rightCol.width()
-        if col_w < 80:                        # 布局未定时兜底
-            col_w = u.rightCol.minimumSize().width() or 250
-        target = QSize(max(160, col_w - 20), 160)
         u.previewIcon.setPixmap(pm.scaled(
-            target, Qt.AspectRatioMode.KeepAspectRatio,
+            self._particle_target(),
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation))
 
     def _stop_particle_movie(self):
-        """停掉正在播放的粒子动画，并恢复图标 64x64 常规布局。"""
+        """停掉正在播放的粒子动画，并恢复常规预览布局。"""
         m = getattr(self, "_particle_movie", None)
         if m is not None:
             m.stop()
@@ -819,6 +827,9 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setMinimumSize(64, 64)
             u.previewIcon.setMaximumSize(64, 64)
             u.previewIcon.setPixmap(QPixmap())
+            # 恢复标题/副标题（粒子模式曾隐藏）
+            u.previewName.setVisible(True)
+            u.previewSub.setVisible(True)
             self._particle_full = False
 
     def _update_generic_checks(self, cmd: str, text: str, params: dict,
