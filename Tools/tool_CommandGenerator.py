@@ -468,6 +468,8 @@ class CommandGeneratorWidget(BaseToolWidget):
             u = self.ui
             ver = u.versionCombo.currentText()
             if cmd == "give":
+                # 切到 give：停掉可能残留的粒子动画
+                self._stop_particle_movie()
                 params = self._params()
                 params["ns_prefix"] = u.nsPrefixCheck.isChecked()
                 text = G.give(params, ver)
@@ -732,6 +734,38 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(sub)
         u.previewEnch.setText("\n".join(x for x in lines if x))
 
+        # 粒子指令：预览框播放 Wiki 渲染动图（QMovie）
+        if cmd == "particle":
+            pid = params.get("name") or ""
+            from Utils.CommandGenerator.particle_preview import (
+                particle_media)
+            media, is_gif = particle_media(pid)
+            self._stop_particle_movie()
+            if media:
+                if is_gif:
+                    from PySide6.QtGui import QMovie
+                    self._particle_movie = QMovie(media)
+                    self._particle_movie.setCacheMode(
+                        QMovie.CacheMode.CacheAll)
+                    # 64x64 预览框内按比例铺满
+                    m = self._particle_movie
+                    m.frameChanged.connect(
+                        lambda *_: u.previewIcon.setPixmap(
+                            m.currentPixmap().scaled(
+                                64, 64,
+                                Qt.AspectRatioMode.KeepAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation)))
+                    u.previewIcon.setText("")
+                    m.start()
+                    return
+                u.previewIcon.setPixmap(QPixmap(media).scaled(
+                    64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+                return
+            u.previewIcon.setPixmap(QPixmap())
+            u.previewIcon.setText("—")
+            return
+
         # 图标：物品类指令尝试按物品 id 找图标
         cand = icon or (params.get("entity") if cmd == "summon" else "") \
             or (params.get("enchantment") if cmd == "enchant" else "")
@@ -743,6 +777,14 @@ class CommandGeneratorWidget(BaseToolWidget):
         else:
             u.previewIcon.setPixmap(QPixmap())
             u.previewIcon.setText("—")
+
+    def _stop_particle_movie(self):
+        """停掉正在播放的粒子动画（切指令/物品时调用）。"""
+        m = getattr(self, "_particle_movie", None)
+        if m is not None:
+            m.stop()
+            m.deleteLater()
+            self._particle_movie = None
 
     def _update_generic_checks(self, cmd: str, text: str, params: dict,
                                ver: str):
