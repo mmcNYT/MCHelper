@@ -467,10 +467,14 @@ class CommandGeneratorWidget(BaseToolWidget):
             cmd = self._current_cmd()
             u = self.ui
             ver = u.versionCombo.currentText()
-            if cmd == "give":
-                # 切到 give：停掉可能残留的粒子动画 + 隐藏试听按钮
+            # 离开 particle 页必经此处：先停残留的粒子动图 + 恢复
+            # 预览布局（此前 execute 分支绕过清理，动图一直残留）；
+            # 试听按钮也一并隐藏（playsound 分支会按需重开）。
+            if cmd != "particle":
                 self._stop_particle_movie()
+            if cmd != "playsound":
                 self._ensure_listen_button(False)
+            if cmd == "give":
                 params = self._params()
                 params["ns_prefix"] = u.nsPrefixCheck.isChecked()
                 text = G.give(params, ver)
