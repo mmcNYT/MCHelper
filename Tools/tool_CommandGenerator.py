@@ -468,8 +468,9 @@ class CommandGeneratorWidget(BaseToolWidget):
             u = self.ui
             ver = u.versionCombo.currentText()
             if cmd == "give":
-                # 切到 give：停掉可能残留的粒子动画
+                # 切到 give：停掉可能残留的粒子动画 + 隐藏试听按钮
                 self._stop_particle_movie()
+                self._ensure_listen_button(False)
                 params = self._params()
                 params["ns_prefix"] = u.nsPrefixCheck.isChecked()
                 text = G.give(params, ver)
@@ -737,6 +738,10 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(sub)
         u.previewEnch.setText("\n".join(x for x in lines if x))
 
+        # playsound 指令：预览区加「🔊 试听」按钮
+        self._ensure_listen_button(cmd == "playsound",
+                                   params.get("sound") or "")
+
         # 粒子指令：预览框顶满播放 Wiki 渲染动图 + 底部标注粒子名
         # （隐藏 name/sub 文本列，图片顶格独占整行）
         if cmd == "particle":
@@ -791,6 +796,35 @@ class CommandGeneratorWidget(BaseToolWidget):
         else:
             u.previewIcon.setPixmap(QPixmap())
             u.previewIcon.setText("—")
+
+    def _ensure_listen_button(self, show: bool, sound_id: str = ""):
+        """playsound 预览区的「🔊 试听」按钮：按需创建/显隐。
+
+        点击播放当前选中的音效（assets/sounds 下的官方 ogg，
+        由 gen_sound_assets.py 从 .minecraft/assets 提取）。
+        """
+        u = self.ui
+        btn = getattr(self, "_listen_btn", None)
+        if show and btn is None:
+            from PySide6.QtWidgets import QPushButton
+            btn = QPushButton("🔊 试听")
+            btn.setToolTip("播放当前选中的音效")
+            btn.clicked.connect(self._play_current_sound)
+            # 放在 previewEnch 之前（预览框内倒数第二行）
+            lay = u.previewLayout
+            lay.insertWidget(lay.count() - 1, btn)
+            self._listen_btn = btn
+        if btn is not None:
+            btn.setVisible(show)
+            self._listen_sound = sound_id if show else ""
+
+    def _play_current_sound(self):
+        """试听当前 playsound 选中的音效。"""
+        from Utils.CommandGenerator.sound_preview import play_sound
+        sid = getattr(self, "_listen_sound", "")
+        if not play_sound(sid):
+            QMessageBox.information(self, "试听",
+                                   f"该音效无可用音频文件：\n{sid}")
 
     def _particle_target(self):
         """粒子动图的目标尺寸（右栏宽度推导，布局前也稳定）。"""

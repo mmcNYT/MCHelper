@@ -400,6 +400,11 @@ class CommandForm(QWidget):
         if source == "item":
             from Utils.CommandGenerator import item_filter as IF
             return IF.item_items()
+        if source == "sound":
+            # 音效译名：官方来自 zh_cn.json 的 subtitles.*（音效无直接
+            # lang 条目），sound_cn.py 由 gen_sound_assets.py 生成
+            from Utils.CommandGenerator.sound_cn import SOUND_CN
+            return [(x, SOUND_CN.get(x, x)) for x in RL.SOUND_IDS]
         entry = table.get(source)
         if not entry:
             return []
