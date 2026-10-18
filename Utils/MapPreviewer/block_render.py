@@ -250,13 +250,19 @@ def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     return shade
 
 def _grain(seed: int, x0: int, z0: int, h: int, w: int) -> np.ndarray:
-    """逐方块亮度抖动因子（确定性、跨块无缝）：0.94~1.06 微颗粒质感。"""
+    """逐方块材质纹理因子（确定性、跨块无缝）。
+
+    参考实测：MC 每方块内部亮度极差约 23（±11%），来自方块材质的
+    像素花纹。纯色块会让地图读起来像色卡拼贴而非 MC。这里给每个
+    方块一个固定的明暗偏移（同块内一致 -> 保持方块分明），振幅对齐
+    参考的 ±11%。
+    """
     rr = np.arange(h, dtype=np.int64)[:, None] + z0
     cc = np.arange(w, dtype=np.int64)[None, :] + x0
     hv = (cc * 73856093) ^ (rr * 19349663) ^ (int(seed) * 83492791)
     hv = (hv ^ (hv >> 13)) * 1274126177
     u = ((hv ^ (hv >> 16)) & 0xFFFF) / 65535.0
-    return (0.94 + 0.12 * u).astype(np.float32)
+    return (0.89 + 0.22 * u).astype(np.float32)
 
 
 def render_block_region(seed: int, cx_blocks: int, cz_blocks: int,
@@ -376,16 +382,18 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     # shade 层级重新打散，失去"每层分明"的平台感。
     rgb = rgb.astype(np.float32)
     if hillshade:
-        # 影调压缩（对齐参考 mean 88）：γ 压低中间调 + 高光软膝点
+        # 影调：参考实测方块亮度范围 32~207、色阶 158 级，说明亮部要拉高、
+        # 色阶要丰富。仅做轻微 γ 与高光软膝（膝点上移到 0.86，不再压扁）。
         t = np.clip(rgb, 0.0, 255.0) / 255.0
-        t = np.power(t, 0.95)
-        knee = 0.52
+        t = np.power(t, 0.94)
+        knee = 0.86
         hi = t > knee
-        t = np.where(hi, knee + (0.74 - knee)
-                     * (1.0 - np.exp(-(t - knee) / (0.74 - knee))), t)
+        t = np.where(hi, knee + (0.97 - knee)
+                     * (1.0 - np.exp(-(t - knee) / (0.97 - knee))), t)
         rgb = t * 255.0
-    # 颗粒：振幅调小（±3%），避免破坏层内一致性
-    rgb *= (0.970 + 0.060 * _grain(seed, x0, z0, h, w))[..., None]
+    # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
+    # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
+    rgb *= _grain(seed, x0, z0, h, w)[..., None]
     if hillshade:
         water_mask = heights < _SEA
         shade = _hillshade(heights.astype(np.int32), water_mask)
