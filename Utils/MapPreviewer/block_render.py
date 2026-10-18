@@ -118,6 +118,7 @@ def _load_colors() -> dict[str, tuple[int, int, int]]:
     if _COLORS is not None:
         return _COLORS
     table = dict(_TOP_COLORS)
+    table.setdefault("minecraft:air", (0, 0, 0))
     try:
         import json
         with open(_COLORS_PATH, encoding="utf-8") as f:
@@ -182,6 +183,24 @@ def _get_pack(seed: int) -> dict:
     dblob = comp.to_blob(root, rids, 63, blend, thu, snb)
     ctx = _native.build_from_blob(seed, dblob)
 
+    # 真俯视需要把「非地表方块」也纳入 id 空间（树叶、建筑材质等），
+    # 否则 blocks 数组无法表示它们。
+    _EXTRA = [
+        "minecraft:oak_leaves", "minecraft:birch_leaves",
+        "minecraft:spruce_leaves", "minecraft:jungle_leaves",
+        "minecraft:acacia_leaves", "minecraft:dark_oak_leaves",
+        "minecraft:mangrove_leaves", "minecraft:cherry_leaves",
+        "minecraft:azalea_leaves", "minecraft:flowering_azalea_leaves",
+        "minecraft:oak_stairs", "minecraft:spruce_stairs",
+        "minecraft:oak_slab", "minecraft:oak_planks", "minecraft:cobblestone",
+        "minecraft:glass_pane", "minecraft:oak_fence", "minecraft:oak_log",
+        "minecraft:dirt_path", "minecraft:wheat", "minecraft:torch",
+    ]
+    _have = set(block_names)
+    for _nm in _EXTRA:
+        if _nm not in _have:
+            block_names.append(_nm)
+            _have.add(_nm)
     try:
         from Utils.MapPreviewer import jm_colors as _jm
         _jmpal = _jm.build_block_palette(block_names)
@@ -421,13 +440,21 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
                            x0, z0, wet=wet)
 
-    # ---- 4b) 植被散布（树冠/花/草/作物，密度精确近似）----
+    # ---- 4b) 植被：写入 blocks/heights 参与「每列最高方块」竞争 ----
+    # 真俯视图的语义：树叶高于地面 -> 该列顶块变成 leaves。
+    # 不再"覆盖颜色"，而是改变该列的最高方块，最后统一配色。
     if _veg is not None and want_surface:
-        _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0)
+        _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
+                          out_blocks=blocks, out_heights=heights)
 
-    # ---- 4c) 结构 footprint（逐方块近似，覆盖植被）----
+    # ---- 4c) 结构：同样是参与最高方块竞争 ----
     if structures and want_surface:
-        _apply_structures(rgb, heights, x0, z0, h, w, seed, "26.2")
+        _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, "26.2",
+                          pack=pack)
+
+    # ---- 4d) 统一配色：按最终 blocks（每列最高方块）重新上色 ----
+    rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
+                           x0, z0, wet=wet)
 
     # ---- 5) 影调 → 颗粒 → 山体阴影（分级）----
     # 顺序很重要：影调和颗粒必须在乘法式阴影之前完成，否则会把已量化的
@@ -592,6 +619,10 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     colors = pack.get("jm_palette") or _load_colors()
     block_names = pack["block_names"]
     # 方块名 -> RGB 查找表（按 surface blob 顺序）
+    _miss = [nm for nm in block_names if nm not in colors]
+    if _miss and not getattr(_colorize_blocks, "_warned", False):
+        _colorize_blocks._warned = True
+        print("[block_render] 缺配色的方块:", _miss[:8])
     lut = np.array([colors.get(nm, (255, 0, 255)) for nm in block_names],
                    dtype=np.float32)                    # (nb,3)
     idx = np.clip(blocks, 0, len(block_names) - 1)
@@ -599,6 +630,33 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
 
     name_arr = np.asarray(block_names, dtype=object)
     nm = name_arr[idx]
+    # 树叶按群系 tint 着色：leaves 贴图是**灰度图**，直接取均值是灰色，
+    # 必须乘群系 foliage tint 才是绿色（JourneyMap 同法）。
+    _leaf_names = [b for b in block_names if "leaves" in b.split(":")[-1]]
+    if _leaf_names:
+        from Utils.MapPreviewer import jm_colors as _jm2
+        _lm = np.isin(nm, _leaf_names)
+        if _lm.any():
+            _leafcols = {}
+            for _b in _leaf_names:
+                _leafcols[_b] = {}
+            _rows = np.nonzero(_lm.any(axis=1))[0]
+            for _r in _rows[::4]:
+                for _c in range(0, w, 4):
+                    _bk = pack["id2key"].get(
+                        int(biome_grid[_r, _c]), "minecraft:plains"
+                    ).split(":")[-1]
+                    for _b in _leaf_names:
+                        _cc = _leafcols[_b].get(_bk)
+                        if _cc is None:
+                            _cc = _jm2.tinted_color(_b, _bk, colors)
+                            _leafcols[_b][_bk] = _cc
+                        if _cc is None:
+                            continue
+                        _sub = _lm[_r:_r + 4, _c:_c + 4] & (nm[_r:_r + 4, _c:_c + 4] == _b)
+                        if _sub.any():
+                            rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
+
 
     # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
     # 逐点 tint 会让同一高度层出现上百种绿，画面破碎（实测同层 143 色）。
@@ -698,6 +756,9 @@ _NO_VEG_BIOMES = {
     "wooded_badlands", "desert",
 }
 
+_LEAF_BID: dict[str, int] = {}
+_CURRENT_NAME2BID: dict[str, int] = {}
+
 _GROWABLE = {
     "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
     "minecraft:podzol", "minecraft:mycelium", "minecraft:moss_block",
@@ -722,7 +783,8 @@ def _hash01_grid(seed: int, x0: int, z0: int, h: int, w: int, salt: int):
     return (hv.astype(np.float64) / float(1 << 64)).astype(np.float32)
 
 
-def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
+def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
+                      out_blocks=None, out_heights=None):
     """按 biome 密度做确定性植被叠加（就地改 rgb float32）。
 
     树：trunk 概率=tree_p，命中处按树种半径铺冠层（深色覆盖）；
@@ -745,6 +807,12 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
         growable &= ~cold
 
     id2key = pack["id2key"]
+    _n2b = pack.get("name2bid") or {}
+    global _LEAF_BID
+    if not _LEAF_BID and _n2b:
+        for _k, _v in _n2b.items():
+            if _k.endswith("_leaves"):
+                _LEAF_BID[_k] = _v
     tree_p = np.zeros((h, w), np.float32)
     flower_p = np.zeros((h, w), np.float32)
     grass_p = np.zeros((h, w), np.float32)
@@ -811,6 +879,16 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                     continue
                 canopy[yy, xx] = True
                 rgb[yy, xx] = ccol
+                # 真俯视：树叶参与「每列最高方块」竞争（树冠高于地面）
+                if out_blocks is not None:
+                    lid = _LEAF_BID.get("minecraft:%s_leaves" % sp)
+                    if lid is None:
+                        lid = _LEAF_BID.get("minecraft:oak_leaves")
+                    if lid is not None:
+                        leaf_y = int(top_y) + max(1, rad // 2 + 1)
+                        if leaf_y > out_heights[yy, xx]:
+                            out_heights[yy, xx] = leaf_y
+                            out_blocks[yy, xx] = lid
                 # 树冠抬高该列高度：树叶是实体方块，会抬高 getBlockHeight。
                 # 但树冠顶面是**平坦的一层**（同高），只有树冠与周围地面之间
                 # 的高度差才产生坡度 -> 树冠整体被同一 slope 着色（有立体感
@@ -861,7 +939,8 @@ def _stamp_rect(rgb, heights, cx, cy, w, l, fill, border, h, wd, land=True):
             rgb[zz, xx] = border if edge else fill
 
 
-def _apply_structures(rgb, heights, x0, z0, h, w, seed, version):
+def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
+                      pack=None):
     """枚举区域结构并按 footprint 近似逐方块 stamp（覆盖地表/植被）。"""
     try:
         from Utils.Public import structure_map as smap
@@ -873,25 +952,31 @@ def _apply_structures(rgb, heights, x0, z0, h, w, seed, version):
             seed, version, (x0, z0, x0 + w - 1, z0 + h - 1), struct_keys=keys)
     except Exception:
         return
+    global _CURRENT_NAME2BID
+    _CURRENT_NAME2BID = (pack or {}).get("name2bid") or {}
     for st in structs:
         key = st.get("struct")
         ax = int(st.get("x", 0)) - x0
         az = int(st.get("z", 0)) - z0
         land = key not in _WATER_STRUCTURES
         if key == "village":
-            _stamp_village(rgb, heights, ax, az, h, w, seed,
+            _stamp_village(rgb, heights, blocks, ax, az, h, w, seed,
                           int(st.get("x", 0)), int(st.get("z", 0)))
         elif key in _FOOTPRINTS:
             wl, ll, fill, border = _FOOTPRINTS[key]
             _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
 
 
-def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
-    """用真实 jigsaw 还原的村庄方块替换矩形近似。
+def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
+                   colors=None):
+    """用真实 jigsaw 还原的村庄，并让建筑方块参与「每列最高方块」竞争。
 
     读 jar 内村庄模板 NBT（town_centers/houses/streets/decor），按权重
-    拼出整座村庄，取每列最高实体方块的颜色落到图上 —— 房屋外形、门窗、
-    草径(dirt_path)、农田、水井都是模板里的真实布局。
+    拼出整座村庄，取每列最高实体方块 —— 房屋外形、门窗、草径(dirt_path)、
+    农田、水井都是模板里的真实布局。
+
+    真俯视语义：建筑的 y 高于地表时，该列顶块变成建筑的方块（屋顶），
+    因此只能看到屋顶，看不到房屋内部。
     """
     try:
         from Utils.MapPreviewer import village_jigsaw as _vj
@@ -900,10 +985,7 @@ def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
         return
     try:
         from Utils.MapPreviewer import village_jigsaw_exact as _vx
-        # 地形适配：MC 用 project_start_to_heightmap=WORLD_SURFACE_WG 把
-        # 村庄贴到锚点处地表，故 base_y 取该列实测地表高度。
-        # 若地表低于海平面（村庄在水边），抬到海平面以上 1 格，
-        # 对应 terrain_adaptation=beard_thin 的填平效果。
+        # 地形适配：村庄贴到锚点处地表；低于海平面则抬到 SEA+1
         _by = int(heights[az, ax]) if (0 <= az < h and 0 <= ax < w) else 64
         _by = max(_by, _SEA + 1)
         fp = _vx.build_village(seed, wx, wz, base_y=_by)
@@ -914,39 +996,68 @@ def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
             return
     if not fp["blocks"]:
         return
-    grid = _vj.footprint_to_grid(fp, wx - ax, wz - az, w, h)
+
+    # 逐列取村庄的最高实体方块 + 其世界 y
+    gx0, gz0 = wx - ax, wz - az
+    vgrid = np.empty((h, w), dtype=object)
+    vgrid[:] = None
+    vtop = np.full((h, w), -9999, np.int32)
+    skip = ("air", "jigsaw", "structure_void", "cave_air", "void_air")
+    for (bx, by, bz, nm) in fp["blocks"]:
+        px, pz = bx - gx0, bz - gz0
+        if not (0 <= px < w and 0 <= pz < h):
+            continue
+        if nm.split(":")[-1] in skip:
+            continue
+        if by > vtop[pz, px]:
+            vtop[pz, px] = by
+            vgrid[pz, px] = nm
+
     names = set()
-    for row in grid:
+    for row in vgrid:
         for nm in row:
             if nm:
                 names.add(nm)
     if not names:
         return
     pal = _jm.build_block_palette(sorted(names))
-    # 村庄整体占地（含房屋之间的空地）：用方块聚集的包围盒 + 逐列膨胀，
-    # 对应 MC terrain_adaptation=beard_thin 把村庄底座铺平的效果。
-    covered = grid != None
+    n2b = _CURRENT_NAME2BID or {}
+
+    # 村庄底座铺平（含房屋间洼地），对应 terrain_adaptation=beard_thin
+    covered = vgrid != None
     pad = np.zeros_like(covered)
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             ys = np.clip(np.arange(h) + dy, 0, h - 1)
             xs = np.clip(np.arange(w) + dx, 0, w - 1)
             pad |= covered[np.ix_(ys, xs)]
-    ground = pal.get("minecraft:dirt_path") or pal.get("minecraft:dirt") \
-        or (139, 112, 76)
+    ground_nm = "minecraft:dirt_path"
+    if ground_nm not in n2b:
+        ground_nm = "minecraft:dirt"
+    ground_col = pal.get(ground_nm) or (139, 112, 76)
+    ground_bid = n2b.get(ground_nm)
+
     for r in range(h):
         for c in range(w):
-            nm = grid[r, c]
+            nm = vgrid[r, c]
             if nm:
                 col = pal.get(nm)
                 if col is not None:
                     rgb[r, c] = col
-                    if heights[r, c] < _SEA:
-                        heights[r, c] = _SEA
+                # 真俯视：建筑方块参与竞争
+                bid = n2b.get(nm)
+                if bid is not None and int(vtop[r, c]) > heights[r, c]:
+                    heights[r, c] = int(vtop[r, c])
+                    blocks[r, c] = bid
+                elif heights[r, c] < _SEA:
+                    heights[r, c] = _SEA
             elif pad[r, c] and heights[r, c] < _SEA:
-                # 房屋之间/边缘的洼地：铺村庄地面色，避免露出水面
-                rgb[r, c] = ground
+                rgb[r, c] = ground_col
                 heights[r, c] = _SEA
+                if ground_bid is not None:
+                    blocks[r, c] = ground_bid
+
+
 def _colorize_height(heights: np.ndarray, hillshade: bool = False) -> np.ndarray:
     """纯海拔快速档：水蓝、陆地按高度渐绿灰，可选阴影。"""
     h, w = heights.shape
