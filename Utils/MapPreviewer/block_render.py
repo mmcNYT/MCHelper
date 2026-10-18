@@ -725,11 +725,34 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     # 冻结海面：冰/浮冰之下的水体在 MC 里仍属海洋，JourneyMap 也按水色
     # 显示（官方 frozen_ocean 瓦片实测为深蓝 (42,41,148)）。
     # 故 _ICE_BLOCKS 不排除水面判定，只排除雪（雪是真正的地表覆盖）。
+    # ---- 寒冷群系水面结冰（复刻 biome feature freeze_top_layer）----
+    # MC 的冰不是密度函数产物：biome 的 features[10] 里 freeze_top_layer
+    # 会把「顶面是水」的列替换成 ice。故这里按群系规则补冰层。
+    # 判据：群系在 _FREEZE_BIOMES 内 且 该列是开阔水面 且 高度贴海平面。
+    _frz = np.zeros((h, w), bool)
+    if wet is not None:
+        # 逐列判定（4x4 量化会漏掉河岸，实测冻河 98.9% 列是水域，
+        # 量化后只覆盖到 26%，导致冰面残缺）
+        _id2key = pack["id2key"]
+        for _r in range(h):
+            for _c in range(w):
+                _bk = _id2key.get(
+                    int(biome_grid[_r, _c]), "").split(":")[-1]
+                if _bk in _FREEZE_BIOMES:
+                    _frz[_r, _c] = True
+    # 结冰列：寒冷群系里的开阔水面（冻河的顶块是 gravel，不含 ice 方块，
+    # 所以不能靠顶块类型判断是否已结冰）
+    _ice_mask = np.zeros((h, w), bool)
+    if wet is not None and _frz.any():
+        _ice_mask = _frz & np.asarray(wet, bool)
+
     if wet is not None:
         # native 精确判定（该列海平面处确为开阔水体）。
         # 有 wet 掩码时不再按方块类型排除：雪/冰覆盖的水面仍属水域
         # （官方 frozen_ocean 瓦片显示为深蓝，而非白色冰面）。
         water_mask = np.asarray(wet, bool)
+        # 已结冰的列不再按水色渲染（否则水色会把冰盖掉）
+        water_mask = water_mask & ~_ice_mask
     else:
         # 兜底启发式
         deep = heights < (_SEA - 6)
@@ -763,6 +786,11 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                        + wr[_sh] * _t)
         rgb[water_mask] = wr[water_mask]
 
+    # 冰面最后绘制（压过水色）：冻河/冻洋表面应整片覆冰
+    if _ice_mask.any():
+        _icec = colors.get("minecraft:ice") or _ICE_RGB
+        rgb[_ice_mask] = _icec
+
 
     # 地表不做贴图逐像素采样：贴图会让同一高度层出现上百种颜色（破碎）。
     # 地形配色 = 方块固有色（+ 群系草色），整层统一；材质细节只保留给树冠。
@@ -783,6 +811,14 @@ _NO_VEG_BIOMES = {
     "ice_spikes", "frozen_peaks", "jagged_peaks", "snowy_slopes",
     "stony_peaks", "stony_shore", "badlands", "eroded_badlands",
     "wooded_badlands", "desert",
+}
+
+# 会触发 freeze_top_layer 的寒冷群系（MC biome features[10] 含该特征）
+_FREEZE_BIOMES = {
+    "frozen_river", "frozen_ocean", "deep_frozen_ocean", "ice_spikes",
+    "snowy_plains", "snowy_taiga", "snowy_beach", "snowy_slopes",
+    "frozen_peaks", "jagged_peaks", "grove", "deep_cold_ocean",
+    "cold_ocean",
 }
 
 _LEAF_BID: dict[str, int] = {}
