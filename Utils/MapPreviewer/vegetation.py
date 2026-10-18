@@ -123,18 +123,18 @@ def _configured_category(name: str, depth=0) -> str:
 
 # 树种 -> (冠层半径方块, 冠层RGB)。半径决定覆盖面积。
 _SPECIES = {
-    "oak":       (2, (60, 96, 44)),
-    "fancy_oak": (3, (58, 100, 42)),
-    "birch":     (2, (92, 128, 62)),
-    "spruce":    (2, (44, 78, 58)),
-    "pine":      (2, (40, 74, 56)),
-    "jungle":    (3, (52, 96, 38)),
+    "oak":       (2, (44, 76, 32)),
+    "fancy_oak": (3, (42, 78, 30)),
+    "birch":     (2, (74, 108, 50)),
+    "spruce":    (2, (32, 62, 46)),
+    "pine":      (2, (30, 58, 44)),
+    "jungle":    (3, (38, 78, 28)),
     "acacia":    (3, (116, 96, 36)),
-    "dark_oak":  (3, (48, 82, 46)),
-    "swamp":     (2, (64, 88, 44)),
-    "mangrove":  (2, (66, 92, 48)),
+    "dark_oak":  (3, (34, 62, 34)),
+    "swamp":     (2, (48, 68, 34)),
+    "mangrove":  (2, (50, 72, 36)),
     "cherry":    (3, (214, 156, 176)),
-    "default":   (2, (60, 96, 44)),
+    "default":   (2, (44, 76, 32)),
 }
 
 # biome 短名 -> 主导树种（placed 名未能判定时的兜底）
@@ -209,13 +209,25 @@ def _attempts_from_placements(placements) -> float:
     return v
 
 
+_SPECIES_KEYS = ("cherry", "mangrove", "jungle", "acacia", "dark_oak", "birch",
+                 "spruce", "pine", "swamp", "fancy_oak", "oak", "palm")
+
+
 def _species_of(biome_short: str, placed_short: str) -> str:
+    """从 placed 名推断树种；多名混种（如 trees_birch_and_oak）时以群系
+    主导树种为准，避免"先匹配到 birch 就把整片森林当白桦"的错判。"""
     n = placed_short
-    for key in ("cherry", "mangrove", "jungle", "acacia", "dark_oak", "birch",
-                "spruce", "pine", "swamp", "fancy_oak", "oak", "palm"):
-        if key in n:
-            return key
-    return _BIOME_SPECIES.get(biome_short, "default")
+    hits = [k for k in _SPECIES_KEYS if k in n]
+    biome_sp = _BIOME_SPECIES.get(biome_short)
+    if biome_sp:
+        # 混种：群系主导树种在命中列表里就用它
+        if not hits or len(hits) > 1:
+            if biome_sp in hits or len(hits) > 1 or not hits:
+                return biome_sp
+        return hits[0]
+    if hits:
+        return hits[0]
+    return "default"
 
 
 _PROFILE: dict[str, dict] = {}
