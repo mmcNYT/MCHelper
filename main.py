@@ -5,7 +5,11 @@ import sys
 # 无害诊断日志（「Using Qt multimedia with FFmpeg」「Input #0, ogg…」
 # 「vorbis Could not update timestamps」等），否则每次试听音效都会
 # 刷到控制台。FFmpeg 的时间戳提示是解码器噪声，不影响实际出声。
-os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=false")
+#
+# 注意用**强制覆盖**而非 setdefault：若外部环境已设过
+# QT_LOGGING_RULES（IDE/其他 Qt 程序残留），setdefault 会静默跳过，
+# 导致规则不生效（实测 GUI 里仍刷 vorbis 日志的根因）。
+os.environ["QT_LOGGING_RULES"] = "qt.multimedia.*=false"
 
 from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtGui import QOpenGLContext, QOffscreenSurface, QSurfaceFormat
