@@ -57,34 +57,34 @@ _COLORS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # 可产出方块顶面精确色（30 种全量，杜绝品红兜底）；
 # 纹理平均色文件若存在会覆盖（更贴近真实材质），再叠加本表兜底。
 _TOP_COLORS: dict[str, tuple[int, int, int]] = {
-    "minecraft:stone": (146, 138, 126),
+    "minecraft:stone": (140, 136, 128),
     "minecraft:cobblestone": (140, 134, 128),
     "minecraft:deepslate": (88, 86, 84),
     "minecraft:dirt": (142, 106, 76),
     "minecraft:coarse_dirt": (130, 96, 68),
-    "minecraft:podzol": (96, 74, 34),
-    "minecraft:mycelium": (116, 104, 108),
+    "minecraft:podzol": (98, 78, 42),
+    "minecraft:mycelium": (112, 102, 104),
     "minecraft:farmland": (120, 85, 56),
-    "minecraft:sand": (228, 216, 172),
-    "minecraft:red_sand": (186, 108, 46),
-    "minecraft:gravel": (146, 140, 132),
-    "minecraft:clay": (168, 170, 176),
-    "minecraft:sandstone": (225, 212, 166),
+    "minecraft:sand": (228, 214, 170),
+    "minecraft:red_sand": (178, 106, 50),
+    "minecraft:gravel": (138, 134, 128),
+    "minecraft:clay": (162, 166, 172),
+    "minecraft:sandstone": (224, 212, 170),
     "minecraft:red_sandstone": (176, 96, 46),
-    "minecraft:mud": (72, 66, 60),
-    "minecraft:terracotta": (158, 106, 78),
-    "minecraft:white_terracotta": (214, 190, 174),
-    "minecraft:light_gray_terracotta": (146, 122, 112),
-    "minecraft:yellow_terracotta": (190, 144, 54),
-    "minecraft:orange_terracotta": (140, 74, 38),
-    "minecraft:red_terracotta": (150, 74, 56),
-    "minecraft:brown_terracotta": (86, 58, 42),
-    "minecraft:moss_block": (89, 109, 45),
-    "minecraft:snow_block": (245, 248, 238),
-    "minecraft:powder_snow": (250, 252, 245),
+    "minecraft:mud": (66, 62, 46),
+    "minecraft:terracotta": (144, 96, 64),
+    "minecraft:white_terracotta": (214, 196, 180),
+    "minecraft:light_gray_terracotta": (156, 136, 124),
+    "minecraft:yellow_terracotta": (176, 140, 58),
+    "minecraft:orange_terracotta": (170, 92, 44),
+    "minecraft:red_terracotta": (146, 80, 58),
+    "minecraft:brown_terracotta": (80, 58, 42),
+    "minecraft:moss_block": (78, 100, 42),
+    "minecraft:snow_block": (150, 158, 176),
+    "minecraft:powder_snow": (158, 166, 184),
     "minecraft:ice": (140, 176, 232),
     "minecraft:packed_ice": (120, 160, 228),
-    "minecraft:blue_ice": (106, 154, 235),
+    "minecraft:blue_ice": (98, 122, 168),
     "minecraft:obsidian": (21, 18, 30),
     "minecraft:granite": (149, 103, 85),
     "minecraft:diorite": (188, 188, 190),
@@ -422,12 +422,41 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     if gmask.any():
         rgb[gmask] = _grass_tint(tq, hq)[gmask]
 
-    # 冰/雪：固有色（冰雪偏亮，冰偏蓝），不受水深/草色影响
-    for bset, col in ((_ICE_BLOCKS, _ICE_RGB),
-                      (_SNOW_BLOCKS, np.array([242, 250, 250], np.float32))):
+    # 寒冷群系覆雪：MC 的雪由 biome 的 freeze_top_layer feature 实现，
+    # 顶块仍是 grass_block 但上面覆雪层。故按群系给草地覆雪
+    # （参考截图雪原是冷蓝白而非绿色）。
+    if gmask.any():
+        cold = np.zeros((h, w), bool)
+        for r in range(0, h, 4):
+            for c in range(0, w, 4):
+                k = pack["id2key"].get(int(biome_grid[r, c]), "")
+                if k.split(":")[-1] in _SNOWY_BIOMES:
+                    cold[r:r + 4, c:c + 4] = True
+        sc = gmask & cold
+        if sc.any():
+            rgb[sc] = colors.get("minecraft:snow_block", (150, 158, 176))
+
+    # 沼泽/红树林草地：参考实测暗黄绿 (64,74,44)，比通用草 tint 更暗偏黄
+    if gmask.any():
+        sw = np.zeros((h, w), bool)
+        for r in range(0, h, 4):
+            for c in range(0, w, 4):
+                k = pack["id2key"].get(int(biome_grid[r, c]), "")
+                if k.split(":")[-1] in ("swamp", "mangrove_swamp"):
+                    sw[r:r + 4, c:c + 4] = True
+        swm = gmask & sw
+        if swm.any():
+            rgb[swm] = (68, 82, 48)
+
+    # 冰/雪：走色表固有色（参考截图为冷蓝灰，非亮白），不受水深/草色影响
+    for bset, dflt in ((_ICE_BLOCKS, (126, 146, 186)),
+                       (_SNOW_BLOCKS, (176, 184, 200))):
         m = np.isin(nm, list(bset))
         if m.any():
-            rgb[m] = col
+            for bname in bset:
+                mm = (nm == bname)
+                if mm.any():
+                    rgb[mm] = colors.get(bname, dflt)
 
     # 水面：水下列（未结冰）画海平面水体，按水深渐变（近岸亮→深海暗）
     ice_or_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
@@ -441,6 +470,20 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
 
 
 # 可生长植被的地表（水/冰/裸岩上不放）
+# 顶块被雪覆盖的寒冷群系（freeze_top_layer 生效）
+_SNOWY_BIOMES = {
+    "snowy_plains", "snowy_taiga", "snowy_beach", "snowy_slopes",
+    "ice_spikes", "frozen_peaks", "jagged_peaks", "grove",
+    "frozen_river", "frozen_ocean", "deep_frozen_ocean",
+}
+
+# 几乎不长植被的极寒/裸岩群系
+_NO_VEG_BIOMES = {
+    "ice_spikes", "frozen_peaks", "jagged_peaks", "snowy_slopes",
+    "stony_peaks", "stony_shore", "badlands", "eroded_badlands",
+    "wooded_badlands", "desert",
+}
+
 _GROWABLE = {
     "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
     "minecraft:podzol", "minecraft:mycelium", "minecraft:moss_block",
@@ -475,8 +518,17 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
     names = pack["block_names"]
     idx = np.clip(blocks, 0, len(names) - 1)
     top_name = np.asarray(names, dtype=object)[idx]
-    # 植被只长在陆地（顶面 y >= 海平面）且可生长地表上；排除水下沙/砾
+    # 植被只长在陆地（顶面 y >= 海平面）且可生长地表上；排除水下沙/砾。
+    # 极寒群系（雪原/冰刺）地面覆雪，不长植被（参考截图冰刺几乎无植被）。
     growable = np.isin(top_name, list(_GROWABLE)) & (heights >= _SEA)
+    if growable.any():
+        cold = np.zeros((h, w), bool)
+        for r in range(0, h, 4):
+            for c in range(0, w, 4):
+                k = pack["id2key"].get(int(biome_grid[r, c]), "")
+                if k.split(":")[-1] in _NO_VEG_BIOMES:
+                    cold[r:r + 4, c:c + 4] = True
+        growable &= ~cold
 
     id2key = pack["id2key"]
     tree_p = np.zeros((h, w), np.float32)

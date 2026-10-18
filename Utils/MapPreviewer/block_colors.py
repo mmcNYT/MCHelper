@@ -61,10 +61,10 @@ _TERRACOTTA = np.array([
 # 草色双梯度四角锚点（原版 grass colormap 骨架 x 地图色板系收敏）：
 # 行=温度（冷→热），列=湿度（干→湿）；整体降饱和 +G 提权重，
 # 契合参考风格的柔和大地色调
-_GRASS_TL = np.array([104, 138, 76], dtype=np.float32)  # 冷干
-_GRASS_TR = np.array([ 88, 126, 62], dtype=np.float32)  # 冷湿
-_GRASS_BL = np.array([150, 146,  78], dtype=np.float32)   # 热干（热带草原，去饱和）
-_GRASS_BR = np.array([ 70, 132,  50], dtype=np.float32)    # 热湿（丛林）
+_GRASS_TL = np.array([ 96, 128,  70], dtype=np.float32)  # 冷干
+_GRASS_TR = np.array([ 74, 100,  52], dtype=np.float32)  # 冷湿
+_GRASS_BL = np.array([132, 122,  62], dtype=np.float32)   # 热干（热带草原，去饱和）
+_GRASS_BR = np.array([ 44, 116,  36], dtype=np.float32)    # 热湿（丛林）
 
 _DIRT_RGB = np.array([151, 109, 77], dtype=np.float32)   # 地图 DIRT base
 _SNOW_RGB = np.array([243, 246, 248], dtype=np.float32)  # 地图 SNOW base
