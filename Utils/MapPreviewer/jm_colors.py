@@ -201,32 +201,51 @@ def bevel_slope(color, slope: float):
             int(min(255, round(b * slope))))
 
 
-def slope_from_heights(heights: np.ndarray, x0: int, z0: int):
-    """按 JourneyMap 的 primary/secondary 偏移算每列坡度因子。
+# JourneyMap BaseRenderer 构造函数的精确偏移集合（反编译提取）：
+#   primary   3 个：西北 1 格环
+#   secondary 5 个：西北 2 格环
+# 全部朝西北（负 x / 负 z）——对应固定西北光源，非双向对称。
+PRIMARY_SLOPE_OFFSETS = ((0, -1), (-1, -1), (-1, 0))
+SECONDARY_SLOPE_OFFSETS = ((-1, -2), (-2, -1), (-2, -2), (-2, 0), (0, -2))
 
-    JourneyMap 用相对邻列的**高度差**（主/次两个方向，各自有上下坡系数），
-    夹到 [slopeMin, slopeMax] -> 纯地形驱动、确定性、不随机。
+
+def slope_from_heights(heights: np.ndarray, x0: int = 0, z0: int = 0,
+                       min_y: int = -64):
+    """复刻 BaseRenderer.calculateSlope（逐偏移累积后取平均）。
+
+    反编译逐字节还原的累积规则（currY=本列高度, depth=currY-minY, offH=偏移列高度）：
+        dh = offH - currY
+        dh <  0 (下坡): acc += (offH - depth) / ((currY - depth) * 1.0)
+        dh >= 0 (上坡): acc += ((currY + depth) * 1.0) / (offH + depth)
+        slope = acc / offsets.size();  NaN/Inf -> 1.0
+    注意 depth 是**加减**项而非除数本身——这是此前算错的原因。
+    结果仍是地形的确定性函数，同坡同色、不破碎。
     """
     h = heights.astype(np.float32)
     hh, ww = h.shape
-    # 主方向（西北）与次方向（东南）的偏移
-    def shift(a, dy, dx):
-        out = np.empty_like(a)
-        ys = np.clip(np.arange(hh) + dy, 0, hh - 1)
-        xs = np.clip(np.arange(ww) + dx, 0, ww - 1)
-        out[:] = a[np.ix_(ys, xs)]
-        return out
+    min_y_f = float(min_y)
+    depth = h - min_y_f                      # currY - minY
 
-    # 主：向北(-z)、向西(-x)；次：向南(+z)、向东(+x)
-    hn = shift(h, -1, 0)
-    hw = shift(h, 0, -1)
-    hs = shift(h, 1, 0)
-    he = shift(h, 0, 1)
-    d_primary = ((hn - h) + (hw - h)) * 0.5      # >0 表示上坡
-    d_second = ((hs - h) + (he - h)) * 0.5
-    slope = np.ones_like(h)
-    slope += np.where(d_primary > 0, d_primary * (SHADING_PRIMARY_UPSLOPE - 1.0),
-                      d_primary * (1.0 - SHADING_PRIMARY_DOWNSLOPE))
-    slope += np.where(d_second > 0, d_second * (SHADING_SECONDARY_UPSLOPE - 1.0),
-                      d_second * (1.0 - SHADING_SECONDARY_DOWNSLOPE))
-    return np.clip(slope, SHADING_SLOPE_MIN, SHADING_SLOPE_MAX)
+    def shifted(dz: int, dx: int) -> np.ndarray:
+        ys = np.clip(np.arange(hh) + dz, 0, hh - 1)
+        xs = np.clip(np.arange(ww) + dx, 0, ww - 1)
+        return h[np.ix_(ys, xs)]
+
+    acc = np.zeros((hh, ww), np.float32)
+    offs = PRIMARY_SLOPE_OFFSETS + SECONDARY_SLOPE_OFFSETS
+    for (dz, dx) in offs:
+        off = shifted(dz, dx)
+        dh = off - h
+        down = dh < 0.0
+        denom_down = (h - depth)              # currY - depth
+        num_down = (off - depth)              # offH - depth
+        num_up = (h + depth)                  # currY + depth
+        denom_up = (off + depth)              # offH + depth
+        with np.errstate(divide="ignore", invalid="ignore"):
+            term = np.where(down,
+                            num_down / denom_down,
+                            num_up / denom_up)
+        acc += term.astype(np.float32)
+    slope = acc / float(len(offs))
+    slope = np.where(np.isfinite(slope), slope, 1.0)
+    return np.clip(slope, SHADING_SLOPE_MIN, SHADING_SLOPE_MAX).astype(np.float32)
