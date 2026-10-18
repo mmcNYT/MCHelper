@@ -61,14 +61,14 @@ _TERRACOTTA = np.array([
 # 草色双梯度四角锚点（原版 grass colormap 骨架 x 地图色板系收敏）：
 # 行=温度（冷→热），列=湿度（干→湿）；整体降饱和 +G 提权重，
 # 契合参考风格的柔和大地色调
-_GRASS_TL = np.array([145, 178, 148], dtype=np.float32)  # 冷干
-_GRASS_TR = np.array([125, 172, 130], dtype=np.float32)  # 冷湿
-_GRASS_BL = np.array([183, 176, 98], dtype=np.float32)   # 热干（热带草原，去饱和）
-_GRASS_BR = np.array([95, 190, 72], dtype=np.float32)    # 热湿（丛林）
+_GRASS_TL = np.array([104, 138, 76], dtype=np.float32)  # 冷干
+_GRASS_TR = np.array([ 88, 126, 62], dtype=np.float32)  # 冷湿
+_GRASS_BL = np.array([150, 146,  78], dtype=np.float32)   # 热干（热带草原，去饱和）
+_GRASS_BR = np.array([ 70, 132,  50], dtype=np.float32)    # 热湿（丛林）
 
 _DIRT_RGB = np.array([151, 109, 77], dtype=np.float32)   # 地图 DIRT base
 _SNOW_RGB = np.array([243, 246, 248], dtype=np.float32)  # 地图 SNOW base
-_ICE_RGB = np.array([170, 182, 231], dtype=np.float32)   # 地图 ICE base 柔化
+_ICE_RGB = np.array([160, 178, 226], dtype=np.float32)   # 地图 ICE base 柔化
 _SAND_RGB = np.array([240, 230, 175], dtype=np.float32)  # 地图 SAND base 柔化
 _STONE_RGB = np.array([136, 136, 136], dtype=np.float32) # 地图 STONE base 柔化
 _GRAVEL_RGB = np.array([140, 133, 133], dtype=np.float32)
@@ -94,9 +94,9 @@ _SCULK_SPECK = np.array([96, 150, 170], dtype=np.float32)
 
 # 水色锚点：参考风格的低饱和柔和灰蓝（非原版亮蓝，避免与暖色
 # 地貌对比过冲）；亮/暗端同色相收敏
-_WATER_SHALLOW = np.array([96, 128, 200], dtype=np.float32)
+_WATER_SHALLOW = np.array([ 62,  96, 168], dtype=np.float32)
 _WATER_BASE = np.array([76, 100, 180], dtype=np.float32)
-_WATER_DEEP = np.array([52, 70, 138], dtype=np.float32)
+_WATER_DEEP = np.array([ 34,  66, 140], dtype=np.float32)
 
 # 花色点缀（繁花森林/草甸）
 _FLOWER_COLORS = np.array([
