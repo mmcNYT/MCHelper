@@ -787,6 +787,7 @@ _NO_VEG_BIOMES = {
 
 _LEAF_BID: dict[str, int] = {}
 _CURRENT_NAME2BID: dict[str, int] = {}
+_CURRENT_PACK: dict = {}
 
 _GROWABLE = {
     "minecraft:grass_block", "minecraft:dirt", "minecraft:coarse_dirt",
@@ -976,12 +977,20 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
     except Exception:
         return
     keys = list(_FOOTPRINTS.keys()) + ["village"]
+    # 结构会跨越瓦片边界：村庄实测可达 115x80，远超 _FINE_TILE(64)。
+    # 若只在本瓦片矩形内枚举，则「锚点在别的瓦片、但主体伸进本瓦片」的
+    # 结构完全不会画出来 -> 村庄被截断。故枚举范围外扩 _STRUCT_PAD。
+    _STRUCT_PAD = 96
     try:
         structs = smap.enumerate_structures(
-            seed, version, (x0, z0, x0 + w - 1, z0 + h - 1), struct_keys=keys)
+            seed, version,
+            (x0 - _STRUCT_PAD, z0 - _STRUCT_PAD,
+             x0 + w - 1 + _STRUCT_PAD, z0 + h - 1 + _STRUCT_PAD),
+            struct_keys=keys)
     except Exception:
         return
-    global _CURRENT_NAME2BID
+    global _CURRENT_NAME2BID, _CURRENT_PACK
+    _CURRENT_PACK = pack or {}
     _CURRENT_NAME2BID = (pack or {}).get("name2bid") or {}
     for st in structs:
         key = st.get("struct")
@@ -1015,7 +1024,17 @@ def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
     try:
         from Utils.MapPreviewer import village_jigsaw_exact as _vx
         # 地形适配：村庄贴到锚点处地表；低于海平面则抬到 SEA+1
-        _by = int(heights[az, ax]) if (0 <= az < h and 0 <= ax < w) else 64
+        # base_y 必须与「哪块瓦片来画」无关，否则同一个村庄在不同瓦片里
+        # 高度不同 -> 拼接处断裂。故直接用锚点世界坐标算地表高度，
+        # 而不是用当前瓦片的 heights（其 ax/az 是相对偏移且常越界）。
+        _by = 64
+        try:
+            _ctx = _CURRENT_PACK.get("ctx")
+            if _ctx is not None:
+                _h = _native.fill_top_grid(_ctx, wx, wz, 1, 1, -64, 320, 1)
+                _by = int(_h[0, 0])
+        except Exception:
+            _by = 64
         _by = max(_by, _SEA + 1)
         fp = _vx.build_village(seed, wx, wz, base_y=_by)
     except Exception:
