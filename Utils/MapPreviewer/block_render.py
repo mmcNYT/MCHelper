@@ -1063,14 +1063,15 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
         land = key not in _WATER_STRUCTURES
         if key == "village":
             _stamp_village(rgb, heights, blocks, ax, az, h, w, seed,
-                          int(st.get("x", 0)), int(st.get("z", 0)))
+                          int(st.get("x", 0)), int(st.get("z", 0)),
+                          x0=x0, z0=z0)
         elif key in _FOOTPRINTS:
             wl, ll, fill, border = _FOOTPRINTS[key]
             _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
 
 
 def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
-                   colors=None):
+                   colors=None, x0=0, z0=0):
     """用真实 jigsaw 还原的村庄，并让建筑方块参与「每列最高方块」竞争。
 
     读 jar 内村庄模板 NBT（town_centers/houses/streets/decor），按权重
@@ -1110,7 +1111,10 @@ def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
         return
 
     # 逐列取村庄的最高实体方块 + 其世界 y
-    gx0, gz0 = wx - ax, wz - az
+    # 注意：grid 原点必须是**当前渲染区域的世界原点** (x0,z0)，
+    # 不是 (wx-ax, wz-az)。后者只在锚点恰好落在本区域时相等；
+    # 村庄跨瓦片时（锚点在别块）会整体错位，导致本瓦片画不出村庄。
+    gx0, gz0 = x0, z0
     vgrid = np.empty((h, w), dtype=object)
     vgrid[:] = None
     vtop = np.full((h, w), -9999, np.int32)
@@ -1156,9 +1160,11 @@ def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
                 col = pal.get(nm)
                 if col is not None:
                     rgb[r, c] = col
-                # 真俯视：建筑方块参与竞争
+                # 真俯视 + 地形适配（对应 MC terrain_adaptation=beard_thin）
+                # MC 生成村庄时会把村庄占地内的地形**削填**到村庄基座高度，
+                # 所以即使地形比村庄高，建筑也必须可见。
                 bid = n2b.get(nm)
-                if bid is not None and int(vtop[r, c]) > heights[r, c]:
+                if bid is not None:
                     heights[r, c] = int(vtop[r, c])
                     blocks[r, c] = bid
                 elif heights[r, c] < _SEA:
