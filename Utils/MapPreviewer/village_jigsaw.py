@@ -158,9 +158,11 @@ def load_template(loc: str) -> dict | None:
         return None
     size = [int(v) for v in nbt.get("size", [0, 0, 0])]
     pal = []
+    pal_props = []
     for p in nbt.get("palette", []):
         nm = p.get("Name", "")
         pal.append(nm)
+        pal_props.append(p.get("Properties") or {})
     blocks = []
     jigsaws = []
     for b in nbt.get("blocks", []):
@@ -170,7 +172,13 @@ def load_template(loc: str) -> dict | None:
         x, y, z = int(pos[0]), int(pos[1]), int(pos[2])
         blocks.append((x, y, z, nm))
         if nm == _JIGSAW:
-            jigsaws.append((x, y, z, b.get("nbt", {}) or {}))
+            # jigsaw 的朝向来自 palette 的 Properties.orientation
+            # （如 'north_up'），不在 block 的 nbt 里。
+            meta = dict(b.get("nbt", {}) or {})
+            props = pal_props[st] if 0 <= st < len(pal_props) else {}
+            if props.get("orientation"):
+                meta["orientation"] = props["orientation"]
+            jigsaws.append((x, y, z, meta))
     out = {"size": size, "blocks": blocks, "jigsaws": jigsaws}
     _TPL_CACHE[loc] = out
     return out

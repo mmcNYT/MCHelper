@@ -889,9 +889,13 @@ def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
     except Exception:
         return
     try:
-        fp = _vj.village_footprint(seed, wx, wz)
+        from Utils.MapPreviewer import village_jigsaw_exact as _vx
+        fp = _vx.build_village(seed, wx, wz)
     except Exception:
-        return
+        try:
+            fp = _vj.village_footprint(seed, wx, wz)
+        except Exception:
+            return
     if not fp["blocks"]:
         return
     grid = _vj.footprint_to_grid(fp, wx - ax, wz - az, w, h)
