@@ -357,7 +357,7 @@ def worldborder(p, v="1.21.11"):
         out += f" {sub} {p.get('damage_value', 0):g}"
     elif br == "warning":
         sub = p.get("warning_sub") or "distance"
-        out += f" {sub} {int(p.get('warning_value', 0))}"
+        out += f" {sub} {int(p.get('warning_value') or 0)}"
     return out
 
 
@@ -453,11 +453,11 @@ def scoreboard(p, v="1.21.11"):
     if br == "players_set":
         return (f"/scoreboard players set {p.get('targets') or '@s'} "
                 f"{p.get('objective') or 'obj1'} "
-                f"{int(p.get('score', 0))}")
+                f"{int(p.get('score') or 0)}")
     if br == "players_add":
         return (f"/scoreboard players add {p.get('targets') or '@s'} "
                 f"{p.get('objective') or 'obj1'} "
-                f"{int(p.get('score', 1))}")
+                f"{int(p.get('score') or 1)}")
     if br == "players_get":
         return (f"/scoreboard players get {p.get('targets') or '@s'} "
                 f"{p.get('objective') or 'obj1'}")
@@ -527,7 +527,12 @@ def bossbar(p, v="1.21.11"):
     elif sub == "style":
         out += f" {p.get('style') or 'notched_10'}"
     elif sub in ("value", "max"):
-        out += f" {int(p.get('value', 100) if sub == 'max' else p.get('value', 0))}"
+        # value 是可空 int（spec optional=True）：「不填」时 params
+        # 返回 None —— p.get('value', 0) 对**值为 None** 的键不取
+        # 默认值（get 只在 key 缺失时用默认），int(None) 即崩。
+        # 各属性的游戏内默认：value=0、max=100。
+        val = p.get("value")
+        out += f" {val if val is not None else (100 if sub == 'max' else 0)}"
     elif sub == "visible":
         out += f" {str(bool(p.get('visible', True))).lower()}"
     elif sub == "players":
@@ -586,7 +591,7 @@ def place(p, v="1.21.11"):
     pool = p.get("pool") or ""
     tgt = p.get("target") or ""
     out = (f"/place jigsaw {_rid(pool, ns_prefix)} {tgt} "
-           f"{int(p.get('max_depth', 7))}")
+           f"{int(p.get('max_depth') or 7)}")
     pos = (p.get("position") or "").strip()
     if pos:
         out += f" {pos}"
