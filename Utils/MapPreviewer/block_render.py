@@ -800,8 +800,11 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         # 逐层叠加：result = bed*(1-a)^n + water*(1-(1-a)^n)
         _a = 0.55
         _keep = np.power(1.0 - _a, dep)[..., None]          # 海床残留比例
-        # 海床底色：浅=沙滩亮色，深=暗
-        _bed = np.array([120.0, 120.0, 118.0], np.float32)
+        # 底层用**该列真实海床方块的色**（此时 rgb 尚未被水覆盖，仍是
+        # 沙/砾石/泥的固有色）。JourneyMap 的 paintStrata 就是把水层
+        # blendWith 到实际下方方块上；用固定灰会让浅水发灰，
+        # 而官方浅水 (72,104,165) 保留沙的暖调。
+        _bed = rgb.astype(np.float32)
         wr = _bed * _keep + _WCg * (1.0 - _keep)
         # 极浅处（1~2 格）偏亮，模拟官方 (201,236,255) 的近岸白边
         _sh = (dep <= 2.0)
