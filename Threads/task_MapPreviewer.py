@@ -749,6 +749,7 @@ class FineTileThread(QThread):
                 self.fine_tile_done.emit({
                     "fx": fx, "fz": fz, "rgb": res["rgb"],
                     "top_block": res.get("top_block"),
+                    "heights": res.get("heights"),
                     "scale": self._scale,
                     "origin_bx": res["origin_bx"],
                     "origin_bz": res["origin_bz"],

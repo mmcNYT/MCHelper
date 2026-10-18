@@ -2179,7 +2179,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         if tb is not None:
             self._fine_blocks[key] = (tb, int(payload["origin_bx"]),
                                       int(payload["origin_bz"]),
-                                      int(payload.get("scale", 1)))
+                                      int(payload.get("scale", 1)),
+                                      payload.get("heights"))
             if len(self._fine_blocks) > 200:
                 for k2 in list(self._fine_blocks.keys())[:-160]:
                     self._fine_blocks.pop(k2, None)
@@ -2351,11 +2352,11 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         return int(sp.x()), int(sp.y())
 
     def _fine_block_at(self, bx: int, bz: int):
-        """精细渲染模式下查询该方块坐标的顶块名。
+        """精细渲染模式下查询该方块坐标的 (方块名, y 坐标)。
 
-        返回方块名（如 'minecraft:grass_block'）或 None。
-        瓦片按 _FINE_TILE 方块网格对齐；top_block 的形状是
-        (ts*scale, ts*scale) 或 (ts, ts)，按比例映射到瓦片内偏移。
+        返回 (block_name, top_y) 或 None。瓦片按 _FINE_TILE 方块网格对齐；
+        top_block / heights 的形状是 (ts*scale, ts*scale) 或 (ts, ts)，
+        按比例映射到瓦片内偏移。
         """
         if not self._fine_on or not self._fine_blocks:
             return None
@@ -2363,19 +2364,31 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         ent = self._fine_blocks.get((bx // ts, bz // ts))
         if ent is None:
             return None
-        tb, ox, oz, _sc = ent
+        tb, ox, oz, _sc, hts = ent
         try:
             hh, ww = tb.shape[:2]
         except AttributeError:
             return None
         if hh <= 0 or ww <= 0:
             return None
-        py_ = int((bz - oz) * hh // ts)
-        px_ = int((bx - ox) * ww // ts)
-        if not (0 <= py_ < hh and 0 <= px_ < ww):
+        rz = int((bz - oz) * hh // ts)
+        rx = int((bx - ox) * ww // ts)
+        if not (0 <= rz < hh and 0 <= rx < ww):
             return None
-        nm = tb[py_, px_]
-        return None if nm is None else str(nm)
+        nm = tb[rz, rx]
+        if nm is None:
+            return None
+        top_y = None
+        if hts is not None:
+            try:
+                hh2, ww2 = hts.shape[:2]
+                ry = int((bz - oz) * hh2 // ts)
+                ryx = int((bx - ox) * ww2 // ts)
+                if 0 <= ry < hh2 and 0 <= ryx < ww2:
+                    top_y = int(hts[ry, ryx])
+            except Exception:
+                top_y = None
+        return str(nm), top_y
 
     def _update_hover(self, pos) -> None:
         blk = self._scene_block(pos)
@@ -2406,9 +2419,15 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         # 精细渲染开启时优先显示该点的真实顶块
         fb = self._fine_block_at(bx, bz)
         if fb:
-            short = fb.split(":")[-1]
+            bname, by = fb
+            try:
+                from Utils.MapPreviewer.block_names_cn import block_cn_name
+                cn = block_cn_name(bname)
+            except Exception:
+                cn = bname.split(":")[-1]
+            ytxt = "Y -" if by is None else f"Y {by}"
             self.labelHover.setText(
-                f"X {bx}  Z {bz}  |  {short}  |  {biome_cn_name(bid)}")
+                f"X {bx}  {ytxt}  Z {bz}  |  {cn}  |  {biome_cn_name(bid)}")
         else:
             self.labelHover.setText(
                 f"X {bx}  Z {bz}  |  {biome_cn_name(bid)} (id {bid})")
