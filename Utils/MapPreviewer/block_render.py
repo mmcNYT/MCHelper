@@ -722,18 +722,47 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                "minecraft:suspicious_gravel"}
     is_water_blk = np.isin(nm, list(_WATER_BLOCKS))
     is_seabed = np.isin(nm, list(_SEABED))
-    ice_or_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
+    # 冻结海面：冰/浮冰之下的水体在 MC 里仍属海洋，JourneyMap 也按水色
+    # 显示（官方 frozen_ocean 瓦片实测为深蓝 (42,41,148)）。
+    # 故 _ICE_BLOCKS 不排除水面判定，只排除雪（雪是真正的地表覆盖）。
     if wet is not None:
-        # native 精确判定：地表到海平面之间确有水体
-        water_mask = np.asarray(wet, bool) & ~ice_or_snow
+        # native 精确判定（该列海平面处确为开阔水体）。
+        # 有 wet 掩码时不再按方块类型排除：雪/冰覆盖的水面仍属水域
+        # （官方 frozen_ocean 瓦片显示为深蓝，而非白色冰面）。
+        water_mask = np.asarray(wet, bool)
     else:
         # 兜底启发式
         deep = heights < (_SEA - 6)
         water_mask = (is_water_blk | (is_seabed & deep)) & ~ice_or_snow
     if water_mask.any():
-        u = np.clip((_SEA - heights) / 45.0, 0.0, 1.0).astype(np.float32)
-        wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]
+        # 水色梯度按官方 JourneyMap 瓦片标定（7,-19.png 实测）：
+        #   浅水 (131,163,232)  中水 (47,87,167)  深水 (45,64,158)
+        # 深度归一区间取 0..24 格（实测海域深度多在 17~30，
+        # 原来 /45 导致永远停在浅色档，这也是水色偏亮的原因）。
+        # 复刻 JourneyMap 的「水层 alpha 叠加」：
+        # water 基础色经 biome tint 后 (63,118,228)，水是透明方块，
+        # 每叠一层就与下方（海床）混合一次 alpha，越深越接近水色本身、
+        # 同时海床亮色被逐步压掉 -> 呈现由浅到深的自然梯度。
+        # 实测水深 1..26，用 0.55 的每层不透明度叠加上限封顶即可
+        # 覆盖官方 (201,236,255)->(131,163,232)->(47,87,167)->(45,64,158) 的走向。
+        # 水色取官方深水实测值（JourneyMap 的水在叠加后会明显偏深，
+        # 用 tint 原色 (63,118,228) 会整体偏亮）
+        _WC = np.array([45.0, 64.0, 158.0], np.float32)
+        dep = np.clip((_SEA - heights).astype(np.float32), 0.0, 30.0)
+        # 逐层叠加：result = bed*(1-a)^n + water*(1-(1-a)^n)
+        _a = 0.55
+        _keep = np.power(1.0 - _a, dep)[..., None]          # 海床残留比例
+        # 海床底色：浅=沙滩亮色，深=暗
+        _bed = np.array([120.0, 120.0, 118.0], np.float32)
+        wr = _bed * _keep + _WC * (1.0 - _keep)
+        # 极浅处（1~2 格）偏亮，模拟官方 (201,236,255) 的近岸白边
+        _sh = (dep <= 2.0)
+        if _sh.any():
+            _t = (dep[_sh] / 2.0)[:, None]
+            wr[_sh] = (np.array([201.0, 236.0, 255.0], np.float32) * (1 - _t)
+                       + wr[_sh] * _t)
         rgb[water_mask] = wr[water_mask]
+
 
     # 地表不做贴图逐像素采样：贴图会让同一高度层出现上百种颜色（破碎）。
     # 地形配色 = 方块固有色（+ 群系草色），整层统一；材质细节只保留给树冠。

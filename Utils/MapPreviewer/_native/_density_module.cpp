@@ -2558,7 +2558,10 @@ PYBIND11_MODULE(_density_sampler, m) {
     }, py::arg("ctx"), py::arg("surface_blob"), py::arg("x"), py::arg("z"),
        py::arg("fill_top"), py::arg("sea_level"), py::arg("biome_id"));
 
-    // 逐列判定「地表到海平面之间是否存在水体」（供水面着色）
+    // 逐列判定「该列顶部是否为开阔水体」（供水面着色）
+    // 判据：从海平面(含)向上找，若 seaLevel 处及以下连续出现水体，
+    // 且该列地表高度 < seaLevel，则为水域。冰刺/冰山尖顶（地表 >= sea）
+    // 不算水域，避免把冰刺画成水。
     m.def("water_mask_grid", [](SamplerCtx* ctx, int x0, int z0, int w, int h,
                                 int seaLevel, int threads) {
         py::array_t<u8> out({h, w});
@@ -2575,24 +2578,20 @@ PYBIND11_MODULE(_density_sampler, m) {
                 int z = z0 + r;
                 for (int c = 0; c < w; c++) {
                     int x = x0 + c;
-                    // 正确做法：找到地表顶(首个实心)，再从地表向上到海平面
-                    // 检查这些 y 上的流体类型是否为 water。
-                    // 关键：地表之下是"实心"，之上的 y 若为非实心且
-                    // pick_type == WATER 才是真正的水体。
-                    int top = -64;
+                    // 找地表顶（首个实心方块，从海平面之上开始）
+                    int top = seaLevel + 1;
                     for (int y = seaLevel + 1; y >= -64; y--) {
                         double d = ctx->tree.eval(ctx->tree.root, x, y, z);
                         if (aq.compute_substance(x, y, z, d)) { top = y; break; }
                     }
                     u8 wet = 0;
+                    // 只有地表低于海平面才可能存在覆盖水体
                     if (top < seaLevel) {
-                        // 地表与海平面之间：逐格检查是否为水
-                        for (int y = seaLevel; y > top; y--) {
-                            double d = ctx->tree.eval(ctx->tree.root, x, y, z);
-                            if (aq.compute_substance(x, y, z, d)) break;
-                            int tp = aq.pick_type(y);
-                            if (tp == Aquifer::T_WATER) { wet = 1; break; }
-                        }
+                        // 海平面处必须是水（不是空气），否则是干涸洼地
+                        double d0 = ctx->tree.eval(ctx->tree.root, x, seaLevel, z);
+                        bool solid0 = aq.compute_substance(x, seaLevel, z, d0);
+                        if (!solid0 && aq.pick_type(seaLevel) == Aquifer::T_WATER)
+                            wet = 1;
                     }
                     ob(r, c) = wet;
                 }
@@ -2605,7 +2604,7 @@ PYBIND11_MODULE(_density_sampler, m) {
         return out;
     }, py::arg("ctx"), py::arg("x0"), py::arg("z0"), py::arg("w"),
        py::arg("h"), py::arg("sea_level") = 63, py::arg("threads") = 0,
-       "逐列判定地表到海平面之间是否为水体");
+       "逐列判定海平面处是否为开阔水体");
 
     m.def("surface_grid", &surface_grid,
           py::arg("ctx"), py::arg("surface_blob"),
