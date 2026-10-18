@@ -221,30 +221,20 @@ _HS_LIGHT_Z = float(np.sin(_HS_ZEN))
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
-    """按高度分层的地形阴影：同一高度层用同一个亮度（同层同色）。
+    """按高度层的确定性阴影：一层一个亮度，同层绝无差异。
 
-    参考图的地形是"一层一色"的台阶感，而非连续坡度渐变。故这里不用
-    horn 坡度公式（同层不同坡位会得到不同 shade，视觉破碎），改为：
-      - 以高度层的「相对高度」决定明暗（层越亮/越高越亮）
-      - 光源方向体现为「层边界的一侧亮一侧暗」（由高度差的符号决定）
-    返回 [0,~1.3]，水面恒 1。
+    要点（对应"同层同色"要求）：
+      - shade 只由该方块的**高度层**决定，与坡度/坡向/邻域无关
+      - 层与层之间亮度不同 -> 台阶感；层内完全一致 -> 不破碎
+      - 水面恒 1（平水不打明暗）
     """
-    h = np.round(heights.astype(np.float32))          # 方块层
-    # 每层一个确定亮度：层高映射到 0.62~1.15（低层暗、高层亮，模拟天光）
-    hmin, hmax = float(h.min()), float(h.max())
+    h = np.round(heights.astype(np.float32))
+    hmin = float(h.min())
+    hmax = float(h.max())
     span = max(hmax - hmin, 1.0)
-    base = 0.62 + 0.53 * ((h - hmin) / span)          # (h,w) 层亮度
-
-    # 层边界的受光/背光：西北亮、东南暗（只看高度差符号，不看坡度大小）
-    p = np.pad(h, 1, mode="edge")
-    dzdx = (p[1:-1, 2:] - p[1:-1, :-2])               # 东-西
-    dzdy = (p[:-2, 1:-1] - p[2:, 1:-1])               # 北-南
-    # 西北向光：西侧高/北侧高时更亮
-    lit = np.sign(-dzdx) * 0.5 + np.sign(dzdy) * 0.5  # [-1,1]
-    shade = base * (1.0 + 0.13 * lit)
+    # 层高 -> 亮度（低层稍暗、高层稍亮，模拟天光；幅度温和不刺眼）
+    shade = np.float32(0.70) + np.float32(0.46) * ((h - hmin) / span)
     shade = np.clip(shade, _FHS_SHADE_MIN, 1.30).astype(np.float32)
-    # 量化到级：同层同色，层间分明
-    shade = np.round(shade * np.float32(_FHS_LEVELS)) / np.float32(_FHS_LEVELS)
     shade[water_mask] = 1.0
     return shade
 
@@ -475,6 +465,49 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
             "elapsed": time.perf_counter() - t0, "cancelled": False}
 
 
+# 群系 -> 草色（量化取色，保证同群系同色；避免逐点温湿度渐变造成破碎）
+_BIOME_GRASS = {
+    "plains": (110, 146, 78), "sunflower_plains": (110, 146, 78),
+    "meadow": (116, 150, 82), "forest": (96, 134, 70),
+    "flower_forest": (104, 140, 74), "birch_forest": (108, 144, 76),
+    "old_growth_birch_forest": (108, 144, 76),
+    "dark_forest": (82, 120, 60), "taiga": (88, 122, 70),
+    "old_growth_pine_taiga": (86, 120, 68),
+    "old_growth_spruce_taiga": (84, 118, 66),
+    "snowy_taiga": (96, 128, 84), "jungle": (66, 138, 52),
+    "sparse_jungle": (86, 138, 62), "bamboo_jungle": (74, 136, 56),
+    "savanna": (140, 136, 74), "savanna_plateau": (140, 136, 74),
+    "windswept_savanna": (138, 134, 72),
+    "swamp": (68, 82, 48), "mangrove_swamp": (68, 82, 48),
+    "grove": (104, 132, 88), "snowy_plains": (118, 138, 106),
+    "windswept_hills": (104, 138, 76), "windswept_forest": (100, 134, 72),
+    "windswept_gravelly_hills": (104, 138, 76),
+    "jagged_peaks": (110, 132, 96), "frozen_peaks": (116, 136, 104),
+    "snowy_slopes": (112, 134, 98), "ice_spikes": (118, 138, 106),
+    "stony_peaks": (108, 134, 92), "badlands": (128, 132, 66),
+    "eroded_badlands": (128, 132, 66), "wooded_badlands": (124, 130, 66),
+}
+_BIOME_GRASS_DEFAULT = (108, 142, 76)
+
+
+def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict) -> np.ndarray:
+    """按群系给出草色（同群系同色，不随温湿度逐点渐变）。"""
+    h, w = biome_grid.shape
+    out = np.empty((h, w, 3), np.float32)
+    id2key = pack["id2key"]
+    cache: dict[int, tuple] = {}
+    for r in range(h):
+        for c in range(w):
+            bid = int(biome_grid[r, c])
+            col = cache.get(bid)
+            if col is None:
+                k = id2key.get(bid, "")
+                col = _BIOME_GRASS.get(k.split(":")[-1], _BIOME_GRASS_DEFAULT)
+                cache[bid] = col
+            out[r, c] = col
+    return out
+
+
 def _grass_tint(tq: np.ndarray, hq: np.ndarray) -> np.ndarray:
     """温度/湿度量化值（*10000）-> (H,W,3) 草色 float32（同主图公式）。"""
     t = np.clip(tq / 10000.0 * 0.5 + 0.5, 0.0, 1.0).astype(np.float32)
@@ -544,10 +577,12 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     name_arr = np.asarray(block_names, dtype=object)
     nm = name_arr[idx]
 
-    # 草色 tint：随温度/湿度真实变色
+    # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
+    # 逐点 tint 会让同一高度层出现上百种绿，画面破碎（实测同层 143 色）。
     gmask = np.isin(nm, list(_GRASS_BLOCKS))
     if gmask.any():
-        rgb[gmask] = _grass_tint(tq, hq)[gmask]
+        _gt = _grass_tint_by_biome(biome_grid, pack)
+        rgb[gmask] = _gt[gmask]
 
     # 寒冷群系覆雪：MC 的雪由 biome 的 freeze_top_layer feature 实现，
     # 顶块仍是 grass_block 但上面覆雪层。故按群系给草地覆雪
@@ -593,29 +628,8 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]
         rgb[water_mask] = wr[water_mask]
 
-    # 材质贴图：用 16x16 顶面纹理逐像素替换纯色（真实 MC 地块花纹）。
-    # 采样坐标取「世界坐标 & 15」——同一方块内 16 个像素各取纹理不同位置，
-    # 相邻方块纹理相位连续，视觉上就是 MC 的方块材质。
-    tex = pack.get("tex")
-    if tex:
-        yy = np.broadcast_to(
-            (np.arange(h, dtype=np.int32)[:, None] + z0) & 15, (h, w))
-        xx = np.broadcast_to(
-            (np.arange(w, dtype=np.int32)[None, :] + x0) & 15, (h, w))
-        for bi, bname in enumerate(block_names):
-            art = tex.get(bname)
-            if art is None:
-                continue
-            m = (idx == bi)
-            if not m.any():
-                continue
-            # art: (16,16,3)；取每像素对应纹理位置；再乘该方块当前色/均值，
-            # 以保留草 tint、覆雪、水深等已算好的色调。
-            base = art[yy[m], xx[m]].astype(np.float32)
-            amean = art.reshape(-1, 3).mean(axis=0)
-            amean = np.where(amean < 1e-3, 1.0, amean)
-            rgb[m] = base * (rgb[m] / amean)
-
+    # 地表不做贴图逐像素采样：贴图会让同一高度层出现上百种颜色（破碎）。
+    # 地形配色 = 方块固有色（+ 群系草色），整层统一；材质细节只保留给树冠。
     return rgb
 
 
