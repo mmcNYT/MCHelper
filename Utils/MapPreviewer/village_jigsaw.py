@@ -295,21 +295,57 @@ def village_footprint(seed: int, anchor_x: int, anchor_z: int,
     return {"blocks": out_blocks, "jigsaws": out_jig}
 
 
+# 屋顶类方块：这些不该被其它 piece 的地面方块盖住
+_ROOF_BLOCKS = {
+    "oak_stairs", "spruce_stairs", "birch_stairs", "jungle_stairs",
+    "acacia_stairs", "dark_oak_stairs", "mangrove_stairs", "cherry_stairs",
+    "oak_slab", "spruce_slab", "birch_slab", "jungle_slab", "acacia_slab",
+    "dark_oak_slab", "mangrove_slab", "cherry_slab", "stone_slab",
+    "cobblestone_slab", "smooth_stone_slab", "oak_planks", "spruce_planks",
+    "birch_planks", "jungle_planks", "acacia_planks", "dark_oak_planks",
+    "mangrove_planks", "cherry_planks", "cobblestone", "mossy_cobblestone",
+    "white_terracotta", "yellow_terracotta", "orange_terracotta",
+    "light_gray_terracotta", "bricks", "stone_bricks", "glass_pane",
+    "glass", "terracotta", "deepslate_tiles", "mud_bricks",
+}
+# 地面类方块（会被屋顶优先覆盖）
+_GROUND_BLOCKS = {"dirt_path", "grass_block", "dirt", "coarse_dirt",
+                  "gravel", "sand", "podzol", "farmland", "water"}
+
+
 def footprint_to_grid(fp: dict, x0: int, z0: int, w: int, h: int):
-    """把方块集合压成 (h,w) 的方块名网格（每列取最高方块）。"""
-    from Utils.MapPreviewer.vegetation import _short
+    """把方块集合压成 (h,w) 的方块名网格。
+
+    重要：MC 的 jigsaw 各 piece 独立定位，后放的 piece 不会把地面铺到
+    先放 piece 的**屋顶上方**。但简单"取最高方块"会出这个问题——
+    后放模板的地面(y=64)恰好盖在先放模板的屋顶(y=65+)之上时，
+    俯视就看到了房子内部。
+
+    故采用双优先级：
+      1) 屋顶类方块优先（只要有屋顶就显示屋顶）
+      2) 其余按最高 y 取
+    """
     grid = np.empty((h, w), dtype=object)
     grid[:] = None
     ytop = np.full((h, w), -9999, np.int32)
+    roof_y = np.full((h, w), -9999, np.int32)
+    roof_nm = np.empty((h, w), dtype=object)
+    roof_nm[:] = None
     for (wx, wy, wz, nm) in fp["blocks"]:
         px, pz = wx - x0, wz - z0
         if not (0 <= px < w and 0 <= pz < h):
             continue
         sh = nm.split(":")[-1]
-        # 只保留有形的实体方块；air 与 jigsaw 是结构占位/连接件，不上图
         if sh in ("air", "jigsaw", "structure_void", "cave_air", "void_air"):
             continue
+        if sh in _ROOF_BLOCKS:
+            if wy > roof_y[pz, px]:
+                roof_y[pz, px] = wy
+                roof_nm[pz, px] = nm
         if wy > ytop[pz, px]:
             ytop[pz, px] = wy
             grid[pz, px] = nm
+    # 屋顶优先覆盖
+    has_roof = roof_nm != None
+    grid[has_roof] = roof_nm[has_roof]
     return grid

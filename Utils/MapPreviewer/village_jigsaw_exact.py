@@ -122,20 +122,33 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
     out_conns: list[dict] = []      # 待处理的连接点
     block_count = 0
 
+    def _local_rot(tpl, x, z, turns):
+        """模板局部坐标 (x,z) 按 turns 顺时针旋转到「旋转后模板」的局部坐标。
+
+        旋转后模板尺寸：turns 为奇数时宽高互换。
+        turns=0: (x, z)
+        turns=1: (z, sx-1-x)      // 顺时针 90°
+        turns=2: (sx-1-x, sz-1-z)
+        turns=3: (sz-1-z, x)
+        """
+        sx, _sy, sz = tpl["size"]
+        t = turns % 4
+        if t == 0:
+            return x, z
+        if t == 1:
+            return z, sx - 1 - x
+        if t == 2:
+            return sx - 1 - x, sz - 1 - z
+        return sz - 1 - z, x
+
     def emit(tpl, p: Placed):
         nonlocal block_count
         for (x, y, z, nm) in tpl["blocks"]:
-            dx, dz = _rotate(x, z, p.turns)
-            if p.turns % 2:
-                # 旋转 90/270 后宽高互换，需以旋转后尺寸修正 x
-                sx, _, sz = tpl["size"]
-                dx, dz = _rotate(x, z, p.turns)
-                dx += (sz - 1) if p.turns % 4 == 1 else 0
-                dz += (sx - 1) if p.turns % 4 == 3 else 0
+            dx, dz = _local_rot(tpl, x, z, p.turns)
             out_blocks.append((p.ox + dx, p.oy + y, p.oz + dz, nm))
             block_count += 1
         for (x, y, z, meta) in tpl["jigsaws"]:
-            dx, dz = _rotate(x, z, p.turns)
+            dx, dz = _local_rot(tpl, x, z, p.turns)
             out_conns.append({
                 "wx": p.ox + dx, "wy": p.oy + y, "wz": p.oz + dz,
                 "meta": meta, "turns": p.turns,
@@ -229,13 +242,13 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
             if hit is None:
                 continue
             # 把 hit 平移到 (nx,ny,nz)
-            rdx, rdz = _rotate(hit[0], hit[2], turns)
+            rdx, rdz = _local_rot(tpl, hit[0], hit[2], turns)
             ox = nx - rdx
             oz = nz - rdz
             oy = ny - hit[1]
             cand = Placed(chosen[1], ox, oy, oz, turns, (sx, sy, sz))
-            # 容差 -1：边界恰好相接不算重叠（MC 也允许轻微交叉，
-            # 屋檐/楼梯常跨出 1 格）
+            # 容差 -1：MC 的 jigsaw 允许边界相接/轻微交叉（屋檐跨格），
+            # 严格 0 容差会让村庄只拼出 23 块（实测），规模严重缩水。
             if any(_overlaps(cand.aabb(-1), p.aabb(-1)) for p in placed):
                 continue
             best = cand
