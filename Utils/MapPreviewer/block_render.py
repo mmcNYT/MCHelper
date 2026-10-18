@@ -194,34 +194,24 @@ def _get_pack(seed: int) -> dict:
     return pack
 
 
-# 精细档 hillshade 高程缩放（方块单位，spacing=1 方块）。参考真实地图风格：
-# 强立体起伏 + 逐方块等高线状明暗，故 z 夸张取较高值让坡面响应更锐利。
+# 精细档 hillshade：高度量化台阶（分层）。参考真实地图的阴影是"每层分明"的
+# 台阶状——同一层高度平面内亮度一致，层与层之间突然跳变（实测参考图山地
+# |ΔL|<1 占 88%、|ΔL|>12 占 12%）。故先量化高度再算坡向，得到分明的层。
 _FHS_ZSCALE = 1.0
-
-
-def _box5(a: np.ndarray) -> np.ndarray:
-    """5×5 盒式平滑（edge pad，两趟一维均值）。输出与输入同形状。"""
-    ph = np.pad(a, ((0, 0), (2, 2)), mode="edge")
-    t = (ph[:, 0:-4] + ph[:, 1:-3] + ph[:, 2:-2]
-         + ph[:, 3:-1] + ph[:, 4:]) * np.float32(0.2)
-    pv = np.pad(t, ((2, 2), (0, 0)), mode="edge")
-    return (pv[0:-4] + pv[1:-3] + pv[2:-2]
-            + pv[3:-1] + pv[4:]) * np.float32(0.2)
+_FHS_STEP = 1      # 高度量化步长（方块）：1 = 逐方块一层（MC 地形天然台阶）
+_FHS_LEVELS = 7    # shade 分级数：参考图山地约 7 个亮度级
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
-    """逐方块山体阴影（GDAL/ArcGIS horn，西北光源 315°/高度角 40°）。
+    """逐方块山体阴影（horn 公式，西北光源 315°/高度角 40°），按高度分层。
 
-    与 block_colors._hillshade_shade 同公式同光源，差别仅在 xy 间距
-    =1 方块（主图为噪声格）。返回 [0,~1.3]：平地=1（中性）、向光坡>1
-    （提亮）、背光坡<1（压暗）。水面（water_mask）恒 1（不打明暗）。
+    关键：不做低频平滑——先把高度量化到整方块层，坡向/坡度取"层与层之间"
+    的突变，从而使阴影每层分明、同层内平坦（对齐参考图台阶观感）。
+    返回 [0,~1.3]；水面（water_mask）恒 1。
     """
-    h = heights.astype(np.float32) * np.float32(_FHS_ZSCALE)
-    # 双尺度地形：低频（5×5 平滑）承载成片坡面明暗，高频（原始）只留少量
-    # 细节。参考真实地图的阴影是"整片坡面亮/暗 + 轻微块面纹理"，若只用
-    # 逐方块高度，高频碎噪会盖掉低频起伏，观感均匀发平。
-    hb = _box5(h)
-    h = hb * np.float32(0.80) + h * np.float32(0.20)
+    # 高度量化：同一方块层内高度完全相同 -> 同层亮度一致（平台）
+    hq = np.round(heights.astype(np.float32) / np.float32(_FHS_STEP))
+    h = hq * np.float32(_FHS_STEP) * np.float32(_FHS_ZSCALE)
     p = np.pad(h, 1, mode="edge")
     p[0, 1:-1] = 2.0 * h[0] - h[1]
     p[-1, 1:-1] = 2.0 * h[-1] - h[-2]
@@ -242,14 +232,12 @@ def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     shade = (np.cos(_HS_ZEN) * np.cos(slope)
              + np.sin(_HS_ZEN) * np.sin(slope) * np.cos(_HS_AZ - aspect))
     shade = np.clip(shade / np.cos(_HS_ZEN), 0.0, 1.3).astype(np.float32)
-    # 3x3 均值平滑：逐方块明暗碎跳 -> 渐变
-    ps = np.pad(shade, 1, mode="edge")
-    shade = (ps[:-2, :-2] + ps[:-2, 1:-1] + ps[:-2, 2:]
-             + ps[1:-1, :-2] + ps[1:-1, 1:-1] + ps[1:-1, 2:]
-             + ps[2:, :-2] + ps[2:, 1:-1] + ps[2:, 2:]) * np.float32(1 / 9)
+    # 分级量化：参考图山地只有约 7 个亮度级、|ΔL|<1 占 88%，说明其阴影是
+    # 严格分层的。把 shade 量化到 N 级，使同层完全一致、层间跳变分明。
+    shade = np.round(shade * np.float32(_FHS_LEVELS)) / np.float32(_FHS_LEVELS)
+    # 刻意不做空间平滑：平滑会把台阶抹成连续渐变，与层状观感相反。
     shade[water_mask] = 1.0
     return shade
-
 
 def _grain(seed: int, x0: int, z0: int, h: int, w: int) -> np.ndarray:
     """逐方块亮度抖动因子（确定性、跨块无缝）：0.94~1.06 微颗粒质感。"""
@@ -373,26 +361,26 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     if structures and want_surface:
         _apply_structures(rgb, heights, x0, z0, h, w, seed, "26.2")
 
-    # ---- 5) 颗粒 + 山体阴影 ----
-    rgb = rgb.astype(np.float32) * _grain(seed, x0, z0, h, w)[..., None]
+    # ---- 5) 影调 → 颗粒 → 山体阴影（分级）----
+    # 顺序很重要：影调和颗粒必须在乘法式阴影之前完成，否则会把已量化的
+    # shade 层级重新打散，失去"每层分明"的平台感。
+    rgb = rgb.astype(np.float32)
     if hillshade:
-        water_mask = heights < _SEA
-        shade = _hillshade(heights.astype(np.int32), water_mask)
-        # 更深的阴影下限：背光坡压到 ~0.05，暗部更接近参考图（深林发黑）
-        rgb *= (0.05 + 0.95 * shade)[..., None]
-        # 影调定量对齐真实地图：参考森林区 mean≈88 / p5≈36 / p95≈122，
-        # 直接输出偏亮过曝。两级压缩：
-        #   1) γ=1.42 压低中间调与暗部；
-        #   2) 高光软压缩（>0.62 段渐近到 ~0.80）压掉雪/裸岩/亮沙的高光尖峰，
-        #      使 p95 落到参考量级。
-        # 局部对比度（相邻 |ΔL|、3×3 std）只被等比缩放，结构不变。
+        # 影调压缩（对齐参考 mean 88）：γ 压低中间调 + 高光软膝点
         t = np.clip(rgb, 0.0, 255.0) / 255.0
-        t = np.power(t, 1.15)
+        t = np.power(t, 1.40)
         knee = 0.52
         hi = t > knee
         t = np.where(hi, knee + (0.74 - knee)
                      * (1.0 - np.exp(-(t - knee) / (0.74 - knee))), t)
         rgb = t * 255.0
+    # 颗粒：振幅调小（±3%），避免破坏层内一致性
+    rgb *= (0.970 + 0.060 * _grain(seed, x0, z0, h, w))[..., None]
+    if hillshade:
+        water_mask = heights < _SEA
+        shade = _hillshade(heights.astype(np.int32), water_mask)
+        # 最后乘分级 shade：同层完全一致 -> 平台；层间跳变 -> 分明台阶
+        rgb *= (0.10 + 0.90 * shade)[..., None]
     rgb = np.clip(rgb, 0, 255).astype(np.uint8)
 
     block_names = pack["block_names"]
