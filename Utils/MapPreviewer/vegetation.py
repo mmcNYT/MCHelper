@@ -34,7 +34,10 @@ def _classify(name: str) -> str:
 
 _FLOWER_BLOCKS = ("poppy", "dandelion", "blue_orchid", "allium", "azure_bluet",
                   "oxeye_daisy", "cornflower", "lily_of_the_valley", "wither_rose",
-                  "tulip", "torchflower", "flower", "cherry_sapling")
+                  "tulip", "torchflower", "flower", "cherry_sapling",
+                  # 26.2：樱花林的地被是 pink_petals（不是树！）
+                  "pink_petals", "wildflower", "sunflower", "lilac", "rose_bush",
+                  "peony", "pitcher_plant", "cactus_flower", "leaf_litter")
 _GRASS_BLOCKS = ("grass", "fern", "shrub", "dead_bush", "bush", "leaf_litter",
                  "dry_grass", "tall_grass", "large_fern", "seagrass")
 _CROP_BLOCKS = ("cactus", "sugar_cane", "pumpkin", "melon", "carved_pumpkin",
@@ -116,7 +119,9 @@ def _configured_category(name: str, depth=0) -> str:
     elif any(any(gb in b for gb in _GRASS_BLOCKS) for b in blocks):
         cat = "grass"
     else:
-        cat = _classify(name)
+        # simple_block 等：方块名判不出时才回退名称。
+        # 注意不能盲信名称——"flower_cherry" 含 cherry 但不是树。
+        cat = _classify(name) if t not in ("simple_block",) else "ignore"
     _CAT_CACHE[name] = cat
     return cat
 
