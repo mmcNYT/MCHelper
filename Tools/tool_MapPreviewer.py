@@ -2107,6 +2107,20 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                  for fx in range(t0x, t1x + 1)]
         return tiles, (ccx, ccz)
 
+    def _fine_scale(self) -> int:
+        """按当前缩放选每方块像素数：放大越深，方块内材质纹理越可见。
+
+        参考图的 1方块=4像素 对应约 4px/方块 的屏幕缩放；这里按
+        屏幕像素/方块 的比例取名：>=3 用 4，>=1.5 用 2，否则 1。
+        同时受单块像素预算约束（scale² 增长会显著增加开销）。
+        """
+        m = self.viewMap.transform().m11()
+        if m >= 3.0:
+            return 4
+        if m >= 1.5:
+            return 2
+        return 1
+
     def _ensure_fine_tiles(self) -> None:
         """提交视口内缺失的精细瓦片到后台批量渲染（渐进上屏，可取消）。"""
         if self._last is None or self._running:
@@ -2131,7 +2145,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         version = str(self._last["version"])
         th = FineTileThread(seed, version, batch, _FINE_TILE, parent=self,
                             want_surface=True, hillshade=self._hillshade_on,
-                            structures=True)
+                            structures=True, scale=self._fine_scale())
         epoch = self._fine_epoch
         th.fine_tile_done.connect(
             lambda pl, e=epoch: self._on_fine_tile_done(pl, e))
@@ -2162,6 +2176,10 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                 pass
         item = self._scene.addPixmap(pm)
         item.setPos(int(payload["origin_bx"]), int(payload["origin_bz"]))
+        # 图像按 scale 倍像素渲染，需缩回 1 场景单位=1 方块
+        sc = int(payload.get("scale", 1))
+        if sc > 1:
+            item.setScale(1.0 / sc)
         item.setZValue(2)   # 压过底图(0)/瓦片，低于网格(5)
         self._fine_tiles[key] = item
         self.labelInfo.setText("精细渲染 %d 块" % len(self._fine_tiles))

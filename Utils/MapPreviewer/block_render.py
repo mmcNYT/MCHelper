@@ -297,7 +297,8 @@ def render_block_region(seed: int, cx_blocks: int, cz_blocks: int,
 
 def render_tile(seed: int, fx: int, fz: int, ts: int,
                 want_surface: bool = True, hillshade: bool = False,
-                structures: bool = True, margin: int = 4) -> dict:
+                structures: bool = True, margin: int = 4,
+                scale: int = 1) -> dict:
     """渲染一个对齐世界网格的精细瓦片：瓦片格 (fx,fz) 覆盖方块
     [fx*ts,(fx+1)*ts)×[fz*ts,(fz+1)*ts)。供视口逐块渐进渲染复用。
 
@@ -306,7 +307,7 @@ def render_tile(seed: int, fx: int, fz: int, ts: int,
     x0 = fx * ts
     z0 = fz * ts
     return _render_rect(seed, x0, z0, ts, ts, want_surface, hillshade,
-                        structures, None, None, margin=margin)
+                        structures, None, None, margin=margin, scale=scale)
 
 
 def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,

@@ -707,7 +707,8 @@ class FineTileThread(QThread):
     error = Signal(str)
 
     def __init__(self, seed, version, tiles, ts, parent=None,
-                 want_surface=True, hillshade=False, structures=True):
+                 want_surface=True, hillshade=False, structures=True,
+                 scale=1):
         super().__init__(parent)
         self._seed = seed
         self._version = version
@@ -716,6 +717,7 @@ class FineTileThread(QThread):
         self._want_surface = want_surface
         self._hillshade = hillshade
         self._structures = structures
+        self._scale = int(scale)
         self._cancelled = False
 
     def request_cancel(self):
@@ -740,11 +742,13 @@ class FineTileThread(QThread):
                 res = br.render_tile(self._seed, fx, fz, self._ts,
                                      want_surface=self._want_surface,
                                      hillshade=self._hillshade,
-                                     structures=self._structures)
+                                     structures=self._structures,
+                                     scale=self._scale)
                 if self._cancelled or res.get("cancelled"):
                     return
                 self.fine_tile_done.emit({
                     "fx": fx, "fz": fz, "rgb": res["rgb"],
+                    "scale": self._scale,
                     "origin_bx": res["origin_bx"],
                     "origin_bz": res["origin_bz"],
                     "elapsed": res.get("elapsed", 0.0)})
