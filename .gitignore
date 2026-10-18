@@ -32,3 +32,6 @@ Utils/MapPreviewer/_native/*.exp
 Utils/MapPreviewer/_native/*.lib
 Utils/MapPreviewer/_native/*.pdb
 Utils/MapPreviewer/_native/_build_*_log.txt
+
+# 方块材质图集缓存（由 jar 生成，可重建）
+Utils/MapPreviewer/_native/worldgen/26.2/block_atlas.npz*
