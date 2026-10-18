@@ -465,10 +465,9 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
         # 色阶要丰富。仅做轻微 γ 与高光软膝（膝点上移到 0.86，不再压扁）。
         t = np.clip(rgb, 0.0, 255.0) / 255.0
         t = np.power(t, 0.94)
-        knee = 0.86
-        hi = t > knee
-        t = np.where(hi, knee + (0.97 - knee)
-                     * (1.0 - np.exp(-(t - knee) / (0.97 - knee))), t)
+        # 不做高光压缩：官方瓦片实测平地雪保持 (255,255,255)
+        # （132220 像素为纯白，占已探索像素的第三位），
+        # 原来的 knee 会把 249 压到 238，使雪面发灰。
         rgb = t * 255.0
     # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
     # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
@@ -537,11 +536,21 @@ _BIOME_GRASS = {
 _BIOME_GRASS_DEFAULT = (108, 142, 76)
 
 
-def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict) -> np.ndarray:
-    """按群系给出草色（同群系同色，不随温湿度逐点渐变）。"""
+def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
+                         gray: float = None) -> np.ndarray:
+    """按群系给出草色（同群系同色，不随温湿度逐点渐变）。
+
+    统一走 MC 官方公式：final = biome_grass_tint * texture_gray / 255。
+    色表来自 jm_colors._BIOME_TINTS（已用官方 JourneyMap 瓦片反推验证）。
+    """
+    from Utils.MapPreviewer import jm_colors as _jm
     h, w = biome_grid.shape
     out = np.empty((h, w, 3), np.float32)
     id2key = pack["id2key"]
+    if gray is None:
+        pal = pack.get("jm_palette") or {}
+        gb = pal.get("minecraft:grass_block")
+        gray = float(gb[1]) if gb else 147.0
     cache: dict[int, tuple] = {}
     for r in range(h):
         for c in range(w):
@@ -549,7 +558,8 @@ def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict) -> np.ndarray:
             col = cache.get(bid)
             if col is None:
                 k = id2key.get(bid, "")
-                col = _BIOME_GRASS.get(k.split(":")[-1], _BIOME_GRASS_DEFAULT)
+                t = _jm.tint_for_biome("grass", k.split(":")[-1])
+                col = tuple(int(round(v * gray / 255.0)) for v in t)
                 cache[bid] = col
             out[r, c] = col
     return out
@@ -770,14 +780,29 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         # 覆盖官方 (201,236,255)->(131,163,232)->(47,87,167)->(45,64,158) 的走向。
         # 水色取官方深水实测值（JourneyMap 的水在叠加后会明显偏深，
         # 用 tint 原色 (63,118,228) 会整体偏亮）
-        _WC = np.array([45.0, 64.0, 158.0], np.float32)
+        from Utils.MapPreviewer import jm_colors as _jm2
+        # 水色基色按**群系**取（MC water_color，官方瓦片已验证逐位精确）
+        # 用 4x4 量化：水体成片，量化边界不影响观感，且保证同群系同色
+        _WCg = np.empty((h, w, 3), np.float32)
+        _wc_cache = {}
+        for _r in range(0, h, 4):
+            for _c in range(0, w, 4):
+                _bk = pack["id2key"].get(
+                    int(biome_grid[_r, _c]), "").split(":")[-1]
+                _t = _wc_cache.get(_bk)
+                if _t is None:
+                    _t = np.array(
+                        _jm2.tint_for_biome("water", _bk), np.float32) \
+                        * (188.0 / 255.0)
+                    _wc_cache[_bk] = _t
+                _WCg[_r:_r + 4, _c:_c + 4] = _t
         dep = np.clip((_SEA - heights).astype(np.float32), 0.0, 30.0)
         # 逐层叠加：result = bed*(1-a)^n + water*(1-(1-a)^n)
         _a = 0.55
         _keep = np.power(1.0 - _a, dep)[..., None]          # 海床残留比例
         # 海床底色：浅=沙滩亮色，深=暗
         _bed = np.array([120.0, 120.0, 118.0], np.float32)
-        wr = _bed * _keep + _WC * (1.0 - _keep)
+        wr = _bed * _keep + _WCg * (1.0 - _keep)
         # 极浅处（1~2 格）偏亮，模拟官方 (201,236,255) 的近岸白边
         _sh = (dep <= 2.0)
         if _sh.any():

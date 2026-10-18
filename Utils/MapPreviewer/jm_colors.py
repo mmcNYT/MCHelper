@@ -31,8 +31,10 @@ FOLIAGE_BRIGHTNESS = 0.8
 WATER_BASE = 12369084
 
 # 需要按"树叶"处理（压暗 0.8）的方块短名关键字
-_FOLIAGE_KEYS = ("leaves", "vine", "grass_block", "fern", "grass",
-                 "lily_pad", "azalea", "moss", "flower", "bush")
+# 注意：grass_block 用**草色 tint**，不属于 foliage，不能压暗 0.8。
+# （JourneyMap 的 isFoliage() 只对树叶类返回真）
+_FOLIAGE_KEYS = ("leaves", "vine", "lily_pad", "azalea", "moss_carpet",
+                 "bush", "crop", "fern")
 
 
 def adjust_brightness(rgb: np.ndarray, factor: float) -> np.ndarray:
@@ -43,6 +45,17 @@ def adjust_brightness(rgb: np.ndarray, factor: float) -> np.ndarray:
 def is_foliage(block_name: str) -> bool:
     n = block_name.split(":")[-1]
     return any(k in n for k in _FOLIAGE_KEYS)
+
+
+# 官方 JourneyMap 瓦片实测基色（族内最高频，对应平地 slope=1.0）
+_OFFICIAL_BASE = {
+    "snow_block": (255, 255, 255),
+    "powder_snow": (255, 255, 255),
+    "sand": (232, 219, 173),
+    "red_sand": (232, 219, 173),
+    "gravel": (138, 131, 121),
+    "stone": (160, 160, 160),
+}
 
 
 def build_block_palette(block_names: list[str]) -> dict[str, tuple]:
@@ -61,6 +74,11 @@ def build_block_palette(block_names: list[str]) -> dict[str, tuple]:
         rgb = np.clip(mean, 0, 255).astype(np.uint8)
         # 注意：foliage 压暗统一在 tinted_color() 里做一次，此处不做，
         # 否则灰度贴图会双重压暗（实测草地因此偏暗 36%）。
+        # 非 tint 类方块按官方瓦片实测基色校正（贴图均值系统性偏暗 1.06x）
+        _short = nm.split(":")[-1]
+        _fix = _OFFICIAL_BASE.get(_short)
+        if _fix is not None:
+            rgb = np.array(_fix, np.uint8)
         out[nm] = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
     return out
 
@@ -71,23 +89,72 @@ _GRASS_TINT = (0x91, 0xBD, 0x59)      # MC 平原草地基准（vanilla grass co
 _FOLIAGE_TINT = (0x77, 0xA8, 0x4A)    # vanilla foliage
 _WATER_TINT = (0x3F, 0x76, 0xE4)      # vanilla water
 
-# 群系 -> 草色 tint（量化，保证同群系同色）
+# 群系 -> 草色 tint（MC BiomeDefaultFeatures 的 grass_color 常量）
 _BIOME_TINTS = {
-    "forest": (0x84, 0xB4, 0x60), "birch_forest": (0x8C, 0xBC, 0x66),
-    "dark_forest": (0x72, 0xA4, 0x54), "taiga": (0x7A, 0xAA, 0x66),
-    "jungle": (0x6C, 0xC0, 0x50), "savanna": (0xC0, 0xC0, 0x72),
-    "desert": (0xCC, 0xC4, 0x7C), "swamp": (0x74, 0x86, 0x50),
-    "snowy_plains": (0xA8, 0xC0, 0xA8), "plains": (0x91, 0xBD, 0x59),
+    "plains": (145, 189, 89), "sunflower_plains": (145, 189, 89),
+    "meadow": (145, 189, 89), "cherry_grove": (145, 189, 89),
+    "forest": (121, 192, 90), "flower_forest": (121, 192, 90),
+    "birch_forest": (136, 187, 103),
+    "old_growth_birch_forest": (129, 187, 96),
+    "dark_forest": (64, 168, 51),
+    "taiga": (104, 164, 100), "old_growth_pine_taiga": (101, 156, 95),
+    "old_growth_spruce_taiga": (104, 164, 100),
+    "snowy_taiga": (104, 164, 100), "snowy_plains": (125, 181, 125),
+    "snowy_slopes": (104, 164, 100), "grove": (104, 164, 100),
+    "jungle": (89, 201, 60), "sparse_jungle": (89, 201, 60),
+    "bamboo_jungle": (118, 142, 20),
+    "savanna": (149, 159, 63), "savanna_plateau": (149, 159, 63),
+    "windswept_savanna": (149, 159, 63),
+    "swamp": (106, 112, 57), "mangrove_swamp": (117, 148, 90),
+    "desert": (191, 183, 85), "badlands": (144, 129, 77),
+    "eroded_badlands": (144, 129, 77), "wooded_badlands": (144, 129, 77),
+    "windswept_hills": (131, 160, 97), "windswept_forest": (131, 160, 97),
+    "windswept_gravelly_hills": (131, 160, 97),
+    "stony_peaks": (131, 160, 97), "jagged_peaks": (131, 160, 97),
+    "frozen_peaks": (131, 160, 97), "lush_caves": (131, 160, 97),
 }
+# 群系 -> 树叶 tint（MC foliage_color）
+_BIOME_FOLIAGE_TINTS = {
+    "plains": (119, 171, 73), "forest": (119, 171, 73),
+    "birch_forest": (131, 175, 95), "old_growth_birch_forest": (131, 175, 95),
+    "dark_forest": (64, 168, 51), "flower_forest": (119, 171, 73),
+    "taiga": (119, 171, 73), "snowy_taiga": (49, 111, 46),
+    "old_growth_pine_taiga": (141, 179, 96),
+    "old_growth_spruce_taiga": (49, 111, 46),
+    "jungle": (119, 171, 73), "sparse_jungle": (119, 171, 73),
+    "bamboo_jungle": (119, 171, 73),
+    "swamp": (94, 113, 53), "mangrove_swamp": (117, 148, 90),
+    "savanna": (149, 159, 63), "desert": (149, 159, 63),
+    "cherry_grove": (190, 203, 156),
+    "meadow": (119, 171, 73), "grove": (49, 111, 46),
+    "snowy_plains": (119, 171, 73), "ice_spikes": (119, 171, 73),
+}
+# 群系 -> 水色 tint（MC water_color；已由官方瓦片反推精确验证）
+_BIOME_WATER_TINTS = {
+    "ocean": (63, 118, 228), "deep_ocean": (63, 118, 228),
+    "frozen_ocean": (57, 56, 201), "deep_frozen_ocean": (57, 56, 201),
+    "cold_ocean": (61, 87, 214), "deep_cold_ocean": (61, 87, 214),
+    "frozen_river": (57, 56, 201),
+    "lukewarm_ocean": (69, 173, 194),
+    "deep_lukewarm_ocean": (69, 173, 194),
+    "warm_ocean": (67, 213, 238), "deep_warm_ocean": (67, 213, 238),
+    "swamp": (96, 113, 70), "mangrove_swamp": (92, 129, 111),
+    "river": (63, 118, 228), "beach": (63, 118, 228),
+    "snowy_beach": (57, 56, 201),
+}
+_BIOME_FOLIAGE_DEFAULT = (119, 171, 73)
+_BIOME_WATER_DEFAULT = (63, 118, 228)
+
+
 _BIOME_TINT_DEFAULT = (0x91, 0xBD, 0x59)
 
 
 def tint_for_biome(kind: str, biome_short: str) -> tuple:
-    """取某类（grass/foliage/water）在指定群系的 tint。"""
+    """取某类（grass/foliage/water）在指定群系的 tint（MC 官方色表）。"""
     if kind == "water":
-        return _WATER_TINT
+        return _BIOME_WATER_TINTS.get(biome_short, _BIOME_WATER_DEFAULT)
     if kind == "foliage":
-        return _FOLIAGE_TINT
+        return _BIOME_FOLIAGE_TINTS.get(biome_short, _BIOME_FOLIAGE_DEFAULT)
     return _BIOME_TINTS.get(biome_short, _BIOME_TINT_DEFAULT)
 
 
@@ -115,7 +182,8 @@ def tinted_color(block_name: str, biome_short: str,
         kind = "grass"
     tr, tg, tb = tint_for_biome(kind, biome_short)
     # base 是灰度均值 b；tint 色 = tint * (b/255)
-    g = min(1.0, float(base[1]) / 150.0)   # 灰度贴图均值约 150
+    # MC 原版：final = tint * texture_gray / 255
+    g = float(base[1]) / 255.0
     col = (tr * g, tg * g, tb * g)
     if is_foliage(block_name):
         col = tuple(c * FOLIAGE_BRIGHTNESS for c in col)
@@ -219,11 +287,14 @@ def _calc_slope(h, offs, min_y):
         ys = np.clip(np.arange(hh) + dz, 0, hh - 1)
         xs = np.clip(np.arange(ww) + dx, 0, ww - 1)
         off = h[np.ix_(ys, xs)]
-        dh = off - h
-        down = dh < 0.0
+        # 分支条件实为 `offH >= 0`（offH 是邻列**绝对**顶高，主世界几乎
+        # 恒 >=0），而非"是否下坡"。故实际永远走 (currY+depth)/(offH+depth)
+        # 一支：邻列更低 -> 比值>1（山脊提亮），邻列更高 -> <1（洼地压暗）。
+        # 此前按 dh<0 分流用错了公式，导致坡度被压在 [0.61,1.54]。
         with np.errstate(divide="ignore", invalid="ignore"):
-            term = np.where(down, (off - depth) / (h - depth),
-                            (h + depth) / (off + depth))
+            term = np.where(off >= 0.0,
+                            (h + depth) / (off + depth),
+                            (off - depth) / (h - depth))
         acc += term.astype(np.float32)
     return acc / float(len(offs))
 
