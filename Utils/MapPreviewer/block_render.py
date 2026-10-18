@@ -553,31 +553,30 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
             radius[r, c] = rad; canopy_col[r, c] = col
             crop_kind[r, c] = pr["crop_kind"]
 
-    # 树干命中 -> 冠层（按半径膨胀，逐树干 stamp 圆盘 + 逐像素叶纹 stipple）
-    trunk = growable & (_hash01_grid(seed, x0, z0, h, w, 1) < tree_p)
-    fol = _hash01_grid(seed, x0, z0, h, w, 7)          # 叶面亮度噪声
-    tvar = _hash01_grid(seed, x0, z0, h, w, 8)         # 逐棵树明暗变化
-    shap = _hash01_grid(seed, x0, z0, h, w, 9)         # 冠层轮廓扰动
+    # 真实树摆放：按 MC per-chunk feature 放置算法（population seed +
+    # in_square 偏移），替代原来的逐像素概率散布。
+    from Utils.MapPreviewer import tree_placement as _tp
+    trees = _tp.place_trees_in_rect(seed, x0, z0, w, h, heights,
+                                    biome_grid, pack["id2key"])
     canopy = np.zeros((h, w), bool)
-    ys, xs = np.nonzero(trunk)
-    for y, x in zip(ys, xs):
-        rad = int(radius[y, x])
-        base = canopy_col[y, x] * np.float32(0.90 + 0.20 * tvar[y, x])
-        # 每棵树独立的轮廓扰动相位，避免所有冠层都是同一个圆
-        ph = np.float32(6.2831853 * tvar[y, x])
+    fol = _hash01_grid(seed, x0, z0, h, w, 7)      # 叶面亮度噪声
+    tvar = _hash01_grid(seed, x0, z0, h, w, 8)     # 逐棵树明暗
+    for (tx, tz, sp, rad, col, top_y) in trees:
+        base = np.asarray(col, np.float32) * np.float32(
+            0.90 + 0.20 * tvar[tz, tx])
+        ph = np.float32(6.2831853 * tvar[tz, tx])
+        lim = rad * rad + rad
         for dy in range(-rad, rad + 1):
-            yy = y + dy
+            yy = tz + dy
             if yy < 0 or yy >= h:
                 continue
             for dx in range(-rad, rad + 1):
-                xx = x + dx
+                xx = tx + dx
                 if xx < 0 or xx >= w:
                     continue
                 r2 = dx * dx + dy * dy
-                lim = rad * rad + rad
                 if r2 > lim:
                     continue
-                # 边界按角度做噪声扰动：不规则树冠轮廓（而非完美圆盘）
                 ang = np.arctan2(float(dy), float(dx)) + ph
                 wob = 0.80 + 0.34 * (0.5 + 0.5 * np.sin(ang * 3.0)
                                      * np.sin(ang * 2.0 + 1.7))
@@ -586,35 +585,7 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                 if growable[yy, xx]:
                     canopy[yy, xx] = True
                     edge = 1.0 - 0.24 * (r2 / max(lim, 1))
-                    rgb[yy, xx] = base * edge \
-                        * np.float32(0.88 + 0.24 * fol[yy, xx])
-
-    # 作物（不在冠层下）
-    crop = growable & ~canopy & (_hash01_grid(seed, x0, z0, h, w, 4) < crop_p)
-    if crop.any():
-        for kind in ("cactus", "sugar_cane", "pumpkin", "melon", "bamboo", "berry"):
-            m = crop & (crop_kind == kind)
-            if m.any():
-                rgb[m] = _veg.crop_color(kind)
-        m = crop & (crop_kind == "")
-        if m.any():
-            rgb[m] = (100, 150, 60)
-
-    # 花（不在冠层/作物下）
-    flower = growable & ~canopy & ~crop & (_hash01_grid(seed, x0, z0, h, w, 2) < flower_p)
-    if flower.any():
-        fc = np.array([_veg.flower_color(i) for i in range(7)], dtype=np.float32)
-        pick = (_hash01_grid(seed, x0, z0, h, w, 5) * 7).astype(np.int32).clip(0, 6)
-        fy, fx = np.nonzero(flower)
-        rgb[fy, fx] = fc[pick[fy, fx]]
-
-    # 草（微弱绿调，覆盖剩余可生长地）
-    grass = growable & ~canopy & ~crop & ~flower & \
-        (_hash01_grid(seed, x0, z0, h, w, 3) < grass_p)
-    if grass.any():
-        tuft = np.array([70, 120, 52], np.float32)
-        rgb[grass] = rgb[grass] * 0.82 + tuft * 0.18
-
+                    rgb[yy, xx] = base * edge                         * np.float32(0.88 + 0.24 * fol[yy, xx])
 
 # ---- 结构 footprint 近似（逐方块；占地尺寸/材质为代表性近似）----
 # key: (宽, 长, 主体色, 边框/屋顶色)；村庄单独按房屋簇渲染。
