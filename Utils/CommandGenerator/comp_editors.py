@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog,
 
 from Utils.CommandGenerator import components as C
 from Utils.CommandGenerator import snbt
+from Utils.CommandGenerator.nbt_key_cn import KEY_CN
+from Utils.CommandGenerator.nbt_dialog import KIND_TOOLTIPS
 
 # ---------------------------------------------------------------------------
 # 附魔数据（复用项目 data/enchants.json）
@@ -853,8 +855,22 @@ class CompoundEditor(_Editor):
         grid.setVerticalSpacing(3)
         for r, f in enumerate(fields):
             k = _codec_kind(f["codec"])
-            # 可选标注在控件 placeholder，标签保持键名干净
-            grid.addWidget(QLabel(f["key"]), r, 0)
+            # 可选标注在控件 placeholder，标签保持键名干净；
+            # 悬停显示该字段的中文说明（KEY_CN）+ 类型/默认值
+            lab = QLabel(f["key"])
+            cn = KEY_CN.get(f["key"])
+            parts = []
+            if cn:
+                parts.append(cn)
+            parts.append(KIND_TOOLTIPS.get(k, ""))
+            if f.get("default"):
+                parts.append(f"默认 {f['default']}")
+            if f["optional"]:
+                parts.append("可选")
+            if parts:
+                lab.setToolTip(f["key"] + "\n" + " · ".join(
+                    x for x in parts if x))
+            grid.addWidget(lab, r, 0)
             w, keff = self._make_field_widget(f, k)
             if f["optional"]:
                 _mark_optional(w)

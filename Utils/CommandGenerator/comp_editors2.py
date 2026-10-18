@@ -72,6 +72,34 @@ _ITEM_ICON_DIR = os.path.join(
     "assets", "Public", "items")
 
 
+# 手写键标签的悬浮说明（_tlab 用）
+_TIPS = {
+    '槽位': 'container.0 起的槽位编号（0-53 为容器常用格）',
+    '物品': '放入该槽的物品',
+    '效果': '吃下后获得的状态效果',
+    '时长(秒)': '效果持续秒数（官方默认 160 秒）',
+    '图案': '旗帜图案类型',
+    '颜色': '图案的染料颜色',
+    '属性名': '地图标记的属性名（如 wall, item）',
+    '值': '该属性的取值',
+    '标记 id': '自定义标记名（同一地图内唯一）',
+    '类型': '地图装饰类型',
+    '玩家名（最简形式）': '正版玩家名；填了名字可留空 UUID',
+    'UUID': '玩家 UUID（可选；与玩家名二选一）',
+    '数量': '物品个数',
+    '蜜蜂实体': '放进巢里的蜜蜂',
+    '在巢刻数': '蜜蜂留在巢内的游戏刻数',
+}
+
+
+def _tlab(text: str):
+    """带悬浮说明的键标签（说明表见 _TIPS）。"""
+    from PySide6.QtWidgets import QLabel as _QL
+    w = _QL(text)
+    w.setToolTip(f"{text}\n{_TIPS.get(text, text)}")
+    return w
+
+
 def _combo(source: str, allow_empty=True, editable=True):
     cb = QComboBox()
     cb.setEditable(editable)
@@ -304,9 +332,9 @@ class ContainerEditor(_ListTableEditor):
         self.slot_spin.setPrefix("槽 ")
         self.item_combo = _combo("item", allow_empty=True)
         self.item_combo.setMinimumWidth(200)
-        grid.addWidget(QLabel("槽位"), 0, 0)
+        grid.addWidget(_tlab("槽位"), 0, 0)
         grid.addWidget(self.slot_spin, 0, 1)
-        grid.addWidget(QLabel("物品"), 1, 0)
+        grid.addWidget(_tlab("物品"), 1, 0)
         grid.addWidget(self.item_combo, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -371,9 +399,9 @@ class StewEditor(_ListTableEditor):
         self.dur_spin = QSpinBox()
         self.dur_spin.setRange(1, 3600)
         self.dur_spin.setValue(160)      # 官方默认（源码 lenientOptionalFieldOf("duration", 160)）
-        grid.addWidget(QLabel("效果"), 0, 0)
+        grid.addWidget(_tlab("效果"), 0, 0)
         grid.addWidget(self.fx_combo, 0, 1)
-        grid.addWidget(QLabel("时长(秒)"), 1, 0)
+        grid.addWidget(_tlab("时长(秒)"), 1, 0)
         grid.addWidget(self.dur_spin, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -465,9 +493,9 @@ class BannerEditor(_ListTableEditor):
         self.color_combo = QComboBox()
         for c in self.DYE_COLORS:
             self.color_combo.addItem(c, c)
-        grid.addWidget(QLabel("图案"), 0, 0)
+        grid.addWidget(_tlab("图案"), 0, 0)
         grid.addWidget(self.pat_combo, 0, 1)
-        grid.addWidget(QLabel("颜色"), 1, 0)
+        grid.addWidget(_tlab("颜色"), 1, 0)
         grid.addWidget(self.color_combo, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -558,9 +586,9 @@ class BlockStateEditor(_Editor):
         self.k_edit.setPlaceholderText("如 facing")
         self.v_edit = QLineEdit()
         self.v_edit.setPlaceholderText("如 north")
-        grid.addWidget(QLabel("属性名"), 0, 0)
+        grid.addWidget(_tlab("属性名"), 0, 0)
         grid.addWidget(self.k_edit, 0, 1)
-        grid.addWidget(QLabel("值"), 1, 0)
+        grid.addWidget(_tlab("值"), 1, 0)
         grid.addWidget(self.v_edit, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -646,9 +674,9 @@ class MapDecoEditor(_Editor):
         self.type_combo = QComboBox()
         for t in self.DECO_TYPES:
             self.type_combo.addItem(t, t)
-        grid.addWidget(QLabel("标记 id"), 0, 0)
+        grid.addWidget(_tlab("标记 id"), 0, 0)
         grid.addWidget(self.id_edit, 0, 1)
-        grid.addWidget(QLabel("类型"), 1, 0)
+        grid.addWidget(_tlab("类型"), 1, 0)
         grid.addWidget(self.type_combo, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -738,14 +766,14 @@ class ProfileEditor(_Editor):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("如 Notch；填了名字可留空 UUID")
         self.name_edit.textChanged.connect(self._emit)
-        grid.addWidget(QLabel("玩家名（最简形式）"), 0, 0)
+        grid.addWidget(_tlab("玩家名（最简形式）"), 0, 0)
         grid.addWidget(self.name_edit, 0, 1)
         self.uuid_edit = QLineEdit()
         # 可选标注在 placeholder（标签保持干净）
         self.uuid_edit.setPlaceholderText(
             "（可选）如 069a79f4-44e9-4726-a5be-fca90e38aaf5")
         self.uuid_edit.textChanged.connect(self._emit)
-        grid.addWidget(QLabel("UUID"), 1, 0)
+        grid.addWidget(_tlab("UUID"), 1, 0)
         grid.addWidget(self.uuid_edit, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -790,7 +818,7 @@ class ItemStackEditor(_Editor):
         self.combo = _combo("item", allow_empty=True)
         self.combo.currentIndexChanged.connect(self._emit)
         self.combo.editTextChanged.connect(self._emit)
-        grid.addWidget(QLabel("物品"), 0, 0)
+        grid.addWidget(_tlab("物品"), 0, 0)
         grid.addWidget(self.combo, 0, 1)
         self.count_spin = None
         if with_count:
@@ -798,7 +826,7 @@ class ItemStackEditor(_Editor):
             self.count_spin.setRange(1, 99)
             self.count_spin.setValue(1)
             self.count_spin.valueChanged.connect(self._emit)
-            grid.addWidget(QLabel("数量"), 1, 0)
+            grid.addWidget(_tlab("数量"), 1, 0)
             grid.addWidget(self.count_spin, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
@@ -988,9 +1016,9 @@ class BeesEditor(_Editor):
         self.ticks_spin = QSpinBox()
         self.ticks_spin.setRange(0, 100000000)
         self.ticks_spin.setValue(0)
-        grid.addWidget(QLabel("蜜蜂实体"), 0, 0)
+        grid.addWidget(_tlab("蜜蜂实体"), 0, 0)
         grid.addWidget(self.bee_combo, 0, 1)
-        grid.addWidget(QLabel("在巢刻数"), 1, 0)
+        grid.addWidget(_tlab("在巢刻数"), 1, 0)
         grid.addWidget(self.ticks_spin, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)

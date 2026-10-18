@@ -121,7 +121,11 @@ class CommandForm(QWidget):
                     # 可空标注在控件 placeholder（_mark_optional），
                     # 不再占用标签文字
                     self._mark_optional(w)
-                self._form.addRow(label, w)
+                # 自建 label 以便挂 tooltip（addRow 传字符串时 Qt 内部
+                # 自建 QLabel 拿不到实例）；悬停显示该参数的用途说明
+                lab = QLabel(label)
+                lab.setToolTip(self._field_tip(fs, label))
+                self._form.addRow(lab, w)
                 if fs.get("hint"):
                     h = QLabel(fs["hint"])
                     h.setWordWrap(True)
@@ -170,6 +174,36 @@ class CommandForm(QWidget):
                     if mark not in cur:
                         le.setPlaceholderText(
                             f"{mark}{cur}" if cur else mark)
+
+    def _field_tip(self, fs: dict, label: str) -> str:
+        """参数标签的悬浮说明。
+
+        hint 优先（spec 里手写的用途说明）；没有 hint 的字段
+        按 kind 给通用说明，保证悬停**永远有内容**。
+        """
+        hint = fs.get("hint")
+        if hint:
+            return f"{label}：{hint}"
+        kind = fs.get("kind")
+        tip_by_kind = {
+            "targets": "目标选择器：@s 自己 / @p 最近玩家 / "
+                       "@a 全体玩家 / @e 全部实体；点「编辑…」构造复杂条件",
+            "pos": "坐标：支持 ~ 相对坐标（如 ~ ~ ~）与绝对坐标（如 0 64 0）",
+            "enum": "从下拉选择一个合法取值",
+            "int": "整数",
+            "float": "数值（支持小数）",
+            "bool": "开/关",
+            "nbt": "NBT 数据：点「编辑 NBT…」在树形编辑器里构造，"
+                   "不必手写",
+            "block": "方块 id：可输入中文名或英文 id 搜索",
+            "resource": "资源 id：可输入中文名或英文 id 搜索",
+            "loot_table_res": "战利品表 id",
+            "text": "自由文本",
+        }
+        base = tip_by_kind.get(kind, "")
+        if base:
+            return f"{label}：{base}"
+        return label
 
     def _controller_values(self) -> dict:
         """被 show_when 引用的控制字段当前值快照。"""

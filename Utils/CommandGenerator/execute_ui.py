@@ -164,6 +164,29 @@ def _resource_items(source):
     return fn() if fn else []
 
 
+def _field_tip(label: str, kind: str, extra: dict) -> str:
+    """参数标签悬浮说明（同 cmd_form._field_tip 的链行版）。
+
+    placeholder 优先（extra 里手写的提示），无则按 kind 通用说明；
+    label 与通用说明重复时不重复拼。
+    """
+    ph = extra.get("placeholder")
+    if ph:
+        return f"{label}：{ph}"
+    tip_by_kind = {
+        "targets": "目标选择器：@s/@p/@a/@e/@r；点「编辑…」构造复杂条件",
+        "pos": "~ 相对坐标 或 绝对坐标（如 0 64 0）",
+        "enum": "从下拉选择一个合法取值",
+        "int": "整数",
+        "float": "数值（支持小数）",
+        "resource": "资源 id：可输入中文名或英文 id 搜索",
+        "block": "方块 id：可搜索",
+        "text": "自由文本",
+    }
+    base = tip_by_kind.get(kind, "")
+    return f"{label}：{base}" if base else label
+
+
 def _mark_optional(w):
     """可空字段的值控件打 placeholder「（可空）」（同 cmd_form）。
 
@@ -282,8 +305,9 @@ class ChainRow(QWidget):
                              if "show_when" in sp[3]}
         for key, label, kind, extra in specs:
             # 可空标注只在控件 placeholder（_mark_optional），
-            # 标签保持干净
+            # 标签保持干净；悬停 tooltip 说明该参数用途
             lab = QLabel(label)
+            lab.setToolTip(_field_tip(label, kind, extra))
             w = self._make_widget(key, kind, extra, args.get(key))
             if extra.get("optional"):
                 _mark_optional(w)
