@@ -281,11 +281,10 @@ class ChainRow(QWidget):
         self._controllers = {sp[3]["show_when"][0] for sp in specs
                              if "show_when" in sp[3]}
         for key, label, kind, extra in specs:
-            lab = QLabel(label + ("（可空）" if extra.get("optional")
-                                  else ""))
+            # 可空标注只在控件 placeholder（_mark_optional），
+            # 标签保持干净
+            lab = QLabel(label)
             w = self._make_widget(key, kind, extra, args.get(key))
-            # 可空字段的值控件标 placeholder（傻瓜式：控件内直接可见，
-            # 不用看标签）
             if extra.get("optional"):
                 _mark_optional(w)
             self.param_lay.addWidget(lab)

@@ -111,7 +111,8 @@ class CommandForm(QWidget):
                 w = self._make_widget(fs)
                 label = fs["label"]
                 if fs.get("optional"):
-                    label += "（可空）"
+                    # 可空标注在控件 placeholder（_mark_optional），
+                    # 不再占用标签文字
                     self._mark_optional(w)
                 self._form.addRow(label, w)
                 if fs.get("hint"):

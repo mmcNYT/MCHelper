@@ -853,10 +853,9 @@ class CompoundEditor(_Editor):
         grid.setVerticalSpacing(3)
         for r, f in enumerate(fields):
             k = _codec_kind(f["codec"])
-            lab = f["key"] + ("（可选）" if f["optional"] else "")
-            grid.addWidget(QLabel(lab), r, 0)
+            # 可选标注在控件 placeholder，标签保持键名干净
+            grid.addWidget(QLabel(f["key"]), r, 0)
             w, keff = self._make_field_widget(f, k)
-            # 可选字段的值控件标 placeholder（控件内直接可见）
             if f["optional"]:
                 _mark_optional(w)
             grid.addWidget(w, r, 1)

@@ -729,9 +729,11 @@ class ProfileEditor(_Editor):
         grid.addWidget(QLabel("玩家名（最简形式）"), 0, 0)
         grid.addWidget(self.name_edit, 0, 1)
         self.uuid_edit = QLineEdit()
-        self.uuid_edit.setPlaceholderText("如 069a79f4-44e9-4726-a5be-fca90e38aaf5")
+        # 可选标注在 placeholder（标签保持干净）
+        self.uuid_edit.setPlaceholderText(
+            "（可选）如 069a79f4-44e9-4726-a5be-fca90e38aaf5")
         self.uuid_edit.textChanged.connect(self._emit)
-        grid.addWidget(QLabel("UUID（可选）"), 1, 0)
+        grid.addWidget(QLabel("UUID"), 1, 0)
         grid.addWidget(self.uuid_edit, 1, 1)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
