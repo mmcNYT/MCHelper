@@ -202,6 +202,11 @@ _FHS_STEP = 1      # 高度量化步长（方块）：1 = 逐方块一层（MC �
 _FHS_LEVELS = 7    # shade 分级数：参考图山地约 7 个亮度级
 _FHS_SHADE_MIN = 0.42   # 阴影下限：防背光陡坡乘深色方块后变纯黑
 
+# 树冠球面光照用的光源方向（西北 315°、高度角 40°，与地形 hillshade 同源）
+_HS_LIGHT_X = float(np.sin(_HS_AZ) * np.cos(_HS_ZEN))
+_HS_LIGHT_Y = float(-np.cos(_HS_AZ) * np.cos(_HS_ZEN))
+_HS_LIGHT_Z = float(np.sin(_HS_ZEN))
+
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     """逐方块山体阴影（horn 公式，西北光源 315°/高度角 40°），按高度分层。
@@ -567,10 +572,13 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
     fol = _hash01_grid(seed, x0, z0, h, w, 7)      # 叶面亮度噪声
     tvar = _hash01_grid(seed, x0, z0, h, w, 8)     # 逐棵树明暗
     for (tx, tz, sp, rad, col, top_y) in trees:
-        base = np.asarray(col, np.float32) * np.float32(
-            0.90 + 0.20 * tvar[tz, tx])
-        ph = np.float32(6.2831853 * tvar[tz, tx])
-        lim = rad * rad + rad
+        # 冠层按球面法线做光照（西北光 315°/40°，与地形阴影同光源）：
+        #   中心 = 正对光源 -> 最亮；边缘 = 掠射 -> 渐暗
+        # 这是参考图树冠有立体感的关键：不是平涂一个色块。
+        base = np.asarray(col, np.float32)
+        lum_t = np.float32(0.90 + 0.20 * tvar[tz, tx])
+        lim = float(rad * rad + rad)
+        rn = max(rad, 1)
         for dy in range(-rad, rad + 1):
             yy = tz + dy
             if yy < 0 or yy >= h:
@@ -582,15 +590,34 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                 r2 = dx * dx + dy * dy
                 if r2 > lim:
                     continue
-                ang = np.arctan2(float(dy), float(dx)) + ph
-                wob = 0.80 + 0.34 * (0.5 + 0.5 * np.sin(ang * 3.0)
-                                     * np.sin(ang * 2.0 + 1.7))
-                if r2 > lim * wob:
+                if not growable[yy, xx]:
                     continue
-                if growable[yy, xx]:
-                    canopy[yy, xx] = True
-                    edge = 1.0 - 0.24 * (r2 / max(lim, 1))
-                    rgb[yy, xx] = base * edge                         * np.float32(0.88 + 0.24 * fol[yy, xx])
+                # 球面法线（俯视近似）：n = (dx/rad, dy/rad, sqrt(1-r²/rad²))
+                nx = dx / rn
+                ny = dy / rn
+                nz = np.sqrt(max(0.0, 1.0 - (r2 / lim)))
+                # 西北光方向（D=1 表示正对光源）
+                d = float(nx * _HS_LIGHT_X + ny * _HS_LIGHT_Y
+                          + nz * _HS_LIGHT_Z)
+                d = max(d, 0.0)
+                # 漫反射 + 环境项；范围约 0.55~1.25，中心亮边缘暗
+                shade3d = 0.72 + 0.45 * d
+                canopy[yy, xx] = True
+                rgb[yy, xx] = base * lum_t * np.float32(shade3d)
+
+    # 树冠投影：给树冠外围一圈地面压暗（模拟树的落影，增强"立起来"感）
+    if canopy.any():
+        sh = np.zeros((h, w), np.float32)
+        yo, xo = np.nonzero(canopy)
+        for oy, ox in zip(yo, xo):
+            for sy in range(-1, 2):      # 光来自西北 -> 影子投东南
+                for sx in range(-1, 2):
+                    yy, xx = oy + sy + 1, ox + sx + 1
+                    if 0 <= yy < h and 0 <= xx < w and not canopy[yy, xx]:
+                        sh[yy, xx] = 1.0
+        if sh.any():
+            rgb = rgb.astype(np.float32)
+            rgb[sh > 0] *= np.float32(0.86)
 
 # ---- 结构 footprint 近似（逐方块；占地尺寸/材质为代表性近似）----
 # key: (宽, 长, 主体色, 边框/屋顶色)；村庄单独按房屋簇渲染。
