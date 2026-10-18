@@ -791,6 +791,20 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         _icec = colors.get("minecraft:ice") or _ICE_RGB
         rgb[_ice_mask] = _icec
 
+    # ---- 积雪针叶林：树冠上表面覆雪（freeze_top_layer 的另一半）----
+    # MC 的 freeze_top_layer 除了让水结冰，还会在「上方为空气」的方块
+    # 顶面放雪层，包括树叶。故寒冷群系里的树叶/草/土顶面都覆一层雪。
+    if _frz.any():
+        _leaf_like = np.isin(nm, list(_SNOW_COVERABLE))
+        _snow_mask = _frz & _leaf_like & ~water_mask
+        if _snow_mask.any():
+            # 覆雪不是纯白：薄雪层会透出底色，按底色 0.72 白 + 0.28 底
+            _base = colors.get("minecraft:snow_block") or (249, 254, 254)
+            _sb = np.array(_base, np.float32)
+            _keep2 = 0.28
+            rgb[_snow_mask] = (rgb[_snow_mask].astype(np.float32) * _keep2
+                               + _sb * (1.0 - _keep2))
+
 
     # 地表不做贴图逐像素采样：贴图会让同一高度层出现上百种颜色（破碎）。
     # 地形配色 = 方块固有色（+ 群系草色），整层统一；材质细节只保留给树冠。
@@ -819,6 +833,20 @@ _FREEZE_BIOMES = {
     "snowy_plains", "snowy_taiga", "snowy_beach", "snowy_slopes",
     "frozen_peaks", "jagged_peaks", "grove", "deep_cold_ocean",
     "cold_ocean",
+}
+
+# 寒冷群系里会被 freeze_top_layer 覆雪的方块（上方为空气时积雪层）
+_SNOW_COVERABLE = {
+    "minecraft:oak_leaves", "minecraft:birch_leaves",
+    "minecraft:spruce_leaves", "minecraft:jungle_leaves",
+    "minecraft:acacia_leaves", "minecraft:dark_oak_leaves",
+    "minecraft:mangrove_leaves", "minecraft:cherry_leaves",
+    "minecraft:azalea_leaves", "minecraft:flowering_azalea_leaves",
+    "minecraft:grass_block", "minecraft:coarse_dirt",
+    "minecraft:podzol", "minecraft:mycelium", "minecraft:moss_block",
+    "minecraft:sand", "minecraft:gravel", "minecraft:stone",
+    "minecraft:andesite", "minecraft:diorite", "minecraft:granite",
+    "minecraft:cobblestone", "minecraft:short_grass", "minecraft:fern",
 }
 
 _LEAF_BID: dict[str, int] = {}
