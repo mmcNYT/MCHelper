@@ -164,6 +164,35 @@ def _resource_items(source):
     return fn() if fn else []
 
 
+def _mark_optional(w):
+    """可空字段的值控件打 placeholder「（可空）」（同 cmd_form）。
+
+    容器（TargetSelectorField）下钻内部 QLineEdit/QComboBox；
+    QComboBox 兼容 lineEdit() 与 Qt6 setPlaceholderText 两套。
+    """
+    from PySide6.QtWidgets import QComboBox, QLineEdit
+    targets = [w]
+    targets += w.findChildren(QLineEdit)
+    targets += [c for c in w.findChildren(QComboBox) if c.isEditable()]
+    mark = "（可空）"
+    for t in targets:
+        if isinstance(t, QLineEdit):
+            cur = t.placeholderText()
+            if mark not in cur:
+                t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+        elif isinstance(t, QComboBox) and t.isEditable():
+            if hasattr(t, "setPlaceholderText"):
+                cur = t.placeholderText()
+                if mark not in cur:
+                    t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+            le = t.lineEdit()
+            if le is not None:
+                cur = le.placeholderText()
+                if mark not in cur:
+                    le.setPlaceholderText(
+                        f"{mark}{cur}" if cur else mark)
+
+
 class ChainRow(QWidget):
     """链中的一行。"""
 
@@ -252,8 +281,13 @@ class ChainRow(QWidget):
         self._controllers = {sp[3]["show_when"][0] for sp in specs
                              if "show_when" in sp[3]}
         for key, label, kind, extra in specs:
-            lab = QLabel(label)
+            lab = QLabel(label + ("（可空）" if extra.get("optional")
+                                  else ""))
             w = self._make_widget(key, kind, extra, args.get(key))
+            # 可空字段的值控件标 placeholder（傻瓜式：控件内直接可见，
+            # 不用看标签）
+            if extra.get("optional"):
+                _mark_optional(w)
             self.param_lay.addWidget(lab)
             self.param_lay.addWidget(w)
             # 记录 label+widget 以便整对隐藏

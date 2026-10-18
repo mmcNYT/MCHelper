@@ -103,7 +103,10 @@ class _ParamRow(QWidget):
         if kind == "entity":
             w = QComboBox()
             w.setEditable(True)
-            w.setPlaceholderText("可选")
+            # 可选标注设在 lineEdit（实际输入框）—— combo 的
+            # setPlaceholderText 是另一套 API，只影响未编辑态
+            if w.lineEdit() is not None:
+                w.lineEdit().setPlaceholderText("（可选）")
             from PySide6.QtGui import QIcon
             from Utils.CommandGenerator.entity_icons import (
                 entity_icon_path)
@@ -126,7 +129,7 @@ class _ParamRow(QWidget):
             self.value = w
         elif kind == "text":
             w = QLineEdit()
-            w.setPlaceholderText("可选" + (f"（{extra.get('hint','')}）" if extra.get("hint") else ""))
+            w.setPlaceholderText("（可选）" + (f"（{extra.get('hint','')}）" if extra.get("hint") else ""))
             if value:
                 w.setText(str(value))
             w.textChanged.connect(lambda *_: self.changed.emit())
@@ -143,7 +146,7 @@ class _ParamRow(QWidget):
             self.value = w
         elif kind == "float":
             w = QLineEdit()
-            w.setPlaceholderText("可选" + (f"（{extra.get('hint','')}）" if extra.get("hint") else ""))
+            w.setPlaceholderText("（可选）" + (f"（{extra.get('hint','')}）" if extra.get("hint") else ""))
             v = QDoubleValidator(-1e308, 1e308, 12)
             v.setLocale(QLocale.c())
             w.setValidator(v)
@@ -163,7 +166,7 @@ class _ParamRow(QWidget):
             self.value = w
         elif kind == "range":
             w = QLineEdit()
-            w.setPlaceholderText("可选（如 5..10 / 5 / ..10 / 5..）")
+            w.setPlaceholderText("（可选）如 5..10 / 5 / ..10 / 5..")
             w.setValidator(QRegularExpressionValidator(
                 QRegularExpression(r"(-?[0-9]+)?\.\.(-?[0-9]+)?|-?[0-9]+")))
             if value:

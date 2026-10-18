@@ -63,6 +63,35 @@ def enchant_by_id() -> dict:
     return {e["id"]: e for e in enchants_data()}
 
 
+def _mark_optional(w):
+    """可选字段的值控件打 placeholder「（可选）」。
+
+    QLineEdit/可编辑 QComboBox 前缀标注（容器下钻）；QSpinBox 系的
+    specialValueText「（不填）」已表达此意，不动。
+    """
+    from PySide6.QtWidgets import QComboBox, QLineEdit
+    targets = [w]
+    targets += w.findChildren(QLineEdit)
+    targets += [c for c in w.findChildren(QComboBox) if c.isEditable()]
+    mark = "（可选）"
+    for t in targets:
+        if isinstance(t, QLineEdit):
+            cur = t.placeholderText()
+            if mark not in cur:
+                t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+        elif isinstance(t, QComboBox) and t.isEditable():
+            if hasattr(t, "setPlaceholderText"):
+                cur = t.placeholderText()
+                if mark not in cur:
+                    t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+            le = t.lineEdit()
+            if le is not None:
+                cur = le.placeholderText()
+                if mark not in cur:
+                    le.setPlaceholderText(
+                        f"{mark}{cur}" if cur else mark)
+
+
 # ---------------------------------------------------------------------------
 # 基类
 # ---------------------------------------------------------------------------
@@ -827,6 +856,9 @@ class CompoundEditor(_Editor):
             lab = f["key"] + ("（可选）" if f["optional"] else "")
             grid.addWidget(QLabel(lab), r, 0)
             w, keff = self._make_field_widget(f, k)
+            # 可选字段的值控件标 placeholder（控件内直接可见）
+            if f["optional"]:
+                _mark_optional(w)
             grid.addWidget(w, r, 1)
             d = f.get("default")
             if d:

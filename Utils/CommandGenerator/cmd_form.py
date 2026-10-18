@@ -112,6 +112,7 @@ class CommandForm(QWidget):
                 label = fs["label"]
                 if fs.get("optional"):
                     label += "（可空）"
+                    self._mark_optional(w)
                 self._form.addRow(label, w)
                 if fs.get("hint"):
                     h = QLabel(fs["hint"])
@@ -123,6 +124,45 @@ class CommandForm(QWidget):
             self._busy = False
 
     # ------------------------------------------------------------------
+    def _mark_optional(self, w):
+        """可空字段的值控件打 placeholder「（可空）…」。
+
+        - QLineEdit / 可编辑 QComboBox：已有 placeholder 则**前缀**
+          「（可空）」，没有则直接设；不覆盖提示语义。
+          QComboBox 的 setPlaceholderText 只影响**未编辑时**的显示，
+          可编辑下拉实际输入框是 lineEdit() —— 两处都设。
+        - QSpinBox/QDoubleSpinBox：specialValueText「（不填）」机制
+          已表达可空，不动。
+        - TargetSelectorField 等容器：findChildren 下钻其内部
+          QLineEdit/QComboBox 再标。
+        """
+        self._mark_optional_r(w, "（可空）")
+
+    @staticmethod
+    def _mark_optional_r(w, mark):
+        from PySide6.QtWidgets import QComboBox
+        targets = [w]
+        # 容器（如 TargetSelectorField）下钻一层可输入控件
+        targets += w.findChildren(QLineEdit)
+        targets += [c for c in w.findChildren(QComboBox)
+                    if c.isEditable()]
+        for t in targets:
+            if isinstance(t, QLineEdit):
+                cur = t.placeholderText()
+                if mark not in cur:
+                    t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+            elif isinstance(t, QComboBox) and t.isEditable():
+                if hasattr(t, "setPlaceholderText"):   # Qt6 combo API
+                    cur = t.placeholderText()
+                    if mark not in cur:
+                        t.setPlaceholderText(f"{mark}{cur}" if cur else mark)
+                le = t.lineEdit()
+                if le is not None:
+                    cur = le.placeholderText()
+                    if mark not in cur:
+                        le.setPlaceholderText(
+                            f"{mark}{cur}" if cur else mark)
+
     def _controller_values(self) -> dict:
         """被 show_when 引用的控制字段当前值快照。"""
         out = {}
