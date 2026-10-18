@@ -397,9 +397,20 @@ class ChainRow(QWidget):
         if kind == "block":
             w = QComboBox()
             w.setEditable(True)
+            from PySide6.QtGui import QIcon
+            import os as _os
+            _icon_dir = _os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.dirname(
+                    _os.path.abspath(__file__)))),
+                "assets", "Public", "items")
             for bid in RL.BLOCK_IDS:
                 cn = RL.BLOCK_CN.get(bid, bid)
-                w.addItem(f"{cn}（{bid}）" if cn != bid else bid, bid)
+                text = f"{cn}（{bid}）" if cn != bid else bid
+                p_ = _os.path.join(_icon_dir, f"{bid}.png")
+                if _os.path.isfile(p_):
+                    w.addItem(QIcon(p_), text, bid)
+                else:
+                    w.addItem(text, bid)
             i = w.findData(value if value is not None
                            else (default or "stone"))
             w.setCurrentIndex(i if i >= 0 else 0)
@@ -417,10 +428,21 @@ class ChainRow(QWidget):
             from PySide6.QtGui import QIcon
             from Utils.CommandGenerator.entity_icons import (
                 entity_icon_path)
+            import os as _os
+            _icon_dir = _os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.dirname(
+                    _os.path.abspath(__file__)))),
+                "assets", "Public", "items")
             for rid, label in _resource_items(src):
                 text = f"{label}（{rid}）" if label != rid else rid
-                # 实体源加图标
-                ip = entity_icon_path(rid) if src == "entity" else None
+                # 实体源：实体图标；物品源：物品图标
+                ip = None
+                if src == "entity":
+                    ip = entity_icon_path(rid)
+                elif src == "item":
+                    p_ = _os.path.join(_icon_dir, f"{rid}.png")
+                    if _os.path.isfile(p_):
+                        ip = p_
                 if ip:
                     w.addItem(QIcon(ip), text, rid)
                 else:

@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
                                QFormLayout, QFrame, QHBoxLayout, QLabel,
@@ -24,6 +26,11 @@ from Utils.CommandGenerator import cmd_specs as CS
 from Utils.CommandGenerator import item_list as IL
 from Utils.CommandGenerator import resource_lists as RL
 from Utils.CommandGenerator import struct_list as SL
+
+# 物品/方块图标（assets/Public/items，多工具公用）
+_ICON_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "assets", "Public", "items")
 
 
 class CommandForm(QWidget):
@@ -245,11 +252,16 @@ class CommandForm(QWidget):
             cb.setEditable(True)
             cb.addItem("")
             cb.addItems(fs.get("presets", CS.COMMON_BLOCKS))
-            # 方块下拉：默认附 1053 个官方方块（中文名），可搜索
+            # 方块下拉：默认附 1053 个官方方块（中文名），可搜索，带图标
+            from PySide6.QtGui import QIcon
             if fs.get("full_blocks", True):
                 for rid, label in self._resource_items("block"):
-                    cb.addItem(label if label == rid
-                               else f"{label}（{rid}）", rid)
+                    text = label if label == rid else f"{label}（{rid}）"
+                    p_ = os.path.join(_ICON_DIR, f"{rid}.png")
+                    if os.path.isfile(p_):
+                        cb.addItem(QIcon(p_), text, rid)
+                    else:
+                        cb.addItem(text, rid)
             if dflt:
                 i = cb.findData(dflt)
                 if i >= 0:
@@ -290,16 +302,21 @@ class CommandForm(QWidget):
             cb.setEditable(True)
             cb.addItem("")
             src = fs.get("source")
+            from PySide6.QtGui import QIcon
             for rid, label in self._resource_items(src):
-                # 实体源加图标（assets/CommandGenerator/entities）
+                # 实体源：实体图标；物品/方块源：物品图标
+                ip = None
                 if src == "entity":
                     from Utils.CommandGenerator.entity_icons import (
                         entity_icon_path)
-                    from PySide6.QtGui import QIcon
                     ip = entity_icon_path(rid)
-                    if ip:
-                        cb.addItem(QIcon(ip), label, rid)
-                        continue
+                elif src in ("item", "block"):
+                    p_ = os.path.join(_ICON_DIR, f"{rid}.png")
+                    if os.path.isfile(p_):
+                        ip = p_
+                if ip:
+                    cb.addItem(QIcon(ip), label, rid)
+                    continue
                 cb.addItem(label, rid)
             if dflt:
                 i = cb.findData(dflt)
