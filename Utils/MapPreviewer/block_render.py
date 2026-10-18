@@ -227,20 +227,17 @@ _HS_LIGHT_Z = float(np.sin(_HS_ZEN))
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
-    """按高度层的确定性阴影：一层一个亮度，同层绝无差异。
+    """按 JourneyMap 的光照模型给出亮度系数（同层同色，不破碎）。
 
-    要点（对应"同层同色"要求）：
-      - shade 只由该方块的**高度层**决定，与坡度/坡向/邻域无关
-      - 层与层之间亮度不同 -> 台阶感；层内完全一致 -> 不破碎
-      - 水面恒 1（平水不打明暗）
+    JourneyMap 的亮度来自 方块真实 lightLevel/15（BaseRenderer.setStratumColors）。
+    我方可用的近似：地表及以上 = 全亮 15，水面下按深度衰减。
+    结果只与"该列顶是否在水下/多深"有关 -> 同层仍同色。
     """
-    h = np.round(heights.astype(np.float32))
-    hmin = float(h.min())
-    hmax = float(h.max())
-    span = max(hmax - hmin, 1.0)
-    # 层高 -> 亮度（低层稍暗、高层稍亮，模拟天光；幅度温和不刺眼）
-    shade = np.float32(0.70) + np.float32(0.46) * ((h - hmin) / span)
-    shade = np.clip(shade, _FHS_SHADE_MIN, 1.30).astype(np.float32)
+    depth = np.maximum(0, _SEA - heights.astype(np.float32))
+    lvl = np.clip(15.0 - depth, 1.0, 15.0)
+    # 对应 day_b = light/15 + tweakBrightenDaylightDiff
+    shade = (lvl / 15.0 + 0.06).astype(np.float32)
+    shade = np.clip(shade, _FHS_SHADE_MIN, 1.30)
     shade[water_mask] = 1.0
     return shade
 
@@ -443,10 +440,19 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     # 地表完全不做色彩抖动：同一地形层必须同色，否则画面破碎。
     # 色相/亮度变异只保留在树冠（_apply_vegetation 的球面光照 + 树种混生）。
     if hillshade:
+        # JourneyMap 斜坡阴影：按邻列高度差算坡度因子，再对 RGB 做
+        # bevel（R/G 额外 *0.85、B 只乘 slope）-> 斜坡变暗且偏蓝。
+        # 坡度纯由地形决定，同坡同色，不随机。
+        from Utils.MapPreviewer import jm_colors as _jm
+        slope = _jm.slope_from_heights(heights, x0, z0)
         water_mask = heights < _SEA
-        shade = _hillshade(heights.astype(np.int32), water_mask)
-        # 最后乘分级 shade：同层完全一致 -> 平台；层间跳变 -> 分明台阶
-        rgb *= (0.10 + 0.90 * shade)[..., None]
+        slope = np.where(water_mask, 1.0, slope).astype(np.float32)
+        rb = slope < 1.0
+        f = np.where(rb, _jm.BEVEL_DARKEN, 1.0).astype(np.float32)
+        rgb = rgb.astype(np.float32)
+        rgb[..., 0] *= f * slope
+        rgb[..., 1] *= f * slope
+        rgb[..., 2] *= slope
     rgb = np.clip(rgb, 0, 255).astype(np.uint8)
 
     block_names = pack["block_names"]

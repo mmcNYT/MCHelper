@@ -120,3 +120,113 @@ def tinted_color(block_name: str, biome_short: str,
     if is_foliage(block_name):
         col = tuple(c * FOLIAGE_BRIGHTNESS for c in col)
     return tuple(int(min(255, max(0, round(c)))) for c in col)
+
+# ===========================================================================
+# JourneyMap BaseRenderer.setStratumColors 的参数与合成（实测默认值）
+# ===========================================================================
+TWEAK_MOONLIGHT_LEVEL = 0.20
+TWEAK_BRIGHTEN_DAYLIGHT_DIFF = 0.06
+TWEAK_BRIGHTEN_LIGHTSOURCE_BLOCK = 1.2
+TWEAK_BLEND_SHALLOW_WATER = 0.15
+TWEAK_MINIMUM_DARKEN_NIGHT_WATER = 0.25
+TWEAK_WATER_COLOR_BLEND = 0.5
+TWEAK_SURFACE_AMBIENT_COLOR = 26
+
+# 头顶是全亮天空时的光照级别（MC max light）
+_MAX_LIGHT = 15.0
+
+
+def blend_with(under, over, alpha: float):
+    """对应 RGB.blendWith：c = under*(1-a) + over*a。"""
+    if alpha >= 1.0:
+        return over
+    if alpha <= 0.0:
+        return under
+    return tuple(int(round(u * (1.0 - alpha) + o * alpha))
+                 for u, o in zip(under, over))
+
+
+def stratom_colors(block_color, light_level: int, light_attenuation: int = 0,
+                   is_water: bool = False, water_color=None,
+                   underwater: bool = False):
+    """复刻 BaseRenderer.setStratumColors：按光照计算 day/night 两套颜色。
+
+    light_level: 0..15（我方可由高度/深度近似）
+    light_attenuation: 水下每格衰减（水深）
+    underwater: 是否在水下（走水色混合分支）
+    返回 (dayColor, nightColor) 两个 (r,g,b)。
+    """
+    base = float(block_color[0]), float(block_color[1]), float(block_color[2])
+    # 日间亮度：光照 / 15，叠加 tweakBrightenDaylightDiff
+    day_b = max(1.0, max(light_level - light_attenuation, 0.0)) / _MAX_LIGHT
+    day_b = day_b + TWEAK_BRIGHTEN_DAYLIGHT_DIFF
+    # 夜间亮度：moonlight 衰减后 / 15
+    night_b = max(TWEAK_MOONLIGHT_LEVEL,
+                  max(light_level - TWEAK_MOONLIGHT_LEVEL - light_attenuation,
+                      0.0)) / _MAX_LIGHT
+
+    day = tuple(min(255.0, c * day_b) for c in base)
+    if underwater and water_color is not None:
+        day = blend_with(day, water_color, TWEAK_WATER_COLOR_BLEND)
+    night = tuple(min(255.0, c * night_b) for c in day)
+    return (tuple(int(round(c)) for c in day),
+            tuple(int(round(c)) for c in night))
+
+
+def light_from_sky(block_y: int, surface_y: int, sea_level: int = 63):
+    """用高度近似 MC 天空光：地表及以上全亮，水下沉降。"""
+    if block_y >= surface_y:
+        return 15
+    depth = surface_y - block_y
+    return max(0, 15 - depth)
+
+# ===========================================================================
+# JourneyMap 斜坡阴影（BaseRenderer.shading* + RGB.bevelSlope）
+# ===========================================================================
+SHADING_SLOPE_MIN = 0.2
+SHADING_SLOPE_MAX = 1.7
+SHADING_PRIMARY_DOWNSLOPE = 0.65
+SHADING_PRIMARY_UPSLOPE = 1.2
+SHADING_SECONDARY_DOWNSLOPE = 0.95
+SHADING_SECONDARY_UPSLOPE = 1.05
+BEVEL_DARKEN = 0.85        # RGB.bevelSlope 里对 R/G 的额外压暗
+
+
+def bevel_slope(color, slope: float):
+    """对应 RGB.bevelSlope：斜坡同时变暗并偏蓝（R/G 额外 *0.85）。"""
+    f = BEVEL_DARKEN if slope < 1.0 else 1.0
+    r, g, b = color
+    return (int(min(255, round(r * f * slope))),
+            int(min(255, round(g * f * slope))),
+            int(min(255, round(b * slope))))
+
+
+def slope_from_heights(heights: np.ndarray, x0: int, z0: int):
+    """按 JourneyMap 的 primary/secondary 偏移算每列坡度因子。
+
+    JourneyMap 用相对邻列的**高度差**（主/次两个方向，各自有上下坡系数），
+    夹到 [slopeMin, slopeMax] -> 纯地形驱动、确定性、不随机。
+    """
+    h = heights.astype(np.float32)
+    hh, ww = h.shape
+    # 主方向（西北）与次方向（东南）的偏移
+    def shift(a, dy, dx):
+        out = np.empty_like(a)
+        ys = np.clip(np.arange(hh) + dy, 0, hh - 1)
+        xs = np.clip(np.arange(ww) + dx, 0, ww - 1)
+        out[:] = a[np.ix_(ys, xs)]
+        return out
+
+    # 主：向北(-z)、向西(-x)；次：向南(+z)、向东(+x)
+    hn = shift(h, -1, 0)
+    hw = shift(h, 0, -1)
+    hs = shift(h, 1, 0)
+    he = shift(h, 0, 1)
+    d_primary = ((hn - h) + (hw - h)) * 0.5      # >0 表示上坡
+    d_second = ((hs - h) + (he - h)) * 0.5
+    slope = np.ones_like(h)
+    slope += np.where(d_primary > 0, d_primary * (SHADING_PRIMARY_UPSLOPE - 1.0),
+                      d_primary * (1.0 - SHADING_PRIMARY_DOWNSLOPE))
+    slope += np.where(d_second > 0, d_second * (SHADING_SECONDARY_UPSLOPE - 1.0),
+                      d_second * (1.0 - SHADING_SECONDARY_DOWNSLOPE))
+    return np.clip(slope, SHADING_SLOPE_MIN, SHADING_SLOPE_MAX)
