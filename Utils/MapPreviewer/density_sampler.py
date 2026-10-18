@@ -361,9 +361,10 @@ class PerlinSimplexNoise:
         return value
 
 
-# Biome.java L61-63：固定 seed 1234 的两个全局噪声（全项目共用）
-_BIOME_TEMP_NOISE = None
-_BIOME_FROZEN_TEMP_NOISE = None
+# Biome.java L61-66：三个固定 seed 的全局 PerlinSimplexNoise（全项目共用）
+_BIOME_TEMP_NOISE = None           # TEMPERATURE_NOISE, seed 1234, octave [0]
+_BIOME_FROZEN_TEMP_NOISE = None    # FROZEN_TEMPERATURE_NOISE, seed 3456, octave [-2,-1,0]
+_BIOME_INFO_NOISE = None           # BIOME_INFO_NOISE, seed 2345, octave [0]
 
 
 def _biome_temperature_noise():
@@ -376,8 +377,32 @@ def _biome_temperature_noise():
 def _biome_frozen_temperature_noise():
     global _BIOME_FROZEN_TEMP_NOISE
     if _BIOME_FROZEN_TEMP_NOISE is None:
-        _BIOME_FROZEN_TEMP_NOISE = PerlinSimplexNoise(LegacyRandomSource(1234), [0])
+        _BIOME_FROZEN_TEMP_NOISE = PerlinSimplexNoise(LegacyRandomSource(3456),
+                                                      [-2, -1, 0])
     return _BIOME_FROZEN_TEMP_NOISE
+
+
+def _biome_info_noise():
+    global _BIOME_INFO_NOISE
+    if _BIOME_INFO_NOISE is None:
+        _BIOME_INFO_NOISE = PerlinSimplexNoise(LegacyRandomSource(2345), [0])
+    return _BIOME_INFO_NOISE
+
+
+def _frozen_modify_temperature(x, z, base):
+    """Biome.TemperatureModifier.FROZEN（L395-409）。
+
+    冻洋的温度被"冰斑"噪声改写：大片噪声+边缘噪声 < 0.3 且小尺度 < 0.8
+    时温度固定为 0.2F，否则用 base。这直接影响
+    shouldMeltFrozenOceanIcebergSlightly（>0.1F）→ 冰山高度削 2 格。"""
+    large = _biome_frozen_temperature_noise().get_value(x * 0.05, z * 0.05,
+                                                       False) * 7.0
+    edge = _biome_info_noise().get_value(x * 0.2, z * 0.2, False)
+    if large + edge < 0.3:
+        small = _biome_info_noise().get_value(x * 0.09, z * 0.09, False)
+        if small < 0.8:
+            return 0.2
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -1142,6 +1167,9 @@ class SurfaceRulesEngine:
         self._sec = None
         self._biome = None
         self._seq = 0  # DFS 节点序号（用于 trace 定位）
+        self._xz_depth = 0         # 当前列的 surface_depth（列级缓存）
+        self._xz_key = None
+        self._msl_cache = {}       # (x,z) -> min_surface_level
 
     def _n(self, key):
         """按需取 NormalNoise（extension 用）。"""
@@ -1276,8 +1304,16 @@ class SurfaceRulesEngine:
 
     # ---- Biome.getHeightAdjustedTemperature（L112-121） ----
     def biome_temperature(self, biome_key, x, y, z, sea_level=_SURFACE_SEA_LEVEL):
-        """冷/暖判定用的高度修正温度（frozen_ocean 冰 melts 判定）。"""
-        base = _BIOME_BASE_TEMP.get(_block_short(biome_key), 0.5)
+        """冷/暖判定用的高度修正温度。
+
+        链路（Biome.java）：
+          getBaseTemperature → temperatureModifier.modifyTemperature
+          （冻洋走 FROZEN：冰斑噪声 < 0.3 且 < 0.8 → 0.2F）
+          → y > seaLevel+17 时按 TEMPERATURE_NOISE 做高度衰减。"""
+        short = _block_short(biome_key)
+        base = _BIOME_BASE_TEMP.get(short, 0.8)
+        if short in _FROZEN_MODIFIER_BIOMES:
+            base = _frozen_modify_temperature(x, z, base)
         snow_level = sea_level + 17
         if y > snow_level:
             v = _biome_temperature_noise().get_value(x / 8.0, z / 8.0) * 8.0
@@ -1342,9 +1378,16 @@ class SurfaceRulesEngine:
     # ---- 状态推进（对应 Context.updateXZ / updateY） ----
     def _update_xz(self, x, z):
         self.block_x, self.block_z = x, z
-        self.surface_depth = int(
-            self.s.noise("minecraft:surface").get_value(x, 0.0, z) * 2.75
-            + 3.0 + _surface_random_double(self.pos_lo, self.pos_hi, x, 0, z) * 0.25)
+        key = (x, z)
+        if self._xz_key == key:
+            self.surface_depth = self._xz_depth
+        else:
+            sd = int(
+                self.s.noise("minecraft:surface").get_value(x, 0.0, z) * 2.75
+                + 3.0 + _surface_random_double(self.pos_lo, self.pos_hi, x, 0, z) * 0.25)
+            self.surface_depth = sd
+            self._xz_depth = sd
+            self._xz_key = key
         self._sec = None
         self._min = None
         self._biome = None
@@ -1373,6 +1416,17 @@ class SurfaceRulesEngine:
         return math.floor(self._preliminary(qx, 0, qz))
 
     def _min_surface_level(self, x, z):
+        key = (x, z)
+        cached = self._msl_cache.get(key)
+        if cached is not None:
+            return cached
+        v = self._min_surface_level_raw(x, z)
+        if len(self._msl_cache) > 4096:
+            self._msl_cache.clear()
+        self._msl_cache[key] = v
+        return v
+
+    def _min_surface_level_raw(self, x, z):
         cell_x, cell_z = x >> 4, z >> 4
         b0, b1 = cell_x << 4, (cell_x + 1) << 4
         c0, c1 = cell_z << 4, (cell_z + 1) << 4
@@ -1721,6 +1775,12 @@ def _load_biome_temps():
 
 
 _BIOME_BASE_TEMP = _load_biome_temps()
+
+# temperature_modifier = "frozen" 的群系（官方 biome JSON 提取）
+_FROZEN_MODIFIER_BIOMES = {"frozen_ocean", "deep_frozen_ocean",
+                           "frozen_river", "snowy_plains", "snowy_taiga",
+                           "snowy_beach", "snowy_slopes", "ice_spikes",
+                           "frozen_peaks", "grove"}
 
 
 # ---------------------------------------------------------------------------

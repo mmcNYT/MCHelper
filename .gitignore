@@ -25,3 +25,10 @@ dist/
 versions/
 MCHelper.spec
 version_info.txt
+
+# MSVC 原生扩展构建中间产物（.pyd 已被忽略；obj/exp/lib/log 不入库）
+Utils/MapPreviewer/_native/*.obj
+Utils/MapPreviewer/_native/*.exp
+Utils/MapPreviewer/_native/*.lib
+Utils/MapPreviewer/_native/*.pdb
+Utils/MapPreviewer/_native/_build_*_log.txt

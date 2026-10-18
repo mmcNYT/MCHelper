@@ -1,0 +1,90 @@
+{
+ "minecraft:stone": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:coarse_dirt": [
+  121,
+  85,
+  58
+ ],
+ "minecraft:rooted_dirt": [
+  121,
+  85,
+  58
+ ],
+ "minecraft:grass_block": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:gravel": [
+  129,
+  127,
+  127
+ ],
+ "minecraft:terracotta": [
+  152,
+  95,
+  69
+ ],
+ "minecraft:white_terracotta": [
+  210,
+  179,
+  163
+ ],
+ "minecraft:orange_terracotta": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:yellow_terracotta": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:brown_terracotta": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:ice": [
+  146,
+  185,
+  254
+ ],
+ "minecraft:packed_ice": [
+  124,
+  165,
+  244
+ ],
+ "minecraft:lava": [
+  226,
+  138,
+  44
+ ],
+ "minecraft:smooth_stone": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:copper_block": [
+  200,
+  116,
+  86
+ ],
+ "minecraft:leaf_litter": [
+  0,
+  0,
+  0
+ ],
+ "minecraft:sulfur": [
+  194,
+  179,
+  107
+ ],
+ "_tinted": {
+  "grass_block_top": "grass"
+ }
+}

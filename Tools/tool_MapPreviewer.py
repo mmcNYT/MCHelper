@@ -57,6 +57,7 @@ from Threads.task_MapPreviewer import (
     CANCELLED_SUMMARY,
     BiomeLocateThread,
     DIM_BIOME_TABLES,
+    FineTileThread,
     MapPreviewerThread,
     StructureLocateThread,
     StructureScanThread,
@@ -102,6 +103,15 @@ _RADIUS_MAP = {"2048": 2048, "4096": 4096}
 # 总量超出缓存预算导致重复渲染（见 _CACHE_WEIGHT_BUDGET 注释）
 _ZOOM_MIN_SCALE = 0.13
 _ZOOM_MAX_SCALE = 4.0
+
+# 精细渲染自动触发阈值：缩放达到该「屏幕像素/方块」比例时自动开启
+# （放大到方块级细节值得逐方块渲染），低于则自动关闭回群系底图。
+_FINE_MIN_SCALE = 2.0
+# 精细瓦片：边长（方块）、单批上限、LRU 保留块数。corner-cache 后 ~0.2ms/列，
+# 64²≈0.8s/块；视口内所有瓦片渐进渲染铺满，随平移复用/淘汰。
+_FINE_TILE = 64
+_FINE_TILE_BATCH_MAX = 6
+_FINE_TILE_MAX = 160
 # 瓦片缓存加权预算（加权 LRU）：cell 瓦片（256x256x3）权重 1，
 # block 瓦片（1024x1024x3）内存 ≈16 倍、权重 6（折中取值）。
 # 预算须 ≥ 极限缩小视口所需瓦片总量（m11=0.13 时 1080p 视口约
@@ -270,6 +280,14 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         # 切换后提示重新生成地图生效（不自动重渲染）
         self._grid_on = True
         self._hillshade_on = True
+        # 精细渲染（逐方块 native fill+surface）：右键菜单开关；
+        # 开启后对右键点周围一块区域后台计算 1px/方块 顶块图并叠加。
+        self._fine_on = False
+        self._fine_tiles: "OrderedDict[tuple[int, int], object]" = OrderedDict()
+        self._fine_tile_thread: FineTileThread | None = None
+        self._fine_tile_retired: list = []
+        self._fine_pinned: bool | None = None   # 右键手动钉住：None=随缩放自动
+        self._fine_epoch = 0            # 精细渲染批序号（迟到结果丢弃）
         # 结构定位线程（None 表示空闲；同扫描线程的保引用策略）
         self._locate_thread = None
         self._locate_retired: list = []
@@ -361,6 +379,12 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._scan_timer.setSingleShot(True)
         self._scan_timer.setInterval(200)   # 停止移动 0.2s 后才开始显示结构
         self._scan_timer.timeout.connect(self._ensure_structure_scan)
+        # 精细渲染自动触发调度（缩放/平移停顿后按视口比例决定是否开启，
+        # 比瓦片稍长的防抖，避免连续缩放途中反复起算）
+        self._fine_timer = QTimer(self)
+        self._fine_timer.setSingleShot(True)
+        self._fine_timer.setInterval(260)
+        self._fine_timer.timeout.connect(self._update_fine_for_zoom)
 
         # 结构标记分帧上屏：增量扫描一次性返回大量结构时，待上屏队列
         # 按帧分批 add_marker，避免主线程一次性创建过多标记项导致卡顿
@@ -1528,6 +1552,12 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._tile_lod = {}
         self._tile_epoch += 1
         self._cancel_tile_thread()
+        # 换图/换种子：旧精细叠加失效，移除并关开关，重置为随缩放自动
+        self._clear_fine()
+        self._fine_on = False
+        self._fine_pinned = None
+        self._fine_epoch += 1
+        self._persist()
 
         # 整图按世界瓦片格对齐切片（瓦片键 = 世界格坐标 // 1024）。
         # 512 半径等非对齐半径的地图会跨格边界：瓦片与地图求交后
@@ -1681,6 +1711,9 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         单批 ≤_TILE_BATCH_MAX 块（距视口中心近的优先），完成后
         batch_done 零延迟续批。
         """
+        # 每次视口调度（初始渲染 + 缩放/平移停顿）都顺带重排精细渲染
+        # 自动判定：单发定时器，重复调用即重新防抖，代价可忽略。
+        self._fine_timer.start()
         if self._last is None or self._running:
             return
         if self._tile_thread is not None:
@@ -1919,7 +1952,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         return super().eventFilter(obj, ev)
 
     def _show_context_menu(self, global_pos) -> None:
-        """右键菜单：区块网格/地形阴影开关 + 适配视野。"""
+        """右键菜单：区块网格/地形阴影开关 + 精细渲染 + 适配视野。"""
         menu = QMenu(self)
         act_grid = menu.addAction("区块网格")
         act_grid.setCheckable(True)
@@ -1927,6 +1960,19 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         act_hs = menu.addAction("地形阴影")
         act_hs.setCheckable(True)
         act_hs.setChecked(self._hillshade_on)
+        menu.addSeparator()
+        # 精细渲染（逐方块 native fill+surface）：仅在有地图时可用
+        act_fine = None
+        fine_center = None
+        if self._last is not None:
+            sp = self.viewMap.mapToScene(
+                self.viewMap.viewport().mapFromGlobal(global_pos))
+            fx, fz = int(sp.x()), int(sp.y())
+            if abs(fx) < _WORLD_LIMIT and abs(fz) < _WORLD_LIMIT:
+                fine_center = (fx, fz)
+                act_fine = menu.addAction("精细渲染(逐方块)")
+                act_fine.setCheckable(True)
+                act_fine.setChecked(self._fine_on)
         menu.addSeparator()
         # 有地图才提供「添加坐标」（无限地图语义下任何可见点都有效）
         act_add = None
@@ -1942,6 +1988,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             self._toggle_grid()
         elif chosen is act_hs:
             self._toggle_hillshade()
+        elif act_fine is not None and chosen is act_fine:
+            self._toggle_fine(fine_center[0], fine_center[1])
         elif act_del is not None and chosen is act_del:
             self._delete_locate_path()
         elif act_add is not None and chosen is act_add:
@@ -1998,10 +2046,13 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         """切换地形阴影：仅改状态并落盘，重新生成地图后生效。"""
         self._hillshade_on = not self._hillshade_on
         self._persist()
+        # 精细渲染开启时：立即按新阴影设置重渲当前补丁（无需重生成地图）
+        if self._fine_on:
+            self._update_fine_for_zoom()
         if self._has_map:
             NotificationWidget.Show(
                 "地形阴影已" + ("开启" if self._hillshade_on else "关闭"),
-                "重新生成地图后生效",
+                "重新生成地图后生效" if not self._fine_on else "精细渲染已即时更新",
                 _NOTIFY_DURATION_MS,
                 title_size=_NOTIFY_TITLE_SIZE,
                 message_size=_NOTIFY_MESSAGE_SIZE,
@@ -2012,6 +2063,190 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         self._grid_on = not self._grid_on
         self._persist()
         self._rebuild_grid()   # 守卫在内：开启=重建，关闭=移除现项
+
+    # ---------- 精细渲染（逐方块 native，视口瓦片渐进铺满）----------
+    def _fine_wanted(self) -> bool:
+        """当前是否应显示精细渲染：右键钉住优先，否则按缩放阈值自动判定。"""
+        if self._last is None or str(self._last.get("version")) != "26.2":
+            return False
+        if self._fine_pinned is not None:
+            return self._fine_pinned
+        return self.viewMap.transform().m11() >= _FINE_MIN_SCALE
+
+    def _update_fine_for_zoom(self) -> None:
+        """缩放/平移停顿后：wanted 则铺满视口精细瓦片，否则整体清空。"""
+        if not self._fine_wanted():
+            if self._fine_on:
+                self._fine_on = False
+                self._clear_fine()
+                self._persist()
+            return
+        first = not self._fine_on
+        self._fine_on = True
+        if first:
+            self._persist()
+            NotificationWidget.Show(
+                "精细渲染已自动开启",
+                f"缩放达 {self.viewMap.transform().m11():.1f}px/方块",
+                _NOTIFY_DURATION_MS, title_size=_NOTIFY_TITLE_SIZE,
+                message_size=_NOTIFY_MESSAGE_SIZE, padding=_NOTIFY_PADDING)
+        self._ensure_fine_tiles()
+
+    def _fine_visible_tiles(self):
+        """视口覆盖的精细瓦片格列表（世界网格对齐）+ 视口中心瓦片坐标。"""
+        ts = _FINE_TILE
+        bx0, bz0, bx1, bz1 = self._visible_world_rect()
+        bx0 = max(bx0, -_WORLD_LIMIT); bz0 = max(bz0, -_WORLD_LIMIT)
+        bx1 = min(bx1, _WORLD_LIMIT); bz1 = min(bz1, _WORLD_LIMIT)
+        if bx1 <= bx0 or bz1 <= bz0:
+            return [], None
+        t0x, t0z = bx0 // ts, bz0 // ts
+        t1x, t1z = (bx1 - 1) // ts, (bz1 - 1) // ts
+        ccx, ccz = (bx0 + bx1) / 2.0 / ts, (bz0 + bz1) / 2.0 / ts
+        tiles = [(fx, fz) for fz in range(t0z, t1z + 1)
+                 for fx in range(t0x, t1x + 1)]
+        return tiles, (ccx, ccz)
+
+    def _ensure_fine_tiles(self) -> None:
+        """提交视口内缺失的精细瓦片到后台批量渲染（渐进上屏，可取消）。"""
+        if self._last is None or self._running:
+            return
+        if self._fine_tile_thread is not None:
+            return   # 批次进行中：batch_done 后再调度一轮（拖动中自愈）
+        tiles, center = self._fine_visible_tiles()
+        if not tiles:
+            return
+        vis = set(tiles)
+        need = [t for t in tiles if t not in self._fine_tiles]
+        if center is not None:
+            ccx, ccz = center
+            need.sort(key=lambda t: (t[0] + 0.5 - ccx) ** 2
+                      + (t[1] + 0.5 - ccz) ** 2)
+        self._evict_fine_tiles(vis)
+        if not need:
+            return
+        batch = need[:_FINE_TILE_BATCH_MAX]
+        self._fine_epoch += 1
+        seed = int(self._last["seed"])
+        version = str(self._last["version"])
+        th = FineTileThread(seed, version, batch, _FINE_TILE, parent=self,
+                            want_surface=True, hillshade=self._hillshade_on,
+                            structures=True)
+        epoch = self._fine_epoch
+        th.fine_tile_done.connect(
+            lambda pl, e=epoch: self._on_fine_tile_done(pl, e))
+        th.batch_done.connect(lambda e=epoch: self._on_fine_batch_done(e))
+        th.error.connect(self._on_fine_error)
+        th.finished.connect(lambda t=th: self._reap_fine_thread(t))
+        th.finished.connect(th.deleteLater)
+        self._fine_tile_thread = th
+        th.start()
+
+    def _on_fine_tile_done(self, payload: dict, epoch: int) -> None:
+        if epoch != self._fine_epoch or not self._fine_on or self._last is None:
+            return
+        import numpy as np
+        rgb = payload.get("rgb")
+        if rgb is None or rgb.ndim != 3 or rgb.shape[0] == 0:
+            return
+        key = (int(payload["fx"]), int(payload["fz"]))
+        h, w, _ = rgb.shape
+        rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
+        img = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+        pm = QPixmap.fromImage(img.copy())
+        old = self._fine_tiles.pop(key, None)
+        if old is not None:
+            try:
+                self._scene.removeItem(old)
+            except RuntimeError:
+                pass
+        item = self._scene.addPixmap(pm)
+        item.setPos(int(payload["origin_bx"]), int(payload["origin_bz"]))
+        item.setZValue(2)   # 压过底图(0)/瓦片，低于网格(5)
+        self._fine_tiles[key] = item
+        self.labelInfo.setText("精细渲染 %d 块" % len(self._fine_tiles))
+
+    def _on_fine_batch_done(self, epoch: int) -> None:
+        if epoch != self._fine_epoch or not self._fine_on:
+            return
+        # 批次线程已结束（batch_done 先于 finished 发出）：先回收引用，
+        # 解除 _ensure_fine_tiles 的 busy 守卫，再零延迟续批铺满视口。
+        self._fine_tile_thread = None
+        self._ensure_fine_tiles()
+
+    def _evict_fine_tiles(self, visible: set) -> None:
+        """LRU 淘汰：超预算且不在视口内的精细瓦片移出场景。"""
+        if len(self._fine_tiles) <= _FINE_TILE_MAX:
+            return
+        for key in list(self._fine_tiles.keys()):
+            if len(self._fine_tiles) <= _FINE_TILE_MAX:
+                break
+            if key in visible:
+                continue
+            item = self._fine_tiles.pop(key)
+            try:
+                self._scene.removeItem(item)
+            except RuntimeError:
+                pass
+
+    def _toggle_fine(self, cx: int, cz: int) -> None:
+        """右键切换：手动钉住精细渲染开/关（覆盖缩放自动判定）。"""
+        if self._last is None:
+            return
+        if str(self._last.get("version")) != "26.2":
+            NotificationWidget.Show("精细渲染不可用", "目前仅支持 26.2 版本",
+                                    _NOTIFY_DURATION_MS,
+                                    title_size=_NOTIFY_TITLE_SIZE,
+                                    message_size=_NOTIFY_MESSAGE_SIZE,
+                                    padding=_NOTIFY_PADDING)
+            return
+        self._fine_pinned = not self._fine_on
+        self._update_fine_for_zoom()
+        self._persist()
+        state = "已开启(已钉住)" if self._fine_on else "已关闭(已钉住)"
+        NotificationWidget.Show("精细渲染" + state, "",
+                                _NOTIFY_DURATION_MS,
+                                title_size=_NOTIFY_TITLE_SIZE,
+                                message_size=_NOTIFY_MESSAGE_SIZE,
+                                padding=_NOTIFY_PADDING)
+
+    def _clear_fine(self) -> None:
+        """移除全部精细瓦片叠加并作废在途线程（不判 isRunning，防悬垂）。"""
+        for item in self._fine_tiles.values():
+            try:
+                self._scene.removeItem(item)
+            except RuntimeError:
+                pass
+        self._fine_tiles.clear()
+        th = self._fine_tile_thread
+        self._fine_tile_thread = None
+        if th is None:
+            return
+        self._fine_epoch += 1   # 迟到结果丢弃
+        try:
+            th.request_cancel()
+        except RuntimeError:
+            return
+        if th not in self._fine_tile_retired:
+            self._fine_tile_retired.append(th)
+
+    def _reap_fine_thread(self, th) -> None:
+        if self._fine_tile_thread is th:
+            self._fine_tile_thread = None
+        try:
+            self._fine_tile_retired.remove(th)
+        except ValueError:
+            pass
+
+    def _on_fine_error(self, msg: str) -> None:
+        self._fine_on = False
+        self._clear_fine()
+        self._persist()
+        self.labelInfo.setText(msg)
+        NotificationWidget.Show("精细渲染失败", msg, _NOTIFY_DURATION_MS,
+                                title_size=_NOTIFY_TITLE_SIZE,
+                                message_size=_NOTIFY_MESSAGE_SIZE,
+                                padding=_NOTIFY_PADDING)
 
     def _on_wheel(self, ev) -> bool:
         """滚轮锚点缩放（Ctrl+滚轮留给外层滚动页面）；钳制+补渲染调度。"""
@@ -2031,6 +2266,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             self._fill_rounds = 0
             self._schedule_timer.start()
             self._scan_timer.start()   # 缩放后视野变化，结构增量扫描跟进
+            self._fine_timer.start()   # 缩放后按新比例判定精细渲染
             self._rebuild_grid()
         return True
 
@@ -2066,6 +2302,7 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
             # 结构防抖：停止移动 0.2s 后才开始显示结构（拖动中持续 move
             # 会重置计时器，一停顿即触发扫描；地图本身拖动中实时生成）
             self._scan_timer.start()
+            self._fine_timer.start()       # 平移后按视口中心重定精细补丁
             self._rebuild_grid()
             self._update_task_status()   # 拖动中实时反馈当前任务
             return True
@@ -2617,19 +2854,24 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         """
         self._schedule_timer.stop()
         self._scan_timer.stop()
+        self._fine_timer.stop()
         threads = [self._thread, self._tile_thread, self._scan_thread,
                    self._locate_thread, self._biome_thread,
+                   self._fine_tile_thread,
                    *self._tile_retired, *self._scan_retired,
-                   *self._locate_retired, *self._biome_retired]
+                   *self._locate_retired, *self._biome_retired,
+                   *self._fine_tile_retired]
         self._thread = None
         self._tile_thread = None
         self._scan_thread = None
         self._locate_thread = None
         self._biome_thread = None
+        self._fine_tile_thread = None
         self._tile_retired.clear()
         self._scan_retired.clear()
         self._locate_retired.clear()
         self._biome_retired.clear()
+        self._fine_tile_retired.clear()
         for th in threads:
             if th is None:
                 continue

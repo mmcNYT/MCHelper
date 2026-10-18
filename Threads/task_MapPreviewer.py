@@ -683,3 +683,72 @@ class BiomeLocateThread(QThread):
                 "biome": self._biome_id, "structures": [],
                 "target": (self._tx, self._tz), "searched_side": searched,
             })
+
+
+# ============================================================================
+# 精细渲染瓦片批量线程（视口逐块渐进，对齐世界网格，可取消）
+# ============================================================================
+class FineTileThread(QThread):
+    """渲染一批精细瓦片（瓦片格坐标 (fx,fz)，每块 ts×ts 方块）。
+
+    逐瓦片「native fill+surface+植被+结构 → 发 fine_tile_done(载荷)」，
+    每块完成立即回主线程上屏（不等整批）。渲染期间瓦片可能失效（用户又
+    拖走），主线程在回调里按 epoch 自行丢弃，本线程不回溯。
+
+    信号：
+        fine_tile_done(object)  单瓦片载荷 dict {fx,fz,rgb,origin_bx,
+                                    origin_bz,elapsed}
+        batch_done()            整批完成
+        error(str)
+    """
+
+    fine_tile_done = Signal(object)
+    batch_done = Signal()
+    error = Signal(str)
+
+    def __init__(self, seed, version, tiles, ts, parent=None,
+                 want_surface=True, hillshade=False, structures=True):
+        super().__init__(parent)
+        self._seed = seed
+        self._version = version
+        self._tiles = list(tiles)         # [(fx, fz), ...] 瓦片格坐标
+        self._ts = ts
+        self._want_surface = want_surface
+        self._hillshade = hillshade
+        self._structures = structures
+        self._cancelled = False
+
+    def request_cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            if str(self._version) != "26.2":
+                self.error.emit("精细渲染目前仅支持 26.2 版本")
+                return
+            try:
+                from Utils.MapPreviewer import block_render as br
+            except Exception as exc:
+                self.error.emit(f"精细渲染模块加载失败：{exc!r}")
+                return
+            if not br.is_available():
+                self.error.emit("native 密度扩展不可用，无法精细渲染")
+                return
+            for fx, fz in self._tiles:
+                if self._cancelled:
+                    return
+                res = br.render_tile(self._seed, fx, fz, self._ts,
+                                     want_surface=self._want_surface,
+                                     hillshade=self._hillshade,
+                                     structures=self._structures)
+                if self._cancelled or res.get("cancelled"):
+                    return
+                self.fine_tile_done.emit({
+                    "fx": fx, "fz": fz, "rgb": res["rgb"],
+                    "origin_bx": res["origin_bx"],
+                    "origin_bz": res["origin_bz"],
+                    "elapsed": res.get("elapsed", 0.0)})
+            if not self._cancelled:
+                self.batch_done.emit()
+        except Exception as exc:
+            self.error.emit(f"精细瓦片线程异常：{exc!r}")
