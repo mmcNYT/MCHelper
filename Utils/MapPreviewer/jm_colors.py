@@ -209,43 +209,56 @@ PRIMARY_SLOPE_OFFSETS = ((0, -1), (-1, -1), (-1, 0))
 SECONDARY_SLOPE_OFFSETS = ((-1, -2), (-2, -1), (-2, -2), (-2, 0), (0, -2))
 
 
-def slope_from_heights(heights: np.ndarray, x0: int = 0, z0: int = 0,
-                       min_y: int = -64):
-    """复刻 BaseRenderer.calculateSlope（逐偏移累积后取平均）。
-
-    反编译逐字节还原的累积规则（currY=本列高度, depth=currY-minY, offH=偏移列高度）：
-        dh = offH - currY
-        dh <  0 (下坡): acc += (offH - depth) / ((currY - depth) * 1.0)
-        dh >= 0 (上坡): acc += ((currY + depth) * 1.0) / (offH + depth)
-        slope = acc / offsets.size();  NaN/Inf -> 1.0
-    注意 depth 是**加减**项而非除数本身——这是此前算错的原因。
-    结果仍是地形的确定性函数，同坡同色、不破碎。
-    """
-    h = heights.astype(np.float32)
+def _calc_slope(h, offs, min_y):
+    """复刻 calculateSlope：给定偏移集合，累加后取平均。"""
     hh, ww = h.shape
     min_y_f = float(min_y)
-    depth = h - min_y_f                      # currY - minY
-
-    def shifted(dz: int, dx: int) -> np.ndarray:
+    depth = h - min_y_f
+    acc = np.zeros((hh, ww), np.float32)
+    for (dz, dx) in offs:
         ys = np.clip(np.arange(hh) + dz, 0, hh - 1)
         xs = np.clip(np.arange(ww) + dx, 0, ww - 1)
-        return h[np.ix_(ys, xs)]
-
-    acc = np.zeros((hh, ww), np.float32)
-    offs = PRIMARY_SLOPE_OFFSETS + SECONDARY_SLOPE_OFFSETS
-    for (dz, dx) in offs:
-        off = shifted(dz, dx)
+        off = h[np.ix_(ys, xs)]
         dh = off - h
         down = dh < 0.0
-        denom_down = (h - depth)              # currY - depth
-        num_down = (off - depth)              # offH - depth
-        num_up = (h + depth)                  # currY + depth
-        denom_up = (off + depth)              # offH + depth
         with np.errstate(divide="ignore", invalid="ignore"):
-            term = np.where(down,
-                            num_down / denom_down,
-                            num_up / denom_up)
+            term = np.where(down, (off - depth) / (h - depth),
+                            (h + depth) / (off + depth))
         acc += term.astype(np.float32)
-    slope = acc / float(len(offs))
+    return acc / float(len(offs))
+
+
+def _apply_mult(v, down_mul, up_mul):
+    """对应 populateSlopes 的系数应用：<1 用下坡系数，>1 用上坡系数。"""
+    return np.where(v < 1.0, v * down_mul,
+                    np.where(v > 1.0, v * up_mul, v)).astype(np.float32)
+
+
+def slope_from_heights(heights: np.ndarray, x0: int = 0, z0: int = 0,
+                       min_y: int = -64, antialiasing: bool = True):
+    """复刻 BaseRenderer.populateSlopes（两遍法，非 8 偏移平均）。
+
+    反编译确认的真实流程：
+      1) slope = calculateSlope(primarySlopeOffsets)   // 只 3 个主偏移
+      2) slope<1 *= 0.65(primaryDown) ; slope>1 *= 1.2(primaryUp)
+      3) 若开启 mapAntialiasing **且 slope 恰为 1.0**（完全平坦）：
+           sec = calculateSlope(secondarySlopeOffsets)  // 5 个次偏移
+           sec>slope *= 1.05 ; sec<slope *= 0.95
+      4) NaN -> 1.0，最后 clamp 到 [shadingSlopeMin, shadingSlopeMax]
+    此前把 8 个偏移一起平均是错的：secondary 只在完全平坦处启用。
+    """
+    h = heights.astype(np.float32)
+    pri = _calc_slope(h, PRIMARY_SLOPE_OFFSETS, min_y)
+    slope = _apply_mult(pri, SHADING_PRIMARY_DOWNSLOPE, SHADING_PRIMARY_UPSLOPE)
+    if antialiasing:
+        flat = np.isclose(pri, 1.0)
+        if flat.any():
+            sec = _calc_slope(h, SECONDARY_SLOPE_OFFSETS, min_y)
+            up = sec > pri
+            dn = sec < pri
+            adj = np.where(up, slope * SHADING_SECONDARY_UPSLOPE,
+                           np.where(dn, slope * SHADING_SECONDARY_DOWNSLOPE,
+                                    slope))
+            slope = np.where(flat, adj, slope)
     slope = np.where(np.isfinite(slope), slope, 1.0)
     return np.clip(slope, SHADING_SLOPE_MIN, SHADING_SLOPE_MAX).astype(np.float32)
