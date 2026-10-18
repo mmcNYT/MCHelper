@@ -432,11 +432,12 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     # ---- 4) 配色（向量化）----
     # 真水掩码：由 native 逐列检查「地表到海平面之间是否为水」，
     # 这比顶块类型/高度启发式都可靠（海底顶块是 gravel、低洼陆地也是 dirt）。
-    try:
-        wet = _native.water_mask_grid(ctx, x0, z0, w, h, _SEA, 0)
-        wet = wet.astype(bool)
-    except Exception:
-        wet = None
+    # 水面判定 = 天空朝向的地表高度低于海平面。
+    # heights 来自 fill_top_grid（从世界顶部向下扫），**洞穴安全**；
+    # 不能像之前的 native 版那样从 seaLevel+1 向下找首个实心——
+    # 那会在山体内部的洞穴停下，把海拔 80+ 的山地误判成水
+    # （实测 808 列地表>=海平面被判为水，山地上出现大片白斑）。
+    wet = heights < _SEA
     rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
                            x0, z0, wet=wet)
 

@@ -169,9 +169,11 @@ def tinted_color(block_name: str, biome_short: str,
     if base is None:
         return None
     n = block_name.split(":")[-1]
-    is_gray = n in ("grass_block", "water", "oak_leaves", "birch_leaves",
-                    "spruce_leaves", "jungle_leaves", "acacia_leaves",
-                    "dark_oak_leaves", "mangrove_leaves", "cherry_leaves")
+    # 是否需要 tint 由**贴图实测**决定，而非硬编码名单：
+    # 灰度图（R≈G≈B）才需要群系 tint；本身彩色的（如樱花叶 (229,172,194)）
+    # 直接返回，否则会被再乘一次 tint 而变成灰绿。
+    _mx, _mn = max(base), min(base)
+    is_gray = (_mx - _mn) <= 8
     if not is_gray:
         return base
     if n == "water":
