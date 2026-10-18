@@ -529,8 +529,10 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(f"共 {len(chains)} 段")
         u.previewEnch.setText("\n".join(
             f"{i}. {n}" for i, n in enumerate(names, 1)))
+        # execute 无物品图标：隐藏图标框（不留空方框）
         u.previewIcon.setPixmap(QPixmap())
-        u.previewIcon.setText("—")
+        u.previewIcon.setText("")
+        u.previewIcon.setVisible(False)
 
     def _update_exec_checks(self, text: str, chains: list, ver: str):
         u = self.ui
@@ -585,16 +587,20 @@ class CommandGeneratorWidget(BaseToolWidget):
         u.previewSub.setText(f"{en} · minecraft:{iid}" if cn else
                              f"minecraft:{iid}")
 
-        # 图标：独立 PNG（assets/Public/items/<id>.png）
+        # 图标：独立 PNG（assets/Public/items/<id>.png）；
+        # 无图时隐藏图标框（不留「无图标」空方框）
         p = os.path.join(_ICON_DIR, f"{iid}.png")
         if os.path.exists(p):
             pm = QPixmap(p).scaled(
                 64, 64, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation)
             u.previewIcon.setPixmap(pm)
+            u.previewIcon.setText("")
+            u.previewIcon.setVisible(True)
         else:
             u.previewIcon.setPixmap(QPixmap())
-            u.previewIcon.setText("无图标")
+            u.previewIcon.setText("")
+            u.previewIcon.setVisible(False)
 
         # 附魔/描述摘要
         lines = []
@@ -792,18 +798,24 @@ class CommandGeneratorWidget(BaseToolWidget):
                     m.frameChanged.connect(
                         lambda *_: self._scale_particle_frame(m))
                     u.previewIcon.setText("")
+                    u.previewIcon.setVisible(True)
                     m.start()
                     return
                 u.previewIcon.setPixmap(QPixmap(media).scaled(
                     self._particle_target(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation))
+                u.previewIcon.setVisible(True)
                 return
+            # 粒子无图（3 个冷门）：隐藏图标框
             u.previewIcon.setPixmap(QPixmap())
-            u.previewIcon.setText("—")
+            u.previewIcon.setText("")
+            u.previewIcon.setVisible(False)
             return
 
-        # 图标：物品类指令尝试按物品 id 找图标
+        # 图标：物品类指令尝试按物品 id 找图标；
+        # **无图时隐藏图标框**（此前留一个 64x64 空框 + "—"，
+        # 视觉上像个中间带横线的空方框，纯噪音）
         cand = icon or (params.get("entity") if cmd == "summon" else "") \
             or (params.get("enchantment") if cmd == "enchant" else "")
         p = os.path.join(_ICON_DIR, f"{cand}.png") if cand else ""
@@ -811,9 +823,12 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setPixmap(QPixmap(p).scaled(
                 64, 64, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))
+            u.previewIcon.setText("")
+            u.previewIcon.setVisible(True)
         else:
             u.previewIcon.setPixmap(QPixmap())
-            u.previewIcon.setText("—")
+            u.previewIcon.setText("")
+            u.previewIcon.setVisible(False)
 
     def _ensure_listen_button(self, show: bool, sound_id: str = ""):
         """playsound 预览区的「🔊 试听」按钮 + 「自动」checkbox。
@@ -914,6 +929,9 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setMinimumSize(64, 64)
             u.previewIcon.setMaximumSize(64, 64)
             u.previewIcon.setPixmap(QPixmap())
+            u.previewIcon.setText("")
+            # 图标框暂隐藏；后续有图指令的分支会按需 setVisible(True)
+            u.previewIcon.setVisible(False)
             # 恢复标题/副标题（粒子模式曾隐藏）
             u.previewName.setVisible(True)
             u.previewSub.setVisible(True)

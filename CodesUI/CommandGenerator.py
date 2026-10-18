@@ -302,7 +302,9 @@ class Ui_commandGenerator(object):
         self.previewIcon.setObjectName(u"previewIcon")
         self.previewIcon.setMinimumSize(QSize(64, 64))
         self.previewIcon.setMaximumSize(QSize(64, 64))
-        self.previewIcon.setFrameShape(QFrame.Shape.StyledPanel)
+        # 无边框：此前 StyledPanel 在无图指令下是一个 64x64 空方框
+        # （中间还有 "—" 横线），视觉噪音；现在无图直接隐藏
+        self.previewIcon.setFrameShape(QFrame.Shape.NoFrame)
         self.previewIcon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.previewTopRow.addWidget(self.previewIcon)
