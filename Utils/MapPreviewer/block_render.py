@@ -634,9 +634,14 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                 if mm.any():
                     rgb[mm] = colors.get(bname, dflt)
 
-    # 水面：水下列（未结冰）画海平面水体，按水深渐变（近岸亮→深海暗）
+    # 水面：**必须是水/冰方块**才算水，不能只看高度——
+    # 低洼的陆地（dirt/gravel/沙）顶块不是水，误判会把陆地涂成蓝色。
+    _WATER_BLOCKS = {"minecraft:water", "minecraft:ice",
+                     "minecraft:packed_ice", "minecraft:blue_ice",
+                     "minecraft:frosted_ice"}
+    is_water_blk = np.isin(nm, list(_WATER_BLOCKS))
     ice_or_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
-    water_mask = (heights < _SEA) & ~ice_or_snow
+    water_mask = (heights < _SEA) & is_water_blk & ~ice_or_snow
     if water_mask.any():
         u = np.clip((_SEA - heights) / 45.0, 0.0, 1.0).astype(np.float32)
         wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]
