@@ -200,6 +200,7 @@ def _get_pack(seed: int) -> dict:
 _FHS_ZSCALE = 1.0
 _FHS_STEP = 1      # 高度量化步长（方块）：1 = 逐方块一层（MC 地形天然台阶）
 _FHS_LEVELS = 7    # shade 分级数：参考图山地约 7 个亮度级
+_FHS_SHADE_MIN = 0.42   # 阴影下限：防背光陡坡乘深色方块后变纯黑
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
@@ -231,7 +232,11 @@ def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     aspect = np.arctan2(-dzdx, -dzdy)
     shade = (np.cos(_HS_ZEN) * np.cos(slope)
              + np.sin(_HS_ZEN) * np.sin(slope) * np.cos(_HS_AZ - aspect))
-    shade = np.clip(shade / np.cos(_HS_ZEN), 0.0, 1.3).astype(np.float32)
+    # 下限钳到 _FHS_SHADE_MIN：背光极陡坡的 horn 公式会算出 0，
+    # 与深色冠层/陶瓦相乘后直接见底变纯黑。真实地图的背光面仍有环境光，
+    # 不会黑到 0，故保留一个下限。
+    shade = np.clip(shade / np.cos(_HS_ZEN), _FHS_SHADE_MIN, 1.3)
+    shade = shade.astype(np.float32)
     # 分级量化：参考图山地只有约 7 个亮度级、|ΔL|<1 占 88%，说明其阴影是
     # 严格分层的。把 shade 量化到 N 级，使同层完全一致、层间跳变分明。
     shade = np.round(shade * np.float32(_FHS_LEVELS)) / np.float32(_FHS_LEVELS)
