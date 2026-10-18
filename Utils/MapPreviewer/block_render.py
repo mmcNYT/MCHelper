@@ -221,45 +221,34 @@ _HS_LIGHT_Z = float(np.sin(_HS_ZEN))
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
-    """逐方块山体阴影（horn 公式，西北光源 315°/高度角 40°），按高度分层。
+    """按高度分层的地形阴影：同一高度层用同一个亮度（同层同色）。
 
-    关键：不做低频平滑——先把高度量化到整方块层，坡向/坡度取"层与层之间"
-    的突变，从而使阴影每层分明、同层内平坦（对齐参考图台阶观感）。
-    返回 [0,~1.3]；水面（water_mask）恒 1。
+    参考图的地形是"一层一色"的台阶感，而非连续坡度渐变。故这里不用
+    horn 坡度公式（同层不同坡位会得到不同 shade，视觉破碎），改为：
+      - 以高度层的「相对高度」决定明暗（层越亮/越高越亮）
+      - 光源方向体现为「层边界的一侧亮一侧暗」（由高度差的符号决定）
+    返回 [0,~1.3]，水面恒 1。
     """
-    # 高度量化：同一方块层内高度完全相同 -> 同层亮度一致（平台）
-    hq = np.round(heights.astype(np.float32) / np.float32(_FHS_STEP))
-    h = hq * np.float32(_FHS_STEP) * np.float32(_FHS_ZSCALE)
+    h = np.round(heights.astype(np.float32))          # 方块层
+    # 每层一个确定亮度：层高映射到 0.62~1.15（低层暗、高层亮，模拟天光）
+    hmin, hmax = float(h.min()), float(h.max())
+    span = max(hmax - hmin, 1.0)
+    base = 0.62 + 0.53 * ((h - hmin) / span)          # (h,w) 层亮度
+
+    # 层边界的受光/背光：西北亮、东南暗（只看高度差符号，不看坡度大小）
     p = np.pad(h, 1, mode="edge")
-    p[0, 1:-1] = 2.0 * h[0] - h[1]
-    p[-1, 1:-1] = 2.0 * h[-1] - h[-2]
-    p[1:-1, 0] = 2.0 * h[:, 0] - h[:, 1]
-    p[1:-1, -1] = 2.0 * h[:, -1] - h[:, -2]
-    p[0, 0] = 2.0 * p[0, 1] - p[0, 2]
-    p[0, -1] = 2.0 * p[0, -2] - p[0, -3]
-    p[-1, 0] = 2.0 * p[-1, 1] - p[-1, 2]
-    p[-1, -1] = 2.0 * p[-1, -2] - p[-1, -3]
-    sum_e = p[:-2, 2:] + 2.0 * p[1:-1, 2:] + p[2:, 2:]
-    sum_w = p[:-2, :-2] + 2.0 * p[1:-1, :-2] + p[2:, :-2]
-    sum_n = p[:-2, :-2] + 2.0 * p[:-2, 1:-1] + p[:-2, 2:]
-    sum_s = p[2:, :-2] + 2.0 * p[2:, 1:-1] + p[2:, 2:]
-    dzdx = (sum_e - sum_w) / 8.0
-    dzdy = (sum_n - sum_s) / 8.0
-    slope = np.arctan(np.sqrt(dzdx * dzdx + dzdy * dzdy))
-    aspect = np.arctan2(-dzdx, -dzdy)
-    shade = (np.cos(_HS_ZEN) * np.cos(slope)
-             + np.sin(_HS_ZEN) * np.sin(slope) * np.cos(_HS_AZ - aspect))
-    # 下限钳到 _FHS_SHADE_MIN：背光极陡坡的 horn 公式会算出 0，
-    # 与深色冠层/陶瓦相乘后直接见底变纯黑。真实地图的背光面仍有环境光，
-    # 不会黑到 0，故保留一个下限。
-    shade = np.clip(shade / np.cos(_HS_ZEN), _FHS_SHADE_MIN, 1.3)
-    shade = shade.astype(np.float32)
-    # 分级量化：参考图山地只有约 7 个亮度级、|ΔL|<1 占 88%，说明其阴影是
-    # 严格分层的。把 shade 量化到 N 级，使同层完全一致、层间跳变分明。
+    dzdx = (p[1:-1, 2:] - p[1:-1, :-2])               # 东-西
+    dzdy = (p[:-2, 1:-1] - p[2:, 1:-1])               # 北-南
+    # 西北向光：西侧高/北侧高时更亮
+    lit = np.sign(-dzdx) * 0.5 + np.sign(dzdy) * 0.5  # [-1,1]
+    shade = base * (1.0 + 0.13 * lit)
+    shade = np.clip(shade, _FHS_SHADE_MIN, 1.30).astype(np.float32)
+    # 量化到级：同层同色，层间分明
     shade = np.round(shade * np.float32(_FHS_LEVELS)) / np.float32(_FHS_LEVELS)
-    # 刻意不做空间平滑：平滑会把台阶抹成连续渐变，与层状观感相反。
     shade[water_mask] = 1.0
     return shade
+
+
 
 def _grain(seed: int, x0: int, z0: int, h: int, w: int) -> np.ndarray:
     """逐方块色彩变异：高频亮度纹理 + 低频成片色相/饱和漂移。
@@ -455,7 +444,8 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
         rgb = t * 255.0
     # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
     # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
-    rgb *= _grain(seed, x0, z0, h, w)
+    # 地表完全不做色彩抖动：同一地形层必须同色，否则画面破碎。
+    # 色相/亮度变异只保留在树冠（_apply_vegetation 的球面光照 + 树种混生）。
     if hillshade:
         water_mask = heights < _SEA
         shade = _hillshade(heights.astype(np.int32), water_mask)
