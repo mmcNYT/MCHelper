@@ -182,9 +182,21 @@ def _get_pack(seed: int) -> dict:
     dblob = comp.to_blob(root, rids, 63, blend, thu, snb)
     ctx = _native.build_from_blob(seed, dblob)
 
+    try:
+        from Utils.MapPreviewer import block_textures as _btex
+        # 地表方块 + 各树种叶片（树冠需要叶片材质）
+        _need = list(block_names) + [
+            "minecraft:%s_leaves" % sp for sp in
+            ("oak", "birch", "spruce", "jungle", "acacia", "dark_oak",
+             "mangrove", "cherry", "azalea", "flowering_azalea")
+        ]
+        _tex = _btex.load_atlas(_need)
+    except Exception:
+        _tex = {}
     pack = {
         "ctx": ctx, "sblob": sblob,
         "block_names": block_names,
+        "tex": _tex,
         "name2bid": {nm: i for i, nm in enumerate(block_names)},
         "id2key": id2key,
         "bs": BiomeSampler(seed, "26.2"),
@@ -270,14 +282,17 @@ def render_block_region(seed: int, cx_blocks: int, cz_blocks: int,
                         on_progress=None, cancel=None,
                         want_surface: bool = True,
                         hillshade: bool = False,
-                        structures: bool = True) -> dict:
-    """渲染一块「1 像素 = 1 方块」的精细俯视图（以 (cx,cz) 为中心）。"""
+                        structures: bool = True,
+                        scale: int = 1) -> dict:
+    """渲染精细俯视图（以 (cx,cz) 为中心）。scale=N 表示每方块 N×N 像素，
+    N>1 时可见方块材质纹理（对应参考截图的 1方块=4像素）。"""
     w = max(16, (int(width_blocks) // 16) * 16)
     h = max(16, (int(height_blocks) // 16) * 16)
     x0 = ((int(cx_blocks) - w // 2) // 16) * 16
     z0 = ((int(cz_blocks) - h // 2) // 16) * 16
     return _render_rect(seed, x0, z0, w, h, want_surface, hillshade,
-                        structures, on_progress, cancel)
+                        structures, on_progress, cancel, margin=0,
+                        scale=scale)
 
 
 def render_tile(seed: int, fx: int, fz: int, ts: int,
@@ -296,7 +311,8 @@ def render_tile(seed: int, fx: int, fz: int, ts: int,
 
 def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
                  want_surface: bool, hillshade: bool, structures: bool,
-                 on_progress=None, cancel=None, margin: int = 0) -> dict:
+                 on_progress=None, cancel=None, margin: int = 0,
+                 scale: int = 1) -> dict:
     """核心：渲染方块矩形 [x0,x0+w)×[z0,z0+h)。margin>0 时向外多渲染再裁回，
     消除跨瓦片的树冠/结构接缝。"""
     import time
@@ -367,7 +383,7 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
         on_progress(h, h, "surface")
 
     # ---- 4) 配色（向量化）----
-    rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack)
+    rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack, x0, z0)
 
     # ---- 4b) 植被散布（树冠/花/草/作物，密度精确近似）----
     if _veg is not None and want_surface:
@@ -405,8 +421,20 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     top_block = np.asarray(block_names, dtype=object)[
         np.clip(blocks, 0, len(block_names) - 1)]
 
-    return {"rgb": _crop(rgb), "heights": _crop(heights),
-            "top_block": _crop(top_block),
+    rgb = _crop(rgb)
+    heights = _crop(heights)
+    top_block = _crop(top_block)
+
+    # scale>1：每方块展开成 N×N 像素，并在块内按材质贴图取不同位置，
+    # 从而呈现参考图那种"1方块=4像素、块内有花纹"的观感。
+    if scale > 1:
+        rgb = _upscale_blocks(rgb, _crop(blocks), pack, scale)
+        heights = np.repeat(np.repeat(heights, scale, axis=0), scale, axis=1)
+        top_block = np.repeat(np.repeat(top_block, scale, axis=0),
+                              scale, axis=1)
+
+    return {"rgb": rgb, "heights": heights,
+            "top_block": top_block,
             "origin_bx": tx0, "origin_bz": tz0, "engine": "native",
             "elapsed": time.perf_counter() - t0, "cancelled": False}
 
@@ -420,9 +448,54 @@ def _grass_tint(tq: np.ndarray, hq: np.ndarray) -> np.ndarray:
     return top * (1 - t[..., None]) + bot * t[..., None]
 
 
+def _upscale_blocks(rgb: np.ndarray, blocks: np.ndarray, pack: dict,
+                    scale: int) -> np.ndarray:
+    """把 1px/方块 结果展开成 scale×scale，块内按材质贴图加纹理花纹。
+
+    rgb: (h,w,3) 每方块一色（已含 tint/阴影）
+    blocks: (h,w) 方块 id
+    返回 (h*scale, w*scale, 3) uint8
+    """
+    h, w = blocks.shape
+    names = pack["block_names"]
+    tex = pack.get("tex") or {}
+    # 块内采样索引（把 16x16 纹理按 scale 均匀取点）
+    ii = ((np.arange(scale) * 16) // scale).astype(np.int32)
+    ii = np.clip(ii, 0, 15)
+
+    # 预取每个 id 的贴图与其均值
+    art_by_id = {}
+    for bi, bname in enumerate(names):
+        art = tex.get(bname)
+        if art is None:
+            continue
+        am = art.reshape(-1, 3).mean(axis=0)
+        am = np.where(am < 1e-3, 1.0, am)
+        art_by_id[bi] = (art, am.astype(np.float32))
+
+    out = np.empty((h * scale, w * scale, 3), np.float32)
+    base = rgb.astype(np.float32)
+    for r in range(h):
+        for c in range(w):
+            bi = int(blocks[r, c])
+            blk = base[r, c]                      # (3)
+            ao = art_by_id.get(bi)
+            if ao is None:
+                out[r*scale:(r+1)*scale, c*scale:(c+1)*scale] = blk
+                continue
+            art, am = ao
+            # 该方块内 scale×scale 的纹理采样（含世界坐标相位，跨块连续）
+            sx = (ii + (c * 16 // max(scale, 1))) & 15
+            sy = (ii + (r * 16 // max(scale, 1))) & 15
+            sub = art[np.ix_(sy, sx)].astype(np.float32)   # (scale,scale,3)
+            out[r*scale:(r+1)*scale, c*scale:(c+1)*scale] = sub * (blk / am)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                      tq: np.ndarray, hq: np.ndarray,
-                     biome_grid: np.ndarray, pack: dict) -> np.ndarray:
+                     biome_grid: np.ndarray, pack: dict,
+                     x0: int = 0, z0: int = 0) -> np.ndarray:
     h, w = blocks.shape
     colors = _load_colors()
     block_names = pack["block_names"]
@@ -484,7 +557,31 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]
         rgb[water_mask] = wr[water_mask]
 
+    # 材质贴图：用 16x16 顶面纹理逐像素替换纯色（真实 MC 地块花纹）。
+    # 采样坐标取「世界坐标 & 15」——同一方块内 16 个像素各取纹理不同位置，
+    # 相邻方块纹理相位连续，视觉上就是 MC 的方块材质。
+    tex = pack.get("tex")
+    if tex:
+        yy = np.broadcast_to(
+            (np.arange(h, dtype=np.int32)[:, None] + z0) & 15, (h, w))
+        xx = np.broadcast_to(
+            (np.arange(w, dtype=np.int32)[None, :] + x0) & 15, (h, w))
+        for bi, bname in enumerate(block_names):
+            art = tex.get(bname)
+            if art is None:
+                continue
+            m = (idx == bi)
+            if not m.any():
+                continue
+            # art: (16,16,3)；取每像素对应纹理位置；再乘该方块当前色/均值，
+            # 以保留草 tint、覆雪、水深等已算好的色调。
+            base = art[yy[m], xx[m]].astype(np.float32)
+            amean = art.reshape(-1, 3).mean(axis=0)
+            amean = np.where(amean < 1e-3, 1.0, amean)
+            rgb[m] = base * (rgb[m] / amean)
+
     return rgb
+
 
 
 # 可生长植被的地表（水/冰/裸岩上不放）
@@ -579,6 +676,19 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
     canopy = np.zeros((h, w), bool)
     fol = _hash01_grid(seed, x0, z0, h, w, 7)      # 叶面亮度噪声
     tvar = _hash01_grid(seed, x0, z0, h, w, 8)     # 逐棵树明暗
+    # 叶片材质（按树种取对应 leaves 贴图）
+    _tex = pack.get("tex") or {}
+    leaf_art = None
+    leaf_mean = 1.0
+    for (_tx, _tz, _sp, _r, _c, _y) in trees[:1]:
+        _ln = "minecraft:%s_leaves" % _sp
+        leaf_art = _tex.get(_ln)
+        if leaf_art is None:
+            leaf_art = _tex.get("minecraft:oak_leaves")
+        if leaf_art is not None:
+            leaf_mean = max(float(leaf_art.mean()), 1.0)
+        break
+
     for (tx, tz, sp, rad, col, top_y) in trees:
         # 冠层按球面法线做光照（西北光 315°/40°，与地形阴影同光源）：
         #   中心 = 正对光源 -> 最亮；边缘 = 掠射 -> 渐暗
@@ -611,7 +721,15 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                 # 漫反射 + 环境项；范围约 0.55~1.25，中心亮边缘暗
                 shade3d = 0.72 + 0.45 * d
                 canopy[yy, xx] = True
-                rgb[yy, xx] = base * lum_t * np.float32(shade3d)
+                # 叶片材质纹理：按世界坐标采样 16x16 叶片图（灰度噪点），
+                # 与球面光照叠加 -> 冠层内部有 MC 叶块的斑驳感
+                lv = np.float32(1.0)
+                if leaf_art is not None:
+                    li = ((xx + x0) & 15)
+                    lj = ((yy + z0) & 15)
+                    lv = leaf_art[lj, li].mean() / max(float(leaf_mean), 1.0)
+                    lv = np.clip(lv, 0.72, 1.30)
+                rgb[yy, xx] = base * lum_t * np.float32(shade3d) * lv
 
     # 树冠投影：给树冠外围一圈地面压暗（模拟树的落影，增强"立起来"感）
     if canopy.any():
