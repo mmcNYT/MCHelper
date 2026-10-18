@@ -634,14 +634,31 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                 if mm.any():
                     rgb[mm] = colors.get(bname, dflt)
 
-    # 水面：**必须是水/冰方块**才算水，不能只看高度——
-    # 低洼的陆地（dirt/gravel/沙）顶块不是水，误判会把陆地涂成蓝色。
-    _WATER_BLOCKS = {"minecraft:water", "minecraft:ice",
-                     "minecraft:packed_ice", "minecraft:blue_ice",
-                     "minecraft:frosted_ice"}
+    # 水面判定（两源合并，缺一不可）：
+    #   a) 顶块本身就是水/冰方块（浅水/水面未被 surface 规则替换时）
+    #   b) 该列 fill 顶低于海平面（海床是 gravel/sand，但上方覆盖水体）
+    # 只用 a) 会漏掉整片海洋（海床顶块是砾石）；只用 b) 会把低洼陆地
+    # 误判成水。故必须结合「是否低于海平面」+「排除冰/雪」。
+    # 判别只看**顶块类型**，不看高度：
+    #   顶块是 water/冰 -> 水；其余（gravel/sand/dirt，哪怕低于海平面）
+    #   -> 陆地。低洼陆地的顶块是土/砾石，绝不会是 water。
+    # （高度不能作判据：整片内陆低地的高度都 < SEA）
+    # 水面判别（三分法，避免此前两个方向的误判）：
+    #   a) 顶块就是 water                        -> 水
+    #   b) 顶块是海床材质(gravel/sand/clay) 且高度远低于海平面 -> 被水覆盖
+    #   c) 其余（含低洼但顶块是土/草的陆地）      -> 陆地
+    # 关键：低洼陆地的顶块是 dirt/grass，绝不会有 gravel/sand 海床特征，
+    # 且高度通常贴近海平面；真正海底则深达 -20 以下。
+    _WATER_BLOCKS = {"minecraft:water"}
+    _SEABED = {"minecraft:gravel", "minecraft:sand", "minecraft:clay",
+               "minecraft:dirt", "minecraft:suspicious_sand",
+               "minecraft:suspicious_gravel"}
     is_water_blk = np.isin(nm, list(_WATER_BLOCKS))
+    is_seabed = np.isin(nm, list(_SEABED))
     ice_or_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
-    water_mask = (heights < _SEA) & is_water_blk & ~ice_or_snow
+    # 海床判定：深度超过 6 格才算被水覆盖（浅洼地不算）
+    deep = heights < (_SEA - 6)
+    water_mask = (is_water_blk | (is_seabed & deep)) & ~ice_or_snow
     if water_mask.any():
         u = np.clip((_SEA - heights) / 45.0, 0.0, 1.0).astype(np.float32)
         wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]
