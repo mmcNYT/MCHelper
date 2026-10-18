@@ -876,22 +876,45 @@ def _apply_structures(rgb, heights, x0, z0, h, w, seed, version):
             _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
 
 
-def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz):
-    """村庄：锚点周围散布若干房屋矩形（陆地，确定性）。"""
-    from Utils.SeedReverser.biome_noise import BiomeSampler
+def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
+    """用真实 jigsaw 还原的村庄方块替换矩形近似。
+
+    读 jar 内村庄模板 NBT（town_centers/houses/streets/decor），按权重
+    拼出整座村庄，取每列最高实体方块的颜色落到图上 —— 房屋外形、门窗、
+    草径(dirt_path)、农田、水井都是模板里的真实布局。
+    """
     try:
-        bio = BiomeSampler(seed, "26.2").biome_at(wx >> 2, 64 >> 2, wz >> 2)
+        from Utils.MapPreviewer import village_jigsaw as _vj
+        from Utils.MapPreviewer import jm_colors as _jm
     except Exception:
-        bio = -1
-    house = _VILLAGE_HOUSE["plains"]
-    rng = np.random.default_rng((seed * 2654435761 ^ wx * 40503 ^ wz) & 0xffffffff)
-    for _ in range(10):
-        hx = ax + int(rng.integers(-20, 21))
-        hz = az + int(rng.integers(-20, 21))
-        hw = int(rng.integers(5, 9)); hl = int(rng.integers(5, 9))
-        _stamp_rect(rgb, heights, hx, hz, hw, hl, house, (90, 80, 70), h, w, True)
-
-
+        return
+    try:
+        fp = _vj.village_footprint(seed, wx, wz)
+    except Exception:
+        return
+    if not fp["blocks"]:
+        return
+    grid = _vj.footprint_to_grid(fp, wx - ax, wz - az, w, h)
+    names = set()
+    for row in grid:
+        for nm in row:
+            if nm:
+                names.add(nm)
+    if not names:
+        return
+    pal = _jm.build_block_palette(sorted(names))
+    for r in range(h):
+        for c in range(w):
+            nm = grid[r, c]
+            if not nm:
+                continue
+            col = pal.get(nm)
+            if col is None:
+                continue
+            # 村庄覆盖列无条件绘制（盖过水面），对应 MC 的村庄地形替换
+            rgb[r, c] = col
+            if heights[r, c] < _SEA:
+                heights[r, c] = _SEA
 def _colorize_height(heights: np.ndarray, hillshade: bool = False) -> np.ndarray:
     """纯海拔快速档：水蓝、陆地按高度渐绿灰，可选阴影。"""
     h, w = heights.shape
