@@ -194,18 +194,17 @@ def _get_pack(seed: int) -> dict:
     return pack
 
 
-# 精细档 hillshade 高程缩放（方块单位，spacing=1 方块）：
-# 主图在 4 方块噪声格尺度用 depth×100×0.001；精细逐方块坡更陡，
-# 取较小 zscale 抑制 1 方块级噪声碎跳，保留地形起伏。
-_FHS_ZSCALE = 0.35
+# 精细档 hillshade 高程缩放（方块单位，spacing=1 方块）。参考真实地图风格：
+# 强立体起伏 + 逐方块等高线状明暗，故 z 夸张取较高值让坡面响应更锐利。
+_FHS_ZSCALE = 0.55
 
 
 def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     """逐方块山体阴影（GDAL/ArcGIS horn，西北光源 315°/高度角 40°）。
 
     与 block_colors._hillshade_shade 同公式同光源，差别仅在 xy 间距
-    =1 方块（主图为噪声格）。返回 [0,1]；水面（water_mask）恒 1（不
-    对平坦水面打明暗，避免噪声碎点）。
+    =1 方块（主图为噪声格）。返回 [0,~1.3]：平地=1（中性）、向光坡>1
+    （提亮）、背光坡<1（压暗）。水面（water_mask）恒 1（不打明暗）。
     """
     h = heights.astype(np.float32) * np.float32(_FHS_ZSCALE)
     p = np.pad(h, 1, mode="edge")
@@ -227,7 +226,7 @@ def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     aspect = np.arctan2(-dzdx, -dzdy)
     shade = (np.cos(_HS_ZEN) * np.cos(slope)
              + np.sin(_HS_ZEN) * np.sin(slope) * np.cos(_HS_AZ - aspect))
-    shade = np.clip(shade / np.cos(_HS_ZEN), 0.0, 1.0).astype(np.float32)
+    shade = np.clip(shade / np.cos(_HS_ZEN), 0.0, 1.3).astype(np.float32)
     # 3x3 均值平滑：逐方块明暗碎跳 -> 渐变
     ps = np.pad(shade, 1, mode="edge")
     shade = (ps[:-2, :-2] + ps[:-2, 1:-1] + ps[:-2, 2:]
@@ -364,7 +363,7 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     if hillshade:
         water_mask = heights < _SEA
         shade = _hillshade(heights.astype(np.int32), water_mask)
-        rgb *= (0.40 + 0.60 * shade)[..., None]
+        rgb *= (0.30 + 0.70 * shade)[..., None]
     rgb = np.clip(rgb, 0, 255).astype(np.uint8)
 
     block_names = pack["block_names"]
@@ -437,9 +436,10 @@ def _hash01_grid(seed: int, x0: int, z0: int, h: int, w: int, salt: int):
     rr = (np.arange(h, dtype=np.int64)[:, None] + z0).astype(np.uint64)
     cc = (np.arange(w, dtype=np.int64)[None, :] + x0).astype(np.uint64)
     U = np.uint64
-    hv = (cc * U(0x9E3779B97F4A7C15) ^ rr * U(0xC2B2AE3D27D4EB4F)
-          ^ U(int(seed) & ((1 << 64) - 1)) * U(0x165667B19E3779F9)
-          ^ U(salt) * U(0x27D4EB2F165667C5))
+    M = (1 << 64) - 1
+    # seed/salt 项用 Python int 先算并掩码，避免 numpy 标量乘溢出告警
+    sbase = ((int(seed) & M) * 0x165667B19E3779F9 ^ (salt * 0x27D4EB2F165667C5)) & M
+    hv = (cc * U(0x9E3779B97F4A7C15) ^ rr * U(0xC2B2AE3D27D4EB4F) ^ U(sbase))
     hv ^= hv >> U(33)
     hv *= U(0xFF51AFD7ED558CCD)
     hv ^= hv >> U(29)
@@ -484,13 +484,15 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
             radius[r, c] = rad; canopy_col[r, c] = col
             crop_kind[r, c] = pr["crop_kind"]
 
-    # 树干命中 -> 冠层（按半径膨胀，逐树干 stamp 圆盘）
+    # 树干命中 -> 冠层（按半径膨胀，逐树干 stamp 圆盘 + 逐像素叶纹 stipple）
     trunk = growable & (_hash01_grid(seed, x0, z0, h, w, 1) < tree_p)
+    fol = _hash01_grid(seed, x0, z0, h, w, 7)          # 叶面亮度噪声
+    tvar = _hash01_grid(seed, x0, z0, h, w, 8)         # 逐棵树明暗变化
     canopy = np.zeros((h, w), bool)
     ys, xs = np.nonzero(trunk)
     for y, x in zip(ys, xs):
         rad = int(radius[y, x])
-        col = canopy_col[y, x]
+        base = canopy_col[y, x] * np.float32(0.82 + 0.34 * tvar[y, x])
         for dy in range(-rad, rad + 1):
             yy = y + dy
             if yy < 0 or yy >= h:
@@ -502,7 +504,11 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                 if dx * dx + dy * dy <= rad * rad + rad:
                     if growable[yy, xx]:
                         canopy[yy, xx] = True
-                        rgb[yy, xx] = col
+                        # 冠层边缘略暗（模拟树冠球面受光），内部叶纹抖动
+                        edge = 1.0 - 0.22 * ((dx * dx + dy * dy)
+                                             / float(rad * rad + rad))
+                        rgb[yy, xx] = base * edge \
+                            * np.float32(0.82 + 0.36 * fol[yy, xx])
 
     # 作物（不在冠层下）
     crop = growable & ~canopy & (_hash01_grid(seed, x0, z0, h, w, 4) < crop_p)
@@ -630,7 +636,7 @@ def _colorize_height(heights: np.ndarray, hillshade: bool = False) -> np.ndarray
     rgb[land, 2] = 90 + 160 * t[land]
     if hillshade:
         shade = _hillshade(heights.astype(np.int32), heights < _SEA)
-        rgb *= (0.40 + 0.60 * shade)[..., None]
+        rgb *= (0.30 + 0.70 * shade)[..., None]
     return np.clip(rgb, 0, 255).astype(np.uint8)
 
 
