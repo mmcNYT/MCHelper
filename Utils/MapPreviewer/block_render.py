@@ -183,6 +183,11 @@ def _get_pack(seed: int) -> dict:
     ctx = _native.build_from_blob(seed, dblob)
 
     try:
+        from Utils.MapPreviewer import jm_colors as _jm
+        _jmpal = _jm.build_block_palette(block_names)
+    except Exception:
+        _jmpal = None
+    try:
         from Utils.MapPreviewer import block_textures as _btex
         # 地表方块 + 各树种叶片（树冠需要叶片材质）
         _need = list(block_names) + [
@@ -197,6 +202,7 @@ def _get_pack(seed: int) -> dict:
         "ctx": ctx, "sblob": sblob,
         "block_names": block_names,
         "tex": _tex,
+        "jm_palette": _jmpal,
         "name2bid": {nm: i for i, nm in enumerate(block_names)},
         "id2key": id2key,
         "bs": BiomeSampler(seed, "26.2"),
@@ -566,7 +572,9 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                      biome_grid: np.ndarray, pack: dict,
                      x0: int = 0, z0: int = 0) -> np.ndarray:
     h, w = blocks.shape
-    colors = _load_colors()
+    # 配色改走 JourneyMap 方案：每方块一个固定色（贴图均值 * 群系 tint），
+    # 颜色只是"方块类型+群系"的函数，与坐标无关 -> 同层必然同色。
+    colors = pack.get("jm_palette") or _load_colors()
     block_names = pack["block_names"]
     # 方块名 -> RGB 查找表（按 surface blob 顺序）
     lut = np.array([colors.get(nm, (255, 0, 255)) for nm in block_names],
