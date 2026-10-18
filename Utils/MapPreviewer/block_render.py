@@ -781,6 +781,13 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0):
                     continue
                 canopy[yy, xx] = True
                 rgb[yy, xx] = ccol
+                # 树冠抬高该列高度：树叶是实体方块，会抬高 getBlockHeight。
+                # 但树冠顶面是**平坦的一层**（同高），只有树冠与周围地面之间
+                # 的高度差才产生坡度 -> 树冠整体被同一 slope 着色（有立体感
+                # 但不碎），而不是内部锥形梯度（那会让 p50 飙到 10+）。
+                ch_h = int(top_y) + max(1, rad // 2 + 1)
+                if ch_h > heights[yy, xx]:
+                    heights[yy, xx] = ch_h
 
 # ---- 结构 footprint 近似（逐方块；占地尺寸/材质为代表性近似）----
 # key: (宽, 长, 主体色, 边框/屋顶色)；村庄单独按房屋簇渲染。
