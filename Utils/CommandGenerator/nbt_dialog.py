@@ -302,6 +302,9 @@ QUICK_PRESETS = [
 
 from Utils.CommandGenerator.nbt_key_cn import KEY_CN   # noqa: E402
 
+# 双击翻转标志的 role id（与显示数据错开）
+_DBL_STATE_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 class NbtDialog(QDialog):
     """NBT 编辑对话框（全内联编辑）。"""
@@ -368,6 +371,9 @@ class NbtDialog(QDialog):
             QTreeWidget.EditTrigger.NoEditTriggers)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
+        # 容器行**双击展开/收起**（新手对树的本能操作；此前双击无反应，
+        # 只有左侧小箭头可点 —— 箭头目标小、不明显）
+        self.tree.itemDoubleClicked.connect(self._on_double_click)
         ll.addWidget(self.tree, 1)
         brow = QHBoxLayout()
         for txt, fn, tip in (
@@ -974,6 +980,20 @@ class NbtDialog(QDialog):
         self._busy = True
         self.quick.setCurrentIndex(0)
         self._busy = False
+
+    def _on_double_click(self, item, _col):
+        """双击容器行 = 展开/收起（复合/列表/数组）。
+
+        **不读 isExpanded()**：load_text 的 expandAll 存在迟到展开
+        事件，紧随的读可能拿到被覆盖的状态（实测双击两次都算出
+        同方向）。改为在 item 上记一个翻转标志 —— 每次双击必翻向，
+        与事件派发时序无关。
+        """
+        if self._kind_of(item) in CONTAINER_KINDS:
+            cur = item.data(0, _DBL_STATE_ROLE)
+            nxt = False if cur is None else bool(cur)
+            item.setData(0, _DBL_STATE_ROLE, not nxt)
+            item.setExpanded(not nxt)
 
     def _menu(self, pos):
         it = self.tree.itemAt(pos)

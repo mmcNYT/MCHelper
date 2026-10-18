@@ -298,6 +298,11 @@ class CommandGeneratorWidget(BaseToolWidget):
             lambda _=False: self._add_component())
         u.giveCompCombo.currentIndexChanged.connect(
             self._on_comp_combo_changed)
+        # 组件下拉**回车即添加**：搜索（attach_search）-> 回车 ->
+        # 加卡，纯键盘流不用碰按钮（此前必须再点「添加」按钮）
+        from PySide6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence(Qt.Key.Key_Return),
+                  u.giveCompCombo, self._add_component_from_combo)
         u.copyBtn.clicked.connect(self._copy)
         u.outputCopyBtn.clicked.connect(self._copy)
         u.clearBtn.clicked.connect(self._clear)
@@ -1011,6 +1016,12 @@ class CommandGeneratorWidget(BaseToolWidget):
         QApplication.clipboard().setText(self.ui.outputEdit.toPlainText())
         self.request_status_message.emit("指令已复制到剪贴板")
 
+    def _add_component_from_combo(self):
+        """组件下拉回车：加当前选中组件（分组标题已在 changed 兜底跳过）。"""
+        cid = self.ui.giveCompCombo.currentData()
+        if cid:
+            self._add_component(cid)
+
     def _clear(self):
         """清空当前指令的参数（give 清组件卡片，通用页重建表单）。"""
         cmd = self._current_cmd()
@@ -1019,6 +1030,11 @@ class CommandGeneratorWidget(BaseToolWidget):
                 self._remove_component(cid)
             self.ui.giveCountSpin.setValue(1)
             self.ui.giveTargetCombo.setCurrentText("@p")
+            # 物品回默认钻石剑（点「清空」的心理预期是全部回初始，
+            # 此前物品残留旧选择，输出框还留着旧指令让人困惑）
+            i = self.ui.giveItemCombo.findData("diamond_sword")
+            if i >= 0:
+                self.ui.giveItemCombo.setCurrentIndex(i)
         else:
             form = getattr(self, "_form", None)
             if form is not None:
