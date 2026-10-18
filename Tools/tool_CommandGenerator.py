@@ -737,6 +737,20 @@ class CommandGeneratorWidget(BaseToolWidget):
         elif cmd == "kill":
             name = "杀死实体"
             sub = params.get("targets") or "（命令执行者自身）"
+        else:
+            # 无专属可视化预览的指令：预览框显示简介
+            # （这指令干什么、怎么用、注意事项）
+            from Utils.CommandGenerator.cmd_info import info_for
+            info = info_for(cmd)
+            if info:
+                name, sub = info
+                if isinstance(sub, (list, tuple)):
+                    lines = list(sub)
+                    sub = ""
+                else:
+                    lines = []
+            if not sub and name:
+                sub = ""
 
         u.previewName.setText(name)
         u.previewSub.setText(sub)
