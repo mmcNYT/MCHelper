@@ -816,25 +816,60 @@ class CommandGeneratorWidget(BaseToolWidget):
             u.previewIcon.setText("—")
 
     def _ensure_listen_button(self, show: bool, sound_id: str = ""):
-        """playsound 预览区的「🔊 试听」按钮：按需创建/显隐。
+        """playsound 预览区的「🔊 试听」按钮 + 「自动」checkbox。
 
-        点击播放当前选中的音效（assets/sounds 下的官方 ogg，
-        由 gen_sound_assets.py 从 .minecraft/assets 提取）。
+        - 试听按钮：点击播放当前选中的音效（assets/sounds 下
+          的官方 ogg，由 gen_sound_assets.py 提取）。
+        - 自动 checkbox：勾选后每次切换音效**立即播放**，
+          逐个试音不用反复点按钮。
         """
         u = self.ui
         btn = getattr(self, "_listen_btn", None)
         if show and btn is None:
             from PySide6.QtWidgets import QPushButton
+            lay = u.previewLayout
+            # 试听按钮 + 自动 checkbox 同排（previewEnch 之前）
+            from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox
+            box = QWidget()
+            bl = QHBoxLayout(box)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.setSpacing(8)
             btn = QPushButton("🔊 试听")
             btn.setToolTip("播放当前选中的音效")
             btn.clicked.connect(self._play_current_sound)
-            # 放在 previewEnch 之前（预览框内倒数第二行）
-            lay = u.previewLayout
-            lay.insertWidget(lay.count() - 1, btn)
+            bl.addWidget(btn)
+            auto = QCheckBox("自动")
+            auto.setToolTip("勾选后：切换音效立即播放，无需点按钮")
+            # 勾选瞬间立即播一次当前音效（即刻反馈）
+            auto.toggled.connect(self._on_listen_auto_toggled)
+            bl.addWidget(auto)
+            bl.addStretch(1)
+            lay.insertWidget(lay.count() - 1, box)
             self._listen_btn = btn
+            self._listen_auto = auto
         if btn is not None:
             btn.setVisible(show)
-            self._listen_sound = sound_id if show else ""
+            auto = getattr(self, "_listen_auto", None)
+            if auto is not None:
+                auto.setVisible(show)
+            new_id = sound_id if show else ""
+            # 自动模式：**音效 id 变化**才播（同一刷新周期内多次
+            # _refresh 不重复播 —— sound 字段的 index/text 两个信号
+            # 都会触发 refresh）
+            changed = new_id != getattr(self, "_listen_sound", "")
+            self._listen_sound = new_id
+            if show and auto is not None and auto.isChecked() \
+                    and new_id and changed:
+                from Utils.CommandGenerator.sound_preview import play_sound
+                play_sound(new_id)
+
+    def _on_listen_auto_toggled(self, checked: bool):
+        """「自动」勾选瞬间：立即播一次当前音效（即刻反馈）。"""
+        if checked:
+            from Utils.CommandGenerator.sound_preview import play_sound
+            sid = getattr(self, "_listen_sound", "")
+            if sid:
+                play_sound(sid)
 
     def _play_current_sound(self):
         """试听当前 playsound 选中的音效。"""
