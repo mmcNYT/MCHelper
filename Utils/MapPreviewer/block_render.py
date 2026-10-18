@@ -411,7 +411,15 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
         on_progress(h, h, "surface")
 
     # ---- 4) 配色（向量化）----
-    rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack, x0, z0)
+    # 真水掩码：由 native 逐列检查「地表到海平面之间是否为水」，
+    # 这比顶块类型/高度启发式都可靠（海底顶块是 gravel、低洼陆地也是 dirt）。
+    try:
+        wet = _native.water_mask_grid(ctx, x0, z0, w, h, _SEA, 0)
+        wet = wet.astype(bool)
+    except Exception:
+        wet = None
+    rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
+                           x0, z0, wet=wet)
 
     # ---- 4b) 植被散布（树冠/花/草/作物，密度精确近似）----
     if _veg is not None and want_surface:
@@ -576,7 +584,8 @@ def _upscale_blocks(rgb: np.ndarray, blocks: np.ndarray, pack: dict,
 def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                      tq: np.ndarray, hq: np.ndarray,
                      biome_grid: np.ndarray, pack: dict,
-                     x0: int = 0, z0: int = 0) -> np.ndarray:
+                     x0: int = 0, z0: int = 0,
+                     wet=None) -> np.ndarray:
     h, w = blocks.shape
     # 配色改走 JourneyMap 方案：每方块一个固定色（贴图均值 * 群系 tint），
     # 颜色只是"方块类型+群系"的函数，与坐标无关 -> 同层必然同色。
@@ -656,9 +665,13 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     is_water_blk = np.isin(nm, list(_WATER_BLOCKS))
     is_seabed = np.isin(nm, list(_SEABED))
     ice_or_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
-    # 海床判定：深度超过 6 格才算被水覆盖（浅洼地不算）
-    deep = heights < (_SEA - 6)
-    water_mask = (is_water_blk | (is_seabed & deep)) & ~ice_or_snow
+    if wet is not None:
+        # native 精确判定：地表到海平面之间确有水体
+        water_mask = np.asarray(wet, bool) & ~ice_or_snow
+    else:
+        # 兜底启发式
+        deep = heights < (_SEA - 6)
+        water_mask = (is_water_blk | (is_seabed & deep)) & ~ice_or_snow
     if water_mask.any():
         u = np.clip((_SEA - heights) / 45.0, 0.0, 1.0).astype(np.float32)
         wr = _WATER_SHALLOW * (1 - u[..., None]) + _WATER_DEEP * u[..., None]

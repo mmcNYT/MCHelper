@@ -2558,6 +2558,55 @@ PYBIND11_MODULE(_density_sampler, m) {
     }, py::arg("ctx"), py::arg("surface_blob"), py::arg("x"), py::arg("z"),
        py::arg("fill_top"), py::arg("sea_level"), py::arg("biome_id"));
 
+    // 逐列判定「地表到海平面之间是否存在水体」（供水面着色）
+    m.def("water_mask_grid", [](SamplerCtx* ctx, int x0, int z0, int w, int h,
+                                int seaLevel, int threads) {
+        py::array_t<u8> out({h, w});
+        auto ob = out.mutable_unchecked<2>();
+        int nth = threads > 0 ? threads
+                              : (int)std::thread::hardware_concurrency();
+        if (nth < 1) nth = 1;
+        std::atomic<int> nextRow{0};
+        auto worker = [&]() {
+            Aquifer aq = ctx->aq.clone_fresh();
+            for (;;) {
+                int r = nextRow.fetch_add(1);
+                if (r >= h) break;
+                int z = z0 + r;
+                for (int c = 0; c < w; c++) {
+                    int x = x0 + c;
+                    // 正确做法：找到地表顶(首个实心)，再从地表向上到海平面
+                    // 检查这些 y 上的流体类型是否为 water。
+                    // 关键：地表之下是"实心"，之上的 y 若为非实心且
+                    // pick_type == WATER 才是真正的水体。
+                    int top = -64;
+                    for (int y = seaLevel + 1; y >= -64; y--) {
+                        double d = ctx->tree.eval(ctx->tree.root, x, y, z);
+                        if (aq.compute_substance(x, y, z, d)) { top = y; break; }
+                    }
+                    u8 wet = 0;
+                    if (top < seaLevel) {
+                        // 地表与海平面之间：逐格检查是否为水
+                        for (int y = seaLevel; y > top; y--) {
+                            double d = ctx->tree.eval(ctx->tree.root, x, y, z);
+                            if (aq.compute_substance(x, y, z, d)) break;
+                            int tp = aq.pick_type(y);
+                            if (tp == Aquifer::T_WATER) { wet = 1; break; }
+                        }
+                    }
+                    ob(r, c) = wet;
+                }
+            }
+        };
+        std::vector<std::thread> pool;
+        for (int i = 1; i < nth; i++) pool.emplace_back(worker);
+        worker();
+        for (auto& t2 : pool) t2.join();
+        return out;
+    }, py::arg("ctx"), py::arg("x0"), py::arg("z0"), py::arg("w"),
+       py::arg("h"), py::arg("sea_level") = 63, py::arg("threads") = 0,
+       "逐列判定地表到海平面之间是否为水体");
+
     m.def("surface_grid", &surface_grid,
           py::arg("ctx"), py::arg("surface_blob"),
           py::arg("fill_tops"), py::arg("biome_grid"),
