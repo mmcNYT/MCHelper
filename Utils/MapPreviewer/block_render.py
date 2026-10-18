@@ -262,19 +262,64 @@ def _hillshade(heights: np.ndarray, water_mask: np.ndarray) -> np.ndarray:
     return shade
 
 def _grain(seed: int, x0: int, z0: int, h: int, w: int) -> np.ndarray:
-    """逐方块材质纹理因子（确定性、跨块无缝）。
+    """逐方块色彩变异：高频亮度纹理 + 低频成片色相/饱和漂移。
 
-    参考实测：MC 每方块内部亮度极差约 23（±11%），来自方块材质的
-    像素花纹。纯色块会让地图读起来像色卡拼贴而非 MC。这里给每个
-    方块一个固定的明暗偏移（同块内一致 -> 保持方块分明），振幅对齐
-    参考的 ±11%。
+    参考实测密林：色相 std=0.163、饱和度 std=0.144、色相直方跨 4 桶
+    （黄绿/正绿/蓝绿并存）。若只做高频亮度抖动，色相仍是单一绿。
+    故分两层：高频 hash 给逐方块亮度纹理，低频平滑噪声给成片色相漂移。
+    返回 (h,w,3) RGB 乘子。
     """
     rr = np.arange(h, dtype=np.int64)[:, None] + z0
     cc = np.arange(w, dtype=np.int64)[None, :] + x0
-    hv = (cc * 73856093) ^ (rr * 19349663) ^ (int(seed) * 83492791)
-    hv = (hv ^ (hv >> 13)) * 1274126177
-    u = ((hv ^ (hv >> 16)) & 0xFFFF) / 65535.0
-    return (0.89 + 0.22 * u).astype(np.float32)
+    base = (cc * 73856093) ^ (rr * 19349663) ^ (int(seed) * 83492791)
+
+    def _u(salt):
+        hv = base ^ (salt * 2654435761)
+        hv2 = (hv ^ (hv >> 13)) * 1274126177
+        return (((hv2 ^ (hv2 >> 16)) & 0xFFFF).astype(np.float32) / 65535.0)
+
+    lum = 0.89 + 0.22 * _u(1)
+
+    GS = 8
+    gh = max(2, h // GS + 2)
+    gw = max(2, w // GS + 2)
+    gr = (np.arange(gh, dtype=np.int64)[:, None] + (z0 // GS))
+    gc = (np.arange(gw, dtype=np.int64)[None, :] + (x0 // GS))
+    gbase = (gc * 374761393) ^ (gr * 668265263) ^ (int(seed) * 1274126177)
+
+    def _g(salt):
+        hv = gbase ^ (salt * 2654435761)
+        hv2 = (hv ^ (hv >> 13)) * 1274126177
+        return (((hv2 ^ (hv2 >> 16)) & 0xFFFF).astype(np.float32) / 65535.0)
+
+    def _bilinear(g):
+        zz = (np.arange(h, dtype=np.float32) / GS)
+        xx = (np.arange(w, dtype=np.float32) / GS)
+        z0i = zz.astype(np.int32)
+        x0i = xx.astype(np.int32)
+        fz = (zz - z0i)[:, None]
+        fx = (xx - x0i)[None, :]
+        z1i = np.minimum(z0i + 1, gh - 1)
+        x1i = np.minimum(x0i + 1, gw - 1)
+        z0i = np.minimum(z0i, gh - 1)
+        x0i = np.minimum(x0i, gw - 1)
+        a = g[z0i][:, x0i]
+        b = g[z0i][:, x1i]
+        c = g[z1i][:, x0i]
+        d = g[z1i][:, x1i]
+        top = a * (1 - fx) + b * fx
+        bot = c * (1 - fx) + d * fx
+        return top * (1 - fz) + bot * fz
+
+    warm = _bilinear(_g(2)) - 0.5
+    satv = _bilinear(_g(3)) - 0.5
+
+    mul = np.empty((h, w, 3), np.float32)
+    mul[..., 0] = lum * (1.0 + 0.58 * warm) * (1.0 + 0.30 * satv)
+    mul[..., 1] = lum
+    mul[..., 2] = lum * (1.0 - 0.52 * warm) * (1.0 + 0.30 * satv)
+    return mul
+
 
 
 def render_block_region(seed: int, cx_blocks: int, cz_blocks: int,
@@ -410,7 +455,7 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
         rgb = t * 255.0
     # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
     # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
-    rgb *= _grain(seed, x0, z0, h, w)[..., None]
+    rgb *= _grain(seed, x0, z0, h, w)
     if hillshade:
         water_mask = heights < _SEA
         shade = _hillshade(heights.astype(np.int32), water_mask)

@@ -32,6 +32,19 @@ _MASK64 = (1 << 64) - 1
 # decoration step 里植被所在的索引（VEGETAL_DECORATION）
 _VEG_STEP = 9
 
+# 各主导树种的常见混生伙伴（真实森林多树种，也提供色相变化）
+_MIX = {
+    "oak": ("birch", "oak", "spruce", "dark_oak"),
+    "birch": ("oak", "birch", "spruce"),
+    "spruce": ("spruce", "pine", "oak"),
+    "pine": ("pine", "spruce", "oak"),
+    "jungle": ("jungle", "oak"),
+    "dark_oak": ("dark_oak", "oak", "birch"),
+    "acacia": ("acacia", "oak"),
+    "swamp": ("swamp", "oak"),
+    "mangrove": ("mangrove", "oak"),
+}
+
 
 class _Rng:
     """Per-chunk feature RNG（Xoroshiro + Java nextInt/nextFloat 语义）。"""
@@ -78,6 +91,7 @@ def chunk_trees(seed: int, cx: int, cz: int, biome_key: str,
     rng = _Rng(_decorrelated(seed, cx, cz, _VEG_STEP))
     species = prof["species"]
     rad, col = _veg.species_canopy(species)
+    mix = _MIX.get(species, ())
     out = []
     for _ in range(n):
         # in_square：nextFloat*16 取整
@@ -88,7 +102,13 @@ def chunk_trees(seed: int, cx: int, cz: int, biome_key: str,
         # heightmap filter：该列必须有有效地表
         if surface_y is None or surface_y[dz, dx] < -64:
             continue
-        out.append((cx * 16 + dx, cz * 16 + dz, species, rad, col))
+        # 混生：按 chunk RNG 以一定概率换成次要树种（真实森林非单一树种），
+        # 这也是参考图色相丰富（黄绿/深绿/蓝绿并存）的来源。
+        sp2, rad2, col2 = species, rad, col
+        if mix and rng.next_float() < 0.45:
+            sp2 = mix[int(rng.next_float() * len(mix)) % len(mix)]
+            rad2, col2 = _veg.species_canopy(sp2)
+        out.append((cx * 16 + dx, cz * 16 + dz, sp2, rad2, col2))
     return out
 
 

@@ -2108,17 +2108,8 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         return tiles, (ccx, ccz)
 
     def _fine_scale(self) -> int:
-        """按当前缩放选每方块像素数：放大越深，方块内材质纹理越可见。
-
-        参考图的 1方块=4像素 对应约 4px/方块 的屏幕缩放；这里按
-        屏幕像素/方块 的比例取名：>=3 用 4，>=1.5 用 2，否则 1。
-        同时受单块像素预算约束（scale² 增长会显著增加开销）。
-        """
-        m = self.viewMap.transform().m11()
-        if m >= 3.0:
-            return 4
-        if m >= 1.5:
-            return 2
+        """每方块像素数。参考图本身是 1像素=1方块，配色丰富度来自
+        材质色相差异而非更高分辨率，故固定 1（性能也最好）。"""
         return 1
 
     def _ensure_fine_tiles(self) -> None:
