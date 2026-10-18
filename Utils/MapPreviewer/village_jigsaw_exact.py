@@ -108,8 +108,12 @@ def _overlaps(a, b) -> bool:
 def build_village(seed: int, anchor_x: int, anchor_z: int,
                   variant: str = "plains", size: int = 6,
                   max_distance: int = 80, max_pieces: int = 120,
-                  max_blocks: int = 250000) -> dict:
-    """严格 jigsaw 拼接（对齐 JigsawPlacement.addPieces 的语义）。"""
+                  max_blocks: int = 250000, base_y: int = 64) -> dict:
+    """严格 jigsaw 拼接（对齐 JigsawPlacement.addPieces 的语义）。
+
+    base_y：村庄基座高度。MC 用 project_start_to_heightmap=WORLD_SURFACE_WG
+    把村庄贴到地表，故调用方应传锚点处的地表高度（而非固定 64）。
+    """
     rng = np.random.default_rng(
         (seed * 2654435761 ^ anchor_x * 40503 ^ anchor_z) & 0xFFFFFFFF)
 
@@ -154,7 +158,8 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
     ctr_tpl = _vj.load_template("minecraft:" + center[1])
     if ctr_tpl is None:
         return {"blocks": [], "conns": []}
-    ctr = Placed(center[1], anchor_x, 64, anchor_z, 0, ctr_tpl["size"])
+    ctr = Placed(center[1], anchor_x, int(base_y), anchor_z, 0,
+                 ctr_tpl["size"])
     placed.append(ctr)
     emit(ctr_tpl, ctr)
 

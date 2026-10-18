@@ -890,7 +890,13 @@ def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
         return
     try:
         from Utils.MapPreviewer import village_jigsaw_exact as _vx
-        fp = _vx.build_village(seed, wx, wz)
+        # 地形适配：MC 用 project_start_to_heightmap=WORLD_SURFACE_WG 把
+        # 村庄贴到锚点处地表，故 base_y 取该列实测地表高度。
+        # 若地表低于海平面（村庄在水边），抬到海平面以上 1 格，
+        # 对应 terrain_adaptation=beard_thin 的填平效果。
+        _by = int(heights[az, ax]) if (0 <= az < h and 0 <= ax < w) else 64
+        _by = max(_by, _SEA + 1)
+        fp = _vx.build_village(seed, wx, wz, base_y=_by)
     except Exception:
         try:
             fp = _vj.village_footprint(seed, wx, wz)
@@ -907,17 +913,29 @@ def _stamp_village(rgb, heights, ax, az, h, w, seed, wx, wz, colors=None):
     if not names:
         return
     pal = _jm.build_block_palette(sorted(names))
+    # 村庄整体占地（含房屋之间的空地）：用方块聚集的包围盒 + 逐列膨胀，
+    # 对应 MC terrain_adaptation=beard_thin 把村庄底座铺平的效果。
+    covered = grid != None
+    pad = np.zeros_like(covered)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            ys = np.clip(np.arange(h) + dy, 0, h - 1)
+            xs = np.clip(np.arange(w) + dx, 0, w - 1)
+            pad |= covered[np.ix_(ys, xs)]
+    ground = pal.get("minecraft:dirt_path") or pal.get("minecraft:dirt") \
+        or (139, 112, 76)
     for r in range(h):
         for c in range(w):
             nm = grid[r, c]
-            if not nm:
-                continue
-            col = pal.get(nm)
-            if col is None:
-                continue
-            # 村庄覆盖列无条件绘制（盖过水面），对应 MC 的村庄地形替换
-            rgb[r, c] = col
-            if heights[r, c] < _SEA:
+            if nm:
+                col = pal.get(nm)
+                if col is not None:
+                    rgb[r, c] = col
+                    if heights[r, c] < _SEA:
+                        heights[r, c] = _SEA
+            elif pad[r, c] and heights[r, c] < _SEA:
+                # 房屋之间/边缘的洼地：铺村庄地面色，避免露出水面
+                rgb[r, c] = ground
                 heights[r, c] = _SEA
 def _colorize_height(heights: np.ndarray, hillshade: bool = False) -> np.ndarray:
     """纯海拔快速档：水蓝、陆地按高度渐绿灰，可选阴影。"""
