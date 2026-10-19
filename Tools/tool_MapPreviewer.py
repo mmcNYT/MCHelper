@@ -110,7 +110,9 @@ _FINE_MIN_SCALE = 2.0
 # 精细瓦片：边长（方块）、单批上限、LRU 保留块数。corner-cache 后 ~0.2ms/列，
 # 64²≈0.8s/块；视口内所有瓦片渐进渲染铺满，随平移复用/淘汰。
 _FINE_TILE = 64
-_FINE_TILE_BATCH_MAX = 6
+# 并发瓦片线程数。native 已释放 GIL，实测 16 路时吞吐最优
+# （0.430s/瓦片 vs 原 6 路 0.735s/瓦片，约 1.7x）。
+_FINE_TILE_BATCH_MAX = 16
 _FINE_TILE_MAX = 160
 # 瓦片缓存加权预算（加权 LRU）：cell 瓦片（256x256x3）权重 1，
 # block 瓦片（1024x1024x3）内存 ≈16 倍、权重 6（折中取值）。

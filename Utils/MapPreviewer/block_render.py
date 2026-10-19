@@ -391,7 +391,7 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
                     "elapsed": time.perf_counter() - t0, "cancelled": True}
         r1 = min(r0 + CHUNK_ROWS, h)
         heights[r0:r1, :] = _native.fill_top_grid(
-            ctx, x0, z0 + r0, w, r1 - r0, -64, 320, 0)
+            ctx, x0, z0 + r0, w, r1 - r0, -64, 320, _NATIVE_THREADS)
         if on_progress is not None:
             on_progress(r1, h, "fill")
 
@@ -424,7 +424,7 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
 
     # ---- 3) native surface：顶块 id + 最终顶 y ----
     tops, blocks = _native.surface_grid(ctx, pack["sblob"], heights,
-                                        biome_grid, x0, z0, 63, 0)
+                                        biome_grid, x0, z0, 63, _NATIVE_THREADS)
     heights = tops
     if on_progress is not None:
         on_progress(h, h, "surface")
@@ -931,6 +931,19 @@ _STRUCTURE_MATERIALS = [
     "minecraft:yellow_terracotta",
 ]
 
+# 原生调用的线程预算。实测单瓦片(72x72=5184 列) fill_top_grid：
+#   threads=1 -> 0.921s, 2 -> 0.146s, 4 -> 0.155s, 8 -> 0.198s, 32 -> 0.277s
+# 线程创建/join 开销压过并行收益，故默认 2；上层瓦片并发时由
+# set_native_threads() 按 cpu/并发数 调整。
+_NATIVE_THREADS = 2
+
+
+def set_native_threads(n: int) -> None:
+    """设置原生 fill/surface 调用的线程数（供瓦片线程池按并发度调整）。"""
+    global _NATIVE_THREADS
+    _NATIVE_THREADS = max(1, int(n))
+
+
 _LEAF_BID: dict[str, int] = {}
 _CURRENT_NAME2BID: dict[str, int] = {}
 _CURRENT_PACK: dict = {}
@@ -1236,21 +1249,26 @@ def _stamp_real_blocks(rgb, heights, blocks, world_blocks, gx0, gz0, h, w,
     vtop[has_roof] = np.maximum(vtop[has_roof], roof_y[has_roof])
 
     n2b = (pack or {}).get("name2bid") or {}
-    for r in range(h):
-        for c in range(w):
-            nm = vgrid[r, c]
-            if not nm:
-                continue
-            col = pal.get(nm)
-            if col is not None:
-                rgb[r, c] = col
-            bid = n2b.get(nm)
-            if bid is not None:
-                if beard or int(vtop[r, c]) > heights[r, c]:
-                    heights[r, c] = int(vtop[r, c])
-                    blocks[r, c] = bid
-            elif heights[r, c] < _SEA:
-                heights[r, c] = _SEA
+    # 向量化：材质只有 ~20 种，按材质分组做掩码批量赋值，
+    # 取代 72x72 的 Python 逐像素双重循环（实测占结构瓦片主要耗时）。
+    _v = vtop.astype(np.int32)
+    for nm in {x for row in vgrid for x in row if x}:
+        m = vgrid == nm
+        col = pal.get(nm)
+        if col is not None:
+            rgb[m] = col
+        bid = n2b.get(nm)
+        if bid is not None:
+            if beard:
+                heights[m] = _v[m]
+                blocks[m] = bid
+            else:
+                keep = m & (_v > heights)
+                heights[keep] = _v[keep]
+                blocks[keep] = bid
+        else:
+            low = m & (heights < _SEA)
+            heights[low] = _SEA
     return True
 
 
@@ -1337,27 +1355,26 @@ def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,
     ground_col = pal.get(ground_nm) or (139, 112, 76)
     ground_bid = n2b.get(ground_nm)
 
-    for r in range(h):
-        for c in range(w):
-            nm = vgrid[r, c]
-            if nm:
-                col = pal.get(nm)
-                if col is not None:
-                    rgb[r, c] = col
-                # 真俯视 + 地形适配（对应 MC terrain_adaptation=beard_thin）
-                # MC 生成村庄时会把村庄占地内的地形**削填**到村庄基座高度，
-                # 所以即使地形比村庄高，建筑也必须可见。
-                bid = n2b.get(nm)
-                if bid is not None:
-                    heights[r, c] = int(vtop[r, c])
-                    blocks[r, c] = bid
-                elif heights[r, c] < _SEA:
-                    heights[r, c] = _SEA
-            elif pad[r, c] and heights[r, c] < _SEA:
-                rgb[r, c] = ground_col
-                heights[r, c] = _SEA
-                if ground_bid is not None:
-                    blocks[r, c] = ground_bid
+    # 向量化（同上：避免逐像素 Python 循环）
+    _v = vtop.astype(np.int32)
+    for nm in {x for row in vgrid for x in row if x}:
+        m = vgrid == nm
+        col = pal.get(nm)
+        if col is not None:
+            rgb[m] = col
+        bid = n2b.get(nm)
+        if bid is not None:
+            heights[m] = _v[m]
+            blocks[m] = bid
+        else:
+            low = m & (heights < _SEA)
+            heights[low] = _SEA
+    gap = (vgrid == None) & pad & (heights < _SEA)
+    if gap.any():
+        rgb[gap] = ground_col
+        heights[gap] = _SEA
+        if ground_bid is not None:
+            blocks[gap] = ground_bid
 
 
 def _colorize_height(heights: np.ndarray, hillshade: bool = False) -> np.ndarray:

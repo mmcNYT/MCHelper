@@ -749,13 +749,33 @@ class BiomeSampler:
         return sample_double_perlin(dpn, x, y, z)
 
     def biome_at(self, x: int, y: int, z: int) -> int:
-        """返回 1:4 噪声格 (x, y, z) 处的群系 id。"""
-        return climate_to_biome(self.climate_point(x, y, z), self._btree)
+        """返回 1:4 噪声格 (x, y, z) 处的群系 id（带记忆化）。
+
+        climate_to_biome 是纯函数但内含 btree 最近邻搜索（单次约 5 次
+        _get_np_dist）。精细渲染里同一格被反复查询：实测单个村庄瓦片
+        触发 111584 次 _get_np_dist（约 21457 次群系查找），主要来自
+        enumerate_structures 的候选点采样与跨瓦片重叠区。
+        """
+        key = (x, y, z)
+        cache = getattr(self, "_biome_cache", None)
+        if cache is None:
+            cache = self._biome_cache = {}
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        val = climate_to_biome(self.climate_point(x, y, z), self._btree)
+        if len(cache) >= _BIOME_CACHE_MAX:
+            cache.clear()
+        cache[key] = val
+        return val
 
 
 # ----------------------------------------------------------------------
 # climateToBiome（biomenoise.c L1369-1484，btree 最近邻搜索）
 # ----------------------------------------------------------------------
+
+_BIOME_CACHE_MAX = 400000
+
 
 def _get_np_dist(np6, bt: BTree, idx: int) -> int:
     """节点 idx 的参数盒到 np 的平方距离（uint64 算术，不溢出）。"""

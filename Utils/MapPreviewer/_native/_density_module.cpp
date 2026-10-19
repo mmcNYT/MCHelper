@@ -1370,6 +1370,12 @@ static py::array_t<i16> fill_top_grid(SamplerCtx* ctx, int x0, int z0, int w, in
     if (nthreads < 1) nthreads = 1;
     if (nthreads > total) nthreads = total;
 
+    // 重计算期间释放 GIL：否则 pybind 调用全程持锁，上层多个瓦片线程
+    // 只能串行（实测 32 核上 6 线程加速比 0.92x，即无收益）。
+    // 花括号限定作用域：return out 需要重新持有 GIL。
+    {
+    py::gil_scoped_release release_guard;
+
     std::atomic<int> next_row{0};
     auto worker = [&]() {
         Aquifer aq = ctx->aq.clone_fresh();   // 线程私有缓存
@@ -1395,6 +1401,7 @@ static py::array_t<i16> fill_top_grid(SamplerCtx* ctx, int x0, int z0, int w, in
     for (int i = 1; i < nthreads; i++) pool.emplace_back(worker);
     worker();
     for (auto& t : pool) t.join();
+    }   // 重新获取 GIL（gil_scoped_release 析构）
     return out;
 }
 
@@ -2302,6 +2309,13 @@ static py::tuple surface_grid(
     int nthreads = threads > 0 ? threads
                               : static_cast<int>(std::thread::hardware_concurrency());
     if (nthreads < 1) nthreads = 1;
+
+    // 输出数组与访问器已在上面创建完毕，重计算期间释放 GIL，
+    // 使上层多个瓦片线程可以真正并行。
+    // 必须用花括号限定作用域：返回 py::tuple 时需要重新持有 GIL。
+    {
+    py::gil_scoped_release release_guard;
+
     std::atomic<int> nextRow{0};
 
     auto worker = [&]() {
@@ -2364,6 +2378,7 @@ static py::tuple surface_grid(
     for (int i = 1; i < nthreads; i++) pool.emplace_back(worker);
     worker();
     for (auto& t : pool) t.join();
+    }   // 重新获取 GIL（gil_scoped_release 析构）
     return py::make_tuple(tops, blocks);
 }
 

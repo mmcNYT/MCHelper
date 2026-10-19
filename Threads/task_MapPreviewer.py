@@ -736,6 +736,11 @@ class FineTileThread(QThread):
             if not br.is_available():
                 self.error.emit("native 密度扩展不可用，无法精细渲染")
                 return
+            # 本线程是多路并发瓦片线程之一：并行放在「瓦片层」最优。
+            # 实测 16 瓦片线程 x 原生 1 线程 = 0.430s/瓦片，
+            # 而原生开满 32 线程反而 0.712s（单瓦片仅 5184 列，
+            # 线程创建/join 开销压过并行收益）。
+            br.set_native_threads(1)
             for fx, fz in self._tiles:
                 if self._cancelled:
                     return

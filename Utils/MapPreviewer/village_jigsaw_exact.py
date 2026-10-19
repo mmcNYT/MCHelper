@@ -15,6 +15,8 @@ MC 的 jigsaw 生成（JigsawPlacement.addPieces）：
 """
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import json
 
 import numpy as np
@@ -105,11 +107,18 @@ def _overlaps(a, b) -> bool:
                 a[5] <= b[2] or b[5] <= a[2])
 
 
-def build_jigsaw(seed: int, anchor_x: int, anchor_z: int,
-                 start_pool: str, size: int = 6,
+_JIGSAW_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_JIGSAW_CACHE_MAX = 96
+
+
+def _build_jigsaw(seed: int, anchor_x: int, anchor_z: int,
+                  start_pool: str, size: int = 6,
                  max_distance: int = 80, max_pieces: int = 120,
                  max_blocks: int = 250000, base_y: int = 64) -> dict:
     """严格 jigsaw 拼接（对齐 JigsawPlacement.addPieces 的语义）。
+
+    结果按 (seed, 锚点, start_pool, base_y) 缓存：_STRUCT_PAD=96 使同一
+    结构被周围多块瓦片重复请求，而拼接是纯函数，缓存后只算一次。
 
     start_pool：起始模板池（如 minecraft:village/plains/town_centers）。
     后续扩展池由每个模板自身的 jigsaw 方块 pool 字段决定，无需外部指定，
@@ -270,6 +279,31 @@ def build_jigsaw(seed: int, anchor_x: int, anchor_z: int,
         out_conns = []
 
     return {"blocks": out_blocks, "conns": out_conns, "pieces": len(placed)}
+
+
+
+def build_jigsaw(seed: int, anchor_x: int, anchor_z: int,
+                 start_pool: str, size: int = 6,
+                 max_distance: int = 80, max_pieces: int = 120,
+                 max_blocks: int = 250000, base_y: int = 64) -> dict:
+    """带 LRU 缓存的 jigsaw 拼接入口。
+
+    _STRUCT_PAD=96 使同一结构被周围多块瓦片重复请求；拼接是纯函数，
+    缓存后每个结构只算一次（村庄单次约 0.15s，重复 9 次即 1.4s 白烧）。
+    """
+    _ck = (seed, anchor_x, anchor_z, start_pool, size, max_distance,
+           max_pieces, base_y)
+    hit = _JIGSAW_CACHE.get(_ck)
+    if hit is not None:
+        _JIGSAW_CACHE.move_to_end(_ck)
+        return hit
+    res = _build_jigsaw(seed, anchor_x, anchor_z, start_pool, size=size,
+                        max_distance=max_distance, max_pieces=max_pieces,
+                        max_blocks=max_blocks, base_y=base_y)
+    _JIGSAW_CACHE[_ck] = res
+    while len(_JIGSAW_CACHE) > _JIGSAW_CACHE_MAX:
+        _JIGSAW_CACHE.popitem(last=False)
+    return res
 
 
 def build_village(seed: int, anchor_x: int, anchor_z: int,
