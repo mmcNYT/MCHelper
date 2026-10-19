@@ -157,25 +157,45 @@ def load_template(loc: str) -> dict | None:
         _TPL_CACHE[loc] = None
         return None
     size = [int(v) for v in nbt.get("size", [0, 0, 0])]
-    pal = []
-    pal_props = []
-    for p in nbt.get("palette", []):
-        nm = p.get("Name", "")
-        pal.append(nm)
-        pal_props.append(p.get("Properties") or {})
+    # 部分结构（沉船等）用 **多调色板** 格式：根键是 palettes（复数），
+    # 每个 block 用可选的 palette 索引选择子表；缺省索引 0。
+    raw_pal = nbt.get("palette")
+    multi = None
+    if not raw_pal and nbt.get("palettes"):
+        multi = nbt["palettes"]
+        raw_pal = multi[0] if multi else []
+    raw_pal = raw_pal or []
+
+    def _build(palette_list):
+        names, props = [], []
+        for p in palette_list:
+            names.append(p.get("Name", ""))
+            props.append(p.get("Properties") or {})
+        return names, props
+
+    pal, pal_props = _build(raw_pal)
+    _sub = {0: (pal, pal_props)}
+    if multi:
+        for _i, _pl in enumerate(multi):
+            _sub[_i] = _build(_pl)
     blocks = []
     jigsaws = []
     for b in nbt.get("blocks", []):
         pos = b.get("pos", [0, 0, 0])
         st = int(b.get("state", 0))
-        nm = pal[st] if 0 <= st < len(pal) else ""
+        if multi:
+            pn = int(b.get("palette", 0) or 0)
+            names, props = _sub.get(pn, _sub[0])
+        else:
+            names, props = pal, pal_props
+        nm = names[st] if 0 <= st < len(names) else ""
         x, y, z = int(pos[0]), int(pos[1]), int(pos[2])
         blocks.append((x, y, z, nm))
         if nm == _JIGSAW:
             # jigsaw 的朝向来自 palette 的 Properties.orientation
             # （如 'north_up'），不在 block 的 nbt 里。
             meta = dict(b.get("nbt", {}) or {})
-            props = pal_props[st] if 0 <= st < len(pal_props) else {}
+            props = props[st] if 0 <= st < len(props) else {}
             if props.get("orientation"):
                 meta["orientation"] = props["orientation"]
             jigsaws.append((x, y, z, meta))

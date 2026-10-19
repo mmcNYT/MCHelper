@@ -105,14 +105,17 @@ def _overlaps(a, b) -> bool:
                 a[5] <= b[2] or b[5] <= a[2])
 
 
-def build_village(seed: int, anchor_x: int, anchor_z: int,
-                  variant: str = "plains", size: int = 6,
-                  max_distance: int = 80, max_pieces: int = 120,
-                  max_blocks: int = 250000, base_y: int = 64) -> dict:
+def build_jigsaw(seed: int, anchor_x: int, anchor_z: int,
+                 start_pool: str, size: int = 6,
+                 max_distance: int = 80, max_pieces: int = 120,
+                 max_blocks: int = 250000, base_y: int = 64) -> dict:
     """严格 jigsaw 拼接（对齐 JigsawPlacement.addPieces 的语义）。
 
-    base_y：村庄基座高度。MC 用 project_start_to_heightmap=WORLD_SURFACE_WG
-    把村庄贴到地表，故调用方应传锚点处的地表高度（而非固定 64）。
+    start_pool：起始模板池（如 minecraft:village/plains/town_centers）。
+    后续扩展池由每个模板自身的 jigsaw 方块 pool 字段决定，无需外部指定，
+    因此村庄/前哨/远古城市等都能共用本函数。
+    base_y：结构基座高度。MC 用 project_start_to_heightmap=WORLD_SURFACE_WG
+    把结构贴到地表，故调用方应传锚点处的地表高度（而非固定 64）。
     """
     rng = np.random.default_rng(
         (seed * 2654435761 ^ anchor_x * 40503 ^ anchor_z) & 0xFFFFFFFF)
@@ -156,7 +159,7 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
             })
 
     # ---- 1) 中心 ----
-    pool = load_pool("minecraft:village/%s/town_centers" % variant)
+    pool = load_pool(start_pool)
     if not pool:
         return {"blocks": [], "conns": []}
     tot = sum(w for w, _, _ in pool)
@@ -247,10 +250,14 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
             oz = nz - rdz
             oy = ny - hit[1]
             cand = Placed(chosen[1], ox, oy, oz, turns, (sx, sy, sz))
-            # 容差 -1：MC 的 jigsaw 允许边界相接/轻微交叉（屋檐跨格），
+            # 垂直连接（塔楼叠在底板上）跳过重叠检查：MC 的 outpost /
+            # bastion 就是把上层房间放在下层之上，AABB 必然相交。
+            # 水平连接用 -1 容差：边界相接不算重叠（屋檐可跨 1 格）；
             # 严格 0 容差会让村庄只拼出 23 块（实测），规模严重缩水。
-            if any(_overlaps(cand.aabb(-1), p.aabb(-1)) for p in placed):
-                continue
+            if front not in ("up", "down"):
+                if any(_overlaps(cand.aabb(-1), p.aabb(-1))
+                       for p in placed):
+                    continue
             best = cand
             break
         if best is None:
@@ -263,3 +270,15 @@ def build_village(seed: int, anchor_x: int, anchor_z: int,
         out_conns = []
 
     return {"blocks": out_blocks, "conns": out_conns, "pieces": len(placed)}
+
+
+def build_village(seed: int, anchor_x: int, anchor_z: int,
+                  variant: str = "plains", size: int = 6,
+                  max_distance: int = 80, max_pieces: int = 120,
+                  max_blocks: int = 250000, base_y: int = 64) -> dict:
+    """村庄 = build_jigsaw 的村庄特化（起始池为 town_centers）。"""
+    return build_jigsaw(seed, anchor_x, anchor_z,
+                        "minecraft:village/%s/town_centers" % variant,
+                        size=size, max_distance=max_distance,
+                        max_pieces=max_pieces, max_blocks=max_blocks,
+                        base_y=base_y)

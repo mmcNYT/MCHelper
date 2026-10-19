@@ -195,7 +195,7 @@ def _get_pack(seed: int) -> dict:
         "minecraft:oak_slab", "minecraft:oak_planks", "minecraft:cobblestone",
         "minecraft:glass_pane", "minecraft:oak_fence", "minecraft:oak_log",
         "minecraft:dirt_path", "minecraft:wheat", "minecraft:torch",
-    ]
+    ] + _STRUCTURE_MATERIALS
     _have = set(block_names)
     for _nm in _EXTRA:
         if _nm not in _have:
@@ -878,6 +878,59 @@ _SNOW_COVERABLE = {
     "minecraft:cobblestone", "minecraft:short_grass", "minecraft:fern",
 }
 
+# 陆地结构模板用到的材质（135 项，由 structure_render 汇总实测得到）。
+# 必须预先纳入 id 空间，否则结构方块无法参与「每列最高」竞争。
+_STRUCTURE_MATERIALS = [
+    "minecraft:barrel", "minecraft:basalt", "minecraft:blackstone",
+    "minecraft:blackstone_stairs", "minecraft:blue_terracotta",
+    "minecraft:brick_stairs", "minecraft:bricks",
+    "minecraft:carved_pumpkin", "minecraft:chest", "minecraft:candle",
+    "minecraft:chiseled_deepslate", "minecraft:chiseled_polished_blackstone",
+    "minecraft:chiseled_stone_bricks", "minecraft:chiseled_tuff",
+    "minecraft:chiseled_tuff_bricks", "minecraft:cobbled_deepslate",
+    "minecraft:cobweb", "minecraft:cracked_deepslate_bricks",
+    "minecraft:cracked_deepslate_tiles",
+    "minecraft:cracked_polished_blackstone_bricks",
+    "minecraft:cracked_stone_bricks", "minecraft:crafting_table",
+    "minecraft:cyan_terracotta", "minecraft:dark_oak_fence",
+    "minecraft:dark_oak_log", "minecraft:dark_oak_planks",
+    "minecraft:dark_oak_slab", "minecraft:dark_oak_stairs",
+    "minecraft:deepslate", "minecraft:deepslate_brick_slab",
+    "minecraft:deepslate_brick_stairs", "minecraft:deepslate_brick_wall",
+    "minecraft:deepslate_bricks", "minecraft:deepslate_tile_stairs",
+    "minecraft:deepslate_tile_wall", "minecraft:deepslate_tiles",
+    "minecraft:dispenser", "minecraft:furnace", "minecraft:gilded_blackstone",
+    "minecraft:glass", "minecraft:gold_block", "minecraft:gray_carpet",
+    "minecraft:gray_wool", "minecraft:hay_block", "minecraft:hopper",
+    "minecraft:infested_stone_bricks", "minecraft:iron_bars",
+    "minecraft:iron_chain", "minecraft:ladder", "minecraft:lectern",
+    "minecraft:light_blue_carpet", "minecraft:light_blue_wool",
+    "minecraft:light_gray_carpet", "minecraft:light_gray_glazed_terracotta",
+    "minecraft:light_gray_terracotta", "minecraft:magma_block",
+    "minecraft:mossy_stone_bricks", "minecraft:mud_brick_slab",
+    "minecraft:mud_brick_stairs", "minecraft:mud_bricks",
+    "minecraft:netherrack", "minecraft:oak_button", "minecraft:oak_trapdoor",
+    "minecraft:obsidian", "minecraft:packed_mud", "minecraft:polished_andesite",
+    "minecraft:polished_blackstone_brick_stairs",
+    "minecraft:polished_blackstone_bricks", "minecraft:polished_deepslate",
+    "minecraft:polished_deepslate_stairs", "minecraft:polished_deepslate_wall",
+    "minecraft:polished_tuff", "minecraft:pumpkin", "minecraft:red_bed",
+    "minecraft:red_carpet", "minecraft:red_terracotta",
+    "minecraft:redstone_block", "minecraft:redstone_lamp",
+    "minecraft:redstone_torch", "minecraft:reinforced_deepslate",
+    "minecraft:sculk_sensor", "minecraft:soul_lantern", "minecraft:soul_sand",
+    "minecraft:spruce_fence", "minecraft:spruce_planks", "minecraft:spruce_slab",
+    "minecraft:spruce_stairs", "minecraft:stone_brick_slab",
+    "minecraft:stone_brick_stairs", "minecraft:stone_bricks",
+    "minecraft:tuff_bricks", "minecraft:wall_torch",
+    "minecraft:waxed_copper_block", "minecraft:waxed_cut_copper",
+    "minecraft:waxed_oxidized_cut_copper",
+    "minecraft:waxed_oxidized_cut_copper_stairs",
+    "minecraft:white_carpet", "minecraft:white_terracotta",
+    "minecraft:white_wool", "minecraft:yellow_glazed_terracotta",
+    "minecraft:yellow_terracotta",
+]
+
 _LEAF_BID: dict[str, int] = {}
 _CURRENT_NAME2BID: dict[str, int] = {}
 _CURRENT_PACK: dict = {}
@@ -1043,6 +1096,12 @@ _VILLAGE_HOUSE = {
 _VILLAGE_ROAD = (120, 108, 92)
 
 
+# 有真实 NBT 模板、可按方块还原的结构（其余用 footprint 矩形近似）
+_TEMPLATE_STRUCTURES = {
+    "pillager_outpost", "igloo", "shipwreck", "ruined_portal",
+    "ancient_city", "trail_ruins",
+}
+
 # 水上结构（其余按陆地结构处理）
 _WATER_STRUCTURES = {"monument", "ocean_ruin", "shipwreck", "buried_treasure"}
 
@@ -1069,7 +1128,9 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
         from Utils.Public import structure_map as smap
     except Exception:
         return
-    keys = list(_FOOTPRINTS.keys()) + ["village"]
+    # 枚举键必须同时包含 footprint 近似与真实模板结构，
+    # 否则 trail_ruins / ancient_city / bastion 根本不会被枚举到。
+    keys = sorted(set(_FOOTPRINTS) | _TEMPLATE_STRUCTURES | {"village"})
     # 结构会跨越瓦片边界：村庄实测可达 115x80，远超 _FINE_TILE(64)。
     # 若只在本瓦片矩形内枚举，则「锚点在别的瓦片、但主体伸进本瓦片」的
     # 结构完全不会画出来 -> 村庄被截断。故枚举范围外扩 _STRUCT_PAD。
@@ -1094,9 +1155,103 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
             _stamp_village(rgb, heights, blocks, ax, az, h, w, seed,
                           int(st.get("x", 0)), int(st.get("z", 0)),
                           x0=x0, z0=z0)
-        elif key in _FOOTPRINTS:
+            continue
+        # 其余陆地结构：有真实模板的按模板还原，失败的才回退矩形近似
+        sx = int(st.get("x", 0))
+        sz = int(st.get("z", 0))
+        if key in _TEMPLATE_STRUCTURES:
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                _by = 64
+                _ctx = (pack or {}).get("ctx")
+                if _ctx is not None:
+                    _by = int(_native.fill_top_grid(
+                        _ctx, sx, sz, 1, 1, -64, 320, 1)[0, 0])
+                _by = max(_by, _SEA + 1)
+                wb = _srender.structure_blocks(key, seed, sx, sz, base_y=_by)
+            except Exception:
+                wb = []
+            if wb and _stamp_real_blocks(rgb, heights, blocks, wb,
+                                         x0, z0, h, w, pack):
+                continue
+        if key in _FOOTPRINTS:
             wl, ll, fill, border = _FOOTPRINTS[key]
             _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
+
+
+
+def _stamp_real_blocks(rgb, heights, blocks, world_blocks, gx0, gz0, h, w,
+                       pack, beard=True):
+    """把结构的实体方块写入图：真俯视 + beard 地形适配。
+
+    与 _stamp_village 共用语义：
+      - 逐列取结构内最高实体方块
+      - 屋顶优先（_ROOF_BLOCKS 不被后放模板的地面盖掉）
+      - 结构一律以自身 y 覆盖 heights（对应 terrain_adaptation）
+    返回 True 表示写入了至少一个方块。
+    """
+    try:
+        from Utils.MapPreviewer import jm_colors as _jm
+        from Utils.MapPreviewer import village_jigsaw as _vj
+    except Exception:
+        return False
+    if not world_blocks:
+        return False
+    vgrid = np.empty((h, w), dtype=object)
+    vgrid[:] = None
+    vtop = np.full((h, w), -9999, np.int32)
+    skip = ("air", "jigsaw", "structure_void", "cave_air", "void_air", "")
+    for (bx, by, bz, nm) in world_blocks:
+        px, pz = bx - gx0, bz - gz0
+        if not (0 <= px < w and 0 <= pz < h):
+            continue
+        if nm.split(":")[-1] in skip:
+            continue
+        if by > vtop[pz, px]:
+            vtop[pz, px] = by
+            vgrid[pz, px] = nm
+    names = {nm for row in vgrid for nm in row if nm}
+    if not names:
+        return False
+    pal = _jm.build_block_palette(sorted(names))
+    # 屋顶优先
+    roof_y = np.full((h, w), -9999, np.int32)
+    roof_nm = np.empty((h, w), dtype=object)
+    roof_nm[:] = None
+    for (bx, by, bz, nm) in world_blocks:
+        px, pz = bx - gx0, bz - gz0
+        if not (0 <= px < w and 0 <= pz < h):
+            continue
+        sh = nm.split(":")[-1]
+        if sh in skip:
+            continue
+        if _vj._ROOF_BLOCKS.__contains__(sh) and by > roof_y[pz, px]:
+            roof_y[pz, px] = by
+            roof_nm[pz, px] = nm
+    # 屋顶优先只在屋顶确实处于该列最高处（或与最高处齐平）时生效。
+    # 无条件覆盖会出错：雪屋的 stone_bricks 属屋顶材质，但它上方的
+    # snow_block 圆顶（94 格）会被顶掉，导致雪屋看起来没有雪。
+    has_roof = (roof_nm != None) & (roof_y >= vtop)
+    vgrid[has_roof] = roof_nm[has_roof]
+    vtop[has_roof] = np.maximum(vtop[has_roof], roof_y[has_roof])
+
+    n2b = (pack or {}).get("name2bid") or {}
+    for r in range(h):
+        for c in range(w):
+            nm = vgrid[r, c]
+            if not nm:
+                continue
+            col = pal.get(nm)
+            if col is not None:
+                rgb[r, c] = col
+            bid = n2b.get(nm)
+            if bid is not None:
+                if beard or int(vtop[r, c]) > heights[r, c]:
+                    heights[r, c] = int(vtop[r, c])
+                    blocks[r, c] = bid
+            elif heights[r, c] < _SEA:
+                heights[r, c] = _SEA
+    return True
 
 
 def _stamp_village(rgb, heights, blocks, ax, az, h, w, seed, wx, wz,

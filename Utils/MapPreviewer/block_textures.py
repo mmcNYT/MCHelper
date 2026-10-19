@@ -52,6 +52,71 @@ _TEX_ALIAS = {
     "minecraft:mangrove_leaves": "mangrove_leaves",
     "minecraft:cherry_leaves": "cherry_leaves",
     "minecraft:azalea_leaves": "azalea_leaves",
+    # 结构材质：MC 无同名贴图，映射到视觉等价基材
+    "minecraft:brick_stairs": "bricks",
+    "minecraft:stone_brick_stairs": "stone_bricks",
+    "minecraft:stone_brick_slab": "stone_bricks",
+    "minecraft:deepslate_brick_stairs": "deepslate_bricks",
+    "minecraft:deepslate_brick_slab": "deepslate_bricks",
+    "minecraft:deepslate_brick_wall": "deepslate_bricks",
+    "minecraft:deepslate_tile_stairs": "deepslate_tiles",
+    "minecraft:deepslate_tile_wall": "deepslate_tiles",
+    "minecraft:mud_brick_stairs": "mud_bricks",
+    "minecraft:mud_brick_slab": "mud_bricks",
+    "minecraft:polished_blackstone_brick_stairs": "polished_blackstone_bricks",
+    "minecraft:dark_oak_fence": "dark_oak_planks",
+    "minecraft:spruce_fence": "spruce_planks",
+    "minecraft:oak_fence": "oak_planks",
+    "minecraft:white_carpet": "white_wool",
+    "minecraft:gray_carpet": "gray_wool",
+    "minecraft:red_carpet": "red_wool",
+    "minecraft:light_blue_carpet": "light_blue_wool",
+    "minecraft:light_gray_carpet": "light_gray_wool",
+    "minecraft:red_bed": "red_wool",
+    "minecraft:chest": "oak_planks",
+    "minecraft:barrel": "barrel_side",
+    "minecraft:dispenser": "dispenser_front",
+    "minecraft:furnace": "furnace_front",
+    "minecraft:magma_block": "magma",
+    "minecraft:infested_stone_bricks": "stone_bricks",
+    "minecraft:crafting_table": "crafting_table_top",
+    "minecraft:carved_pumpkin": "carved_pumpkin_front",
+    "minecraft:pumpkin": "pumpkin_side",
+    "minecraft:hay_block": "hay_block_side",
+    "minecraft:iron_bars": "iron_bars",
+    "minecraft:ladder": "ladder",
+    "minecraft:lectern": "lectern_front",
+    "minecraft:hopper": "hopper_top",
+    "minecraft:candle": "candle",
+    "minecraft:waxed_copper_block": "copper_block",
+    "minecraft:waxed_cut_copper": "cut_copper",
+    "minecraft:waxed_oxidized_cut_copper": "oxidized_cut_copper",
+    "minecraft:waxed_oxidized_cut_copper_stairs": "oxidized_cut_copper",
+    "minecraft:gold_block": "gold_block",
+    "minecraft:redstone_block": "redstone_block",
+    "minecraft:redstone_lamp": "redstone_lamp",
+    "minecraft:redstone_torch": "redstone_torch_on",
+    "minecraft:soul_lantern": "soul_lantern",
+    "minecraft:soul_sand": "soul_sand",
+    "minecraft:soul_fire": "soul_fire_0",
+    "minecraft:obsidian": "obsidian",
+    "minecraft:cobweb": "cobweb",
+    "minecraft:reinforced_deepslate": "reinforced_deepslate_side",
+    "minecraft:sculk_sensor": "sculk_sensor_top",
+    "minecraft:target": "target_top",
+    "minecraft:comparator": "comparator",
+    "minecraft:repeater": "repeater",
+    "minecraft:brewing_stand": "brewing_stand",
+    "minecraft:water_cauldron": "cauldron_side",
+    "minecraft:sticky_piston": "piston_top",
+    "minecraft:piston_head": "piston_top",
+    "minecraft:oak_wall_sign": "oak_planks",
+    "minecraft:oak_button": "oak_planks",
+    "minecraft:redstone_wire": "redstone_dust",
+    "minecraft:redstone_wall_torch": "redstone_torch_on",
+    "minecraft:lever": "lever",
+    "minecraft:structure_block": "structure_block",
+    "minecraft:potted_cactus": "dirt",
     # 楼梯/台阶/栅栏/作物：贴图名与方块名不同（带 _top / 复数等）
     "minecraft:oak_stairs": "oak_planks",
     "minecraft:spruce_stairs": "spruce_planks",
@@ -134,12 +199,36 @@ def build_atlas(block_names: list[str], version: str = "26.2") -> dict:
     for nm in block_names:
         short = nm.split(":")[-1]
         tex = _TEX_ALIAS.get(nm, short)
+        # 26.2 铜系贴图不再带 waxed_ 前缀
+        if tex.startswith("waxed_"):
+            tex = tex[len("waxed_"):]
         rgb = _load_png(z, "assets/minecraft/textures/block/%s.png" % tex)
         if rgb is None:
             # top 变体 / 兼容其它命名
             for alt in (short + "_top", short + "_still", short):
                 rgb = _load_png(z, "assets/minecraft/textures/block/%s.png" % alt)
                 if rgb is not None:
+                    break
+        if rgb is None:
+            # 楼梯/台阶/墙/栅栏等**没有独立贴图**，回退到基材：
+            # dark_oak_stairs -> dark_oak_planks -> dark_oak
+            for suf in ("_stairs", "_slab", "_wall", "_fence_gate",
+                        "_trapdoor", "_button", "_pressure_plate",
+                        "_door", "_sign", "_wall_sign", "_carpet",
+                        "_glazed_terracotta", "_bulb", "_grate",
+                        "_chain", "_lamp", "_torch", "_bed"):
+                if short.endswith(suf):
+                    base = short[:-len(suf)]
+                    for alt in (base + "_planks", base + "s", base + "_top",
+                                base + "_side", base,
+                                base.replace("cracked_", "") + "_bricks",
+                                base.replace("chiseled_", "") + "_bricks",
+                                base.replace("polished_", "") + "_bricks"):
+                        rgb = _load_png(
+                            z,
+                            "assets/minecraft/textures/block/%s.png" % alt)
+                        if rgb is not None:
+                            break
                     break
         if rgb is None:
             continue
