@@ -19,6 +19,15 @@
 文本组件：ComponentArgument 直接用 ComponentSerialization.CODEC
 （either(STRING, list, compound)），故纯文本可写 SNBT 字符串
 `"文字"`，带样式写 `{text:"文字",color:"gold"}`。
+
+**1.21（data version < 4307）例外（RCON 实测，probe_v121*.txt）：**
+  - custom_name / item_name / lore 的组件值走 **stringified**
+    （组件值 = JSON 字符串字面量，内容 = 严格 JSON 组件），
+    对象形报 Malformed 'Not a string'（snbt.text_component 分支）；
+  - attribute_modifiers 的 type 字段需类别前缀
+    （generic./player./zombie.，commands2.attr_id_121）；
+  - enchantments 等包装组件由 ench_wrapped() 处理（实测裸映射
+    亦可通过，但包装形更符合 1.21 规范，保留分支）。
 """
 from __future__ import annotations
 
@@ -155,10 +164,11 @@ def serialize_component(name: str, value, version_key: str = "1.21.11",
 
     if name in ("custom_name", "item_name"):
         # str -> 纯文本组件；dict -> 带样式组件
-        return f"{cid}={snbt.component_value(value)}"
+        # 1.21 为 stringified JSON（见 snbt.text_component）
+        return f"{cid}={snbt.component_value(value, version_key)}"
 
     if name == "lore":
-        return f"{cid}={snbt.text_component_lines(list(value))}"
+        return f"{cid}={snbt.text_component_lines(list(value), version_key)}"
 
     if name == "unbreakable":
         # 官方组件值是**空复合** {}（不是 bool）
@@ -196,14 +206,24 @@ def serialize_component(name: str, value, version_key: str = "1.21.11",
         #   amount: 数值
         #   operation: add_value / add_multiplied_base / add_multiplied_total
         #   slot  : any/mainhand/...（可选，默认 any）
+        if version_key == "1.21":
+            from Utils.CommandGenerator import commands2 as _K2
         mods = []
         for m in value:
             pairs = []
             if m.get("id"):
                 pairs.append(("id", snbt.snbt_string(m["id"])))
             if m.get("type"):
-                pairs.append(("type", snbt.snbt_string(
-                    snbt.res_id(m["type"], ns_prefix))))
+                tname = snbt.res_id(m["type"], ns_prefix)
+                if version_key == "1.21":
+                    # 1.21 组件内 type 同样需类别前缀（实测裸 id 报
+                    # Unknown registry key）；不存在的属性丢弃该条目
+                    t121 = _K2.attr_id_121(tname)
+                    if t121 is None:
+                        continue
+                    tname = t121 if ns_prefix \
+                        else t121.removeprefix("minecraft:")
+                pairs.append(("type", snbt.snbt_string(tname)))
             if m.get("amount") is not None:
                 pairs.append(("amount", snbt.snbt_double(m["amount"])))
             if m.get("operation"):

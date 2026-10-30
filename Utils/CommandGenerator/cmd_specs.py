@@ -92,9 +92,9 @@ SPECS = {
                        show_when=("kind", ["entity"])),
                     _f("slot", "槽位", "int", minimum=0, maximum=105,
                        default=0,
-                       hint="container.0 起的编号；0-53 常用"),
-                    _f("sub", "子分支", "enum",
-                       choices=["with", "from"], default="with"),
+                       hint="填编号即可（自动补 container. 前缀）；0-53 常用"),
+                     _f("sub", "子分支", "enum",
+                        choices=["with", "from"], default="with"),
                     _f("item", "新物品", "block",
                        optional=True, default="stone",
                        presets=COMMON_BLOCKS,
@@ -116,7 +116,7 @@ SPECS = {
                        show_when=("sub", ["from"])),
                     _f("modifier", "战利品修饰符", "text",
                        optional=True, default="",
-                       hint="数据包 modifier id，留空不填"),
+                       hint="数据包 modifier id 或内联 SNBT 函数；留空 = 内联示例（26.2 必填）"),
                 ],
             },
             "modify": {
@@ -131,8 +131,9 @@ SPECS = {
                        show_when=("kind", ["entity"])),
                     _f("slot", "槽位", "int", minimum=0, maximum=105,
                        default=0),
-                    _f("modifier", "战利品修饰符 id", "text",
-                       default=""),
+                    _f("modifier", "战利品修饰符", "text",
+                       default="",
+                       hint="id 或内联 SNBT 函数；留空 = 内联示例（26.2 必填）"),
                 ],
             },
         },
@@ -267,6 +268,11 @@ SPECS = {
             _f("sound", "音效", "resource", source="sound",
                default="entity.player.levelup",
                hint="1637 个官方音效，可搜索"),
+            _f("source", "音源", "enum",
+               choices=["master", "music", "record", "weather", "block",
+                        "hostile", "neutral", "player", "ambient", "voice"],
+               default="master",
+               hint="音源分类（26.2 必填，决定谁听得到）"),
             _f("targets", "目标", "targets", default="@p"),
             _f("pos", "位置", "pos", optional=True, default="~ ~ ~"),
             _f("volume", "音量", "float", optional=True, minimum=0.0,
@@ -476,11 +482,12 @@ def _merge_extra():
     from Utils.CommandGenerator import resource_lists as _RL
     for cmd, spec in S3.SPECS3.items():
         if cmd == "gamerule":
-            # 动态枚举：59 条规则，选中后值类型随规则变化
+            # 动态枚举：59 条规则名（labels 用官方英文 id，中文名
+            # 缺失时回退 id）；值类型不随规则联动（需用户自行匹配
+            # bool/int，kinds 映射自始无 UI 引用，已删）
             rule_field = spec["fields"][0]
             rule_field["choices"] = [r[0] for r in _RL.GAMERULES]
             rule_field["labels"] = {r[0]: r[2] for r in _RL.GAMERULES}
-            rule_field["kinds"] = {r[0]: r[1] for r in _RL.GAMERULES}
         SPECS[cmd] = spec
 
     # advancement 的 _mode_fields 追加到 grant/revoke 两分支

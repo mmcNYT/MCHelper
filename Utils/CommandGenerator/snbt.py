@@ -157,12 +157,21 @@ def snbt_any(v) -> str:
 # 文本组件（JSON 文本组件的 SNBT 表示）
 # ---------------------------------------------------------------------------
 
+import json
+
+
+def _json_dump(obj) -> str:
+    """严格 JSON 序列化（键带引号、无空格、非 ASCII 不转义）。"""
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
 def text_component(text: str = "", color: str | None = None,
                    bold: bool = False, italic: bool = False,
                    underlined: bool = False, strikethrough: bool = False,
                    obfuscated: bool = False,
                    click: tuple | None = None,
-                   hover: tuple | None = None) -> str:
+                   hover: tuple | None = None,
+                   version_key: str = "1.21.11") -> str:
     """文本 -> 组件 SNBT（供 custom_name / item_name / lore 用）。
 
     无任何样式时输出**裸 SNBT 字符串** `"文字"`：这正是官方
@@ -176,7 +185,38 @@ def text_component(text: str = "", color: str | None = None,
     会把引号一起显示出来。
 
     click/hover = (action, value)，如 ("run_command", "say hi")。
+
+    **1.21（data version < 4307）**：custom_name / item_name / lore 等
+    组件值的文本组件走 **stringified** 编码（1.21 服务器 RCON 实测：
+    对象形报 Malformed 'Not a string'，probe_v121/b_out.txt）——
+    组件值必须是 JSON 字符串字面量，其内容才是组件的严格 JSON：
+        纯文本：  "\"测试甲\""
+        带样式：  "{\"text\":\"中文甲\"}"
+    内容必须严格 JSON（键带引号、布尔 true/false、无 SNBT 后缀），
+    否则 Gson 报 MalformedJsonException（如 lore=["L2 raw"]）。
     """
+    if version_key == "1.21":
+        obj = {"text": text}
+        if color:
+            obj["color"] = color
+        for name, on in (("bold", bold), ("italic", italic),
+                         ("underlined", underlined),
+                         ("strikethrough", strikethrough),
+                         ("obfuscated", obfuscated)):
+            if on:
+                obj[name] = True
+        if click:
+            obj["clickEvent"] = {"action": click[0], "value": click[1]}
+        if hover:
+            obj["hoverEvent"] = {"action": hover[0],
+                                 "contents": hover[1]}
+        if list(obj) == ["text"]:
+            # 纯文本：内容就是 JSON 字符串
+            inner = _json_dump(text)
+        else:
+            inner = _json_dump(obj)
+        # 外层再套一层 JSON 字符串字面量（stringified）
+        return json.dumps(inner, ensure_ascii=False)
     styles = []
     if color:
         styles.append(("color", snbt_string(color)))
@@ -202,7 +242,7 @@ def text_component(text: str = "", color: str | None = None,
     return snbt_compound(pairs)
 
 
-def component_value(v) -> str:
+def component_value(v, version_key: str = "1.21.11") -> str:
     """组件值分派：str = 纯文本 / dict = 结构化样式 / 其他原样。
 
     UI 层两种传法：
@@ -210,18 +250,20 @@ def component_value(v) -> str:
         {"text": "宝刀", "color": "gold"}            -> 带样式
     """
     if isinstance(v, str):
-        return text_component(v)
+        return text_component(v, version_key=version_key)
     if isinstance(v, dict):
-        return text_component(**v)
+        return text_component(**v, version_key=version_key)
     return str(v)
 
 
-def text_component_lines(lines: list) -> str:
+def text_component_lines(lines: list, version_key: str = "1.21.11") -> str:
     """多行文本（lore）-> SNBT 列表 `["行1","行2"]`。
 
     每行可为 str（纯文本）、dict（结构化样式）或已序列化的组件 SNBT。
+    1.21 走 stringified（见 text_component 说明）。
     """
-    return snbt_list([component_value(ln) for ln in lines])
+    return snbt_list([component_value(ln, version_key)
+                      for ln in lines])
 
 
 # ---------------------------------------------------------------------------

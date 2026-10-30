@@ -5550,8 +5550,9 @@ RNG 与结构信息表：
 - **gamerule**：59 条规则由 `GameRules.java` 的
   `registerBoolean/registerInteger("name", ...)` 提取
   （**26.2 起规则名改为 snake_case**，如 `keep_inventory`，
-  与旧版的 camelCase `keepInventory` 不同）；类型随规则自动变化
-  （bool → true/false 下拉，int → 数字框）。中文名来自
+  与旧版的 camelCase `keepInventory` 不同）。值类型**不随规则
+  联动**（早先 spec 里宣称的自动变化未实现，kinds 映射已删），
+  值为自由文本，须自行匹配 bool/int。中文名来自
   `gamerule.*` lang 键（14 条有翻译，其余显示 id）。
 - **teleport 别名**：树中标 `teleport`，输出用 `/tp`（官方别名，
   二者等价）。
@@ -5597,7 +5598,18 @@ specialValueText 处理，可选浮点恒返回 0.0，导致
 | `LOOT_TABLE_IDS` | 119 | `BuiltInLootTables.java` | — |
 
 加上既有的物品/实体/效果/音效/药水/纹饰/旗帜/唱片/乐器等，
-**下拉数据源共 15 类、约 3300 项，全部可搜索**。
+以及 P012 轮新增的进度/对话框/维度（`gen_adv_dialog.py`），
+**下拉数据源共 18 类，全部可搜索**。
+
+### P012 轮新增数据源（gen_adv_dialog.py 追加到 resource_lists.py）
+
+| 清单 | 数量 | 来源 | 中文名 |
+|---|---|---|---|
+| `ADVANCEMENT_*` | 125 | 1.21.11 jar `data/minecraft/advancement/`（仅 5 大主线目录，**排除 recipes/* 约 1450 条**配方进度，需要时可手输） | `advancements.<cat>.<id>.title`（assetIndex 29 优先、32 补充；3 条 jar 文件名与 lang 键不同名，勘误表见生成脚本；`bred_all_animals` lang 无键，用通行译名兑底） |
+| `DIALOG_IDS` | 3 | jar `data/minecraft/dialog/`（custom_options/quick_actions/server_links） | lang 无键，显示名即 id |
+| `DIMENSION_*` | 3 | 固定三维度 | lang 无 `dimension.*` 键，用官方通用译名（主世界/下界/末地） |
+
+生成脚本幂等（标记行截断重写），生成脚本：`.temp/gen_adv_dialog.py`。
 
 ### 字段类型改造
 
@@ -5808,6 +5820,258 @@ specialValueText 处理，可选浮点恒返回 0.0，导致
 
 **顺序要求**：必须**先建页再取索引** —— 静态登记值（3）与实际索引
 在首次进入时不符，先取索引会切到错误页（实测切到了 give 页）。
+
+## 12.8c P012 修复轮（空值非法指令 / 必填校验 / 工程性）
+
+全量回归探针 `.temp/probe_p012.py`（38 断言：链路四环 / 39 条空参
+冒烟 / P0 定向 / required_missing / enum 可编辑 / source 全检）。
+
+### P0：产出非法指令的 8+3 处（均已修）
+
+| 指令 | 修前 | 修后 |
+|---|---|---|
+| `data modify from` | `from from`（op 已含 from 又拼一遍） | 单 `from` |
+| `tp/rotate facing` | `facing eyes @e…`（锚点在前） | `facing entity @e… eyes`（官方顺序） |
+| `tp` | rotation 与 facing 可同时输出 | facing 优先（官方两树互斥） |
+| `advancement only` 空 id | `only minecraft:` | UI 必填拦截；直调退回 `everything` |
+| `dialog show` 空 dialog | `show @s` | 必填拦截；兜底 `minecraft:quick_actions` |
+| `dialog clear` | 硬编码 `@a`（spec 无 targets） | spec 补 targets，读参数 |
+| `debugconfig` | `config <t> [dialog]`（官方无此形态） | 三分支重构：`config <player>` / `unconfig <uuid>` / `dialog <uuid> <dialog>`（后两者 UUID 文本） |
+| `waypoint modify` | `style <id>`（缺 `set`） | `color <named>` / `color hex <#RRGGBB>` / `color reset` / `style set <id>` / `style reset` 五选一（sub enum + labels） |
+| `data modify set` 空 NBT | `set`（悬空） | 必填拦截；兜底 `{}` |
+| `place jigsaw/feature/template` 空 id | `minecraft:` | 必填拦截 + 兜底（jigsaw 用 village/plains/houses，feature 用 forest_rock，template 用 empty） |
+| `title` 空文本 | 尾随空格 | `text_component("")` = `""`（合法空组件） |
+| `item` 空 pos/targets | `block  0` 双空格 | 兜底 `~ ~ ~` / `@s` |
+
+**通用口径**：必填空值在 UI 层由必填校验拦截（见下）；serializer
+兜底仅保直接调 API 不产出非法指令。
+
+### 必填校验（spec 驱动，通用页全量生效）
+
+- `cmd_form.required_missing()`：遍历字段，`optional` 缺省即必填；
+  空值判定与 `params()` 归一口径一致（None/空串）；被 `show_when`
+  隐藏的字段不参与。`tool_CommandGenerator._update_generic_checks`
+  接入，缺失项显示 `✗ 必填项未填：<label>`。
+- **连带修复**：`params()` 的 `resource`/`block_res` 分支在手输清空
+  后 `currentData()` 仍残留旧 id —— 空文本现在归空（必填拦截生效）。
+- spec 侧配套：`advancement`（only/from/through/until 时）与
+  `data modify` 的 `nbt`（set/merge/prepend/append 时）、
+  `source_path`（from 时）改必填 + `show_when` 联动；
+  `rotate`/`teleport` 的 `rotation` 补 `show_when`（与 facing 互斥）。
+
+### P2 工程性
+
+- **`_positional`/`_fmt` 三处重复统一**：抽 `serialize_util.py`
+  （统一为 None+"" 都算未填；旧 commands.py 版只判 None，对现有
+  调用无行为差异），三文件改为 import。
+- **gamerule 死数据删除**：`kinds` 映射 UI 层零引用（"值类型随规则
+  自动变化"从未实现），连同 spec 的 `special="gamerule"` 标记一起删；
+  规则名下拉（choices/labels 动态填充）保留。
+- **enum 可编辑**：`cmd_form` 支持 `editable=True`（开放集合如
+  scoreboard 判据 `custom:*`）。注意 `setCurrentText()` 不改
+  `currentData()`，`params()` 对可编辑枚举走文本匹配逻辑
+  （匹配项取 itemData，否则原样手输值）。
+- **resource_lists.py 残留清理**：空 `GAMERULES` 定义块删除
+  （生成脚本重跑残留）；后续 P013 服务器验证轮用 AST 等价对比
+  脚本删除了 gen_res4 重跑产生的 7 个字节级重复段
+  （ATTRIBUTE_IDS/CN、DAMAGE_TYPE_IDS/CN、PARTICLE_IDS/CN、
+  LOOT_TABLE_IDS，约 200 行；备份 `.temp/resource_lists.py.bak`）。
+  注意 gen_res4 追加段无幂等保护，重跑仍会再重复。
+
+## 12.8d P013 服务器实测验证轮（26.2 真服务器 RCON 金标准）
+
+用 26.2 官方服务端（`.temp/rcon_server_262/`，RCON 25575）把全
+序列化器产出逐条发给真 Brigadier 解析器验证：探针
+`.temp/rcon_probe.py`（A 默认/B 逐分支/C 定向共 163 用例），
+分类器区分 OK / EXEC（环境执行失败，语法已过）/ SYNTAX（真语法
+错误）/ DEV。**终态：163 用例 SYNTAX=0**（OK 64 / EXEC 82 /
+DEV 17）。
+
+### 26.2 语法差异（反编译 + 服务器双确认，均已修）
+
+| 差异点 | 26.2 真实形状 |
+|---|---|
+| dev-only 四指令 | `chase`/`raid`/`spawn_armor_trims`/`debugconfig` 正式服不注册（归 DEV，不修） |
+| `effect infinite` | 无顶层分支：`effect give <t> <e> infinite [amp] [hide]` |
+| `loot` | 目标在前来源在后：`loot give @p loot <表>` |
+| `attribute` | 40 个 id 全部无 `generic.`/`player.` 前缀 |
+| `waypoint color hex` | `HexColorArgument` 只吃 3/6 位裸十六进制，不认 `#` |
+| `bossbar` | `add <id> <名>` 名必填；`get <id> <value\|max\|visible\|players>` 项必填 |
+| `tick` | 无顶层 stop；`step stop`/`sprint stop`；rate/sprint 参数必填 |
+| `random` | `roll\|value <range>`；`reset <seq\|*> [seed] [b] [b]`（seq 在前） |
+| `forceload` | 无顶层 all（是 `remove all`） |
+| `datapack create` | `<id> <描述>` 描述必填（空给 `""`） |
+| `playsound` | `<声音> <来源> <目标>` source 必填 literal（默认 master） |
+| `item` 槽位 | 裸数字非法，需 `container.0` |
+| `data modify` | 无裸 value op：`<op> value <nbt>`；**from 是来源说明符挂在操作下**：`set from <src> <srcPath>`（原把 from 当操作产出非法形状） |
+| `tp facing/rotation` | 子节点只挂 `<targets> <location>` 树下，裸位置形式没有 facing/rotation，自动补 targets |
+| `item modifier` | **必填**且 vanilla 零数据文件（`ResourceOrIdArgument.lootModifier` 只认数据包 id 或**内联 SNBT**），留空兑底 `{"function":"minecraft:enchant_with_levels","levels":1}`（服务器实测解析通过） |
+
+### 26.2 两个坑（探针工程必知）
+
+1. **datapack create 污染注册表**：create 写入世界的空包（哪怕
+   默认禁用）会让 loot_table 注册表查询全部报 Can't find element
+   （dialog 等不受影响），且残留会导致**下次启动直接失败**
+   （`Registry must be non-empty`）。26.2 无 `datapack remove`
+   分支，RCON 无法清理——探针必须把 datapack 用例排最后跑，
+   结束后删 `world/datapacks/*` 再复验（已验证干净世界重启正常）。
+   排查期间曾误判 loot 表清单过期，实际 `chests/simple_dungeon`
+   等旧 id 全部有效，`LOOT_TABLE_IDS` 无需改。
+2. **26.2 server.jar 是 bundler 结构**：外层只有 165 条目，真身在
+   `META-INF/versions/26.2/server-26.2.jar`，loot_table 等 vanilla
+   数据要从嵌套 jar 提取（1355 个表）。
+
+### 验证链
+
+`.temp/rcon_probe.py`（四轮：149→163 用例，SYNTAX 50→9→6→**0**）
+→ 本地回归 `probe_p012.py` 38/38（含 tp facing/data from 新断言）。
+探针客户端为纯 Python Source RCON 实现，测试黑名单 stop/ban 等
+生命周期指令，chase/perf/tick/datapack 排最后。
+
+### 12.8d+ 长命令专项验证轮（大 NBT / 数据组件，>1000 字符）
+
+用户要求用长度超过 1000 的命令专项验证大 NBT / 数据组件指令。
+探针 `.temp/rcon_probe_long.py`（v5），双通道设计，输出
+`rcon_probe_long_out.txt`：
+
+- **A 组（RCON 直发，12 用例）**：>1000 字符且 UTF-8 ≤1446 字节，
+  终态 **12/12 过**（唯一 SYNTAX 是 A10 裸中文键对照，预期内）。
+  覆盖 give 属性修饰符 10/附魔+lore15、summon 500 字符 CustomName
+  +30 标签+10 属性（真实召唤）、data merge 25 键、title 嵌套
+  extra20、bossbar/scoreboard 1000 字符名（服务器完整回显）、
+  `execute if items` 多子谓词、datapack create 1000 字符描述、
+  中文引号反斜杠转义。
+- **B 组（mcfunction 通道，8 用例）**：>1446 字节命令写入临时数据
+  包 `mchelper_longtest`，**每条独立函数**（mch_b1~b8，加载期
+  Brigadier 全量解析，语法错只废单个函数），终态 **8/8 过**：
+  give 25 属性修饰符（3026c）、give 中文 lore30（2634B）、summon
+  盔甲架 4 件中文装备 NBT（1467B，实体召唤副作用确认）、summon
+  70 中文标签猪（1553B，kill 计数确认）、data merge 30 中文引号键
+  （1956B）、title 中文嵌套 extra30（2320B）、bossbar 中文（380B，
+  get 确认）、execute if items 中文谓词（773B）。loot 回归 OK。
+
+**关键发现（反编译 + 服务器双确认）：**
+
+1. **vanilla RCON 硬上限 ≈1446 字节（UTF-8）**：
+   `RconClient.java` L47-57 单次 `read(buf, 0, 1460)`，声明包长与
+   实际读取不符直接 return 断连（实测 3040B 断连、1162B 通过）。
+   是服务器通道约束而非产品缺陷；超限命令须走 mcfunction/函数包
+   通道（数据包加载期全量解析，错误在服务器日志
+   `Failed to load function ... Whilst parsing command on line N`）。
+2. **26.2 `function` 命令 RCON 场景响应 `Running function <id>`**
+   （= 执行成功），不是旧版 `Executed N command(s)`。
+3. **SNBT 裸键仅允许 `[A-Za-z0-9._+-]`**：裸中文键名报
+   `Expected literal "`（A10 直发对照实证）；中文键名必须加引号
+   （`{"中文键0": "..."}`）。data get 的 path 同理：引号键节点
+   `"键"` 形式合法；复合过滤器 `{"键"}`（无值）26.2 报
+   `Expected literal :`（必须带值）。
+4. **26.2 组件化后方块实体 NBT 严格化**：`data merge block` 写
+   自定义键（非 codec 已知键）响应 `Modified block data` 但键
+   **即时被剥离**（同会话全量 get 确认，箱体 NBT 只剩
+   components/x/y/z/Items/id；容器内容已迁移
+   `minecraft:container` 组件）。语法有效、写入不保留——产品用
+   户在 26.2+ 写方块自定义标签将无效，属版本行为变化而非 bug。
+5. `datapack create` 产生的包**默认启用**（再次确认）。
+
+**探针演进**：v1 发现 RCON 断连 → v2 实证 1446 上限 + 函数通道
+（合并函数被首个语法错整包拖死）→ v3 修 B03 双大括号构造 bug
+（mcfunction 逐行暴露：一次只报第一个错）→ v4 修 B05 裸中文键
+（改引号键）+ 拆独立函数 + 增 A10/A11 对照 → v5 修 `Running
+function` 判定 + data path 引号键验证（`rcon_verify_path.py`
+两阶段：箱子闭环 + 跨重启持久化，附带发现 0 -60 0 幽灵方块实体：
+setblock 恒失败但 merge 假 Modified，换 8 -60 8 正常）。
+
+**结论：产品序列化器在超长命令上零缺陷**（text_component 无截断、
+give 组件 / summon NBT / data / title / bossbar / scoreboard /
+datapack / execute if items 长参数透传全部通过 26.2 解析），
+**无需产品代码修改**；发现 3-4 属服务器语法约束与版本行为变化，
+建议在产品文档/提示中告知用户。
+
+### 12.8e 双版本适配轮（1.21.11 / 1.21 真服务器 RCON 验证）
+
+用户决策：**三版本并存**（UI 下拉 26.2/1.21.11/1.21 不动，26.2 保持
+已验证状态）；**双服务器全量验证**（下载两版官方服务端，RCON 探针
+至 SYNTAX=0）；**1.21 不支持的指令/规则/属性在生成时输出提示文本**
+（不改指令列表、不隐藏 UI 项）。
+
+**1.21 实测差异全景**（163 探针 + 语义专项探针 probe_v121/b +
+属性/规则批量实测探针，RCON 实测裁决，非文档推断）：
+
+| 维度 | 1.21 行为 | 产品动作 |
+|---|---|---|
+| attribute 属性 id | 必须类别前缀：generic.×23 / player.×7 / zombie.×1（spawn_reinforcements，1.21.2 前旧命名） | `commands2.attr_id_121()` 映射（attribute 指令 + give 组件 attribute_modifiers 的 type 字段共用） |
+| attribute 26.x 独有属性 | camera_distance / tempt_range / waypoint_transmit_range / waypoint_receive_range 不存在 | 生成提示文本 |
+| gamerule 规则名 | 驼峰/旧命名：27 条驼峰同形 + 21 条官方改名（**官方 GameRuleRegistryFix v4658 对照 + 3953 实测**：spawn_mobs→doMobSpawning、respawn_radius→spawnRadius、max_block_modifications→commandModificationBlockLimit 等；其中 elytra_movement_check/raids 为 convertBooleanInverted **反转对**，布尔值取反） | `commands3._RULE_121_RENAME` 映射 + `_RULE_121_INVERT` 值反转 + `_camel_rule()` 兜底 |
+| gamerule 26.x 独有规则 | 10 条无对应（3953 实测：pvp/spawn_monsters/tnt_explodes 为 1.21.2+~1.21.10 新增，locator_bar 1.21.5+，command_blocks_work/spawner_blocks_work 1.21.2+，其余 26.x 新增）；fire_spread_radius_around_player 为官方 int 合成规则（doFireTick×allowFireTicksAwayFromPlayer：-1 全域/0 关/128 默认），降级为 doFireTick 布尔 | 生成提示文本；fire_spread 在 gamerule() 内值转换（0→false，非 0→true；3953 无 allowFireTicksAwayFromPlayer） |
+| custom_name / item_name / lore | 组件值走 **stringified**（值=JSON 字符串字面量，内容=严格 JSON 组件）；对象形报 Malformed 'Not a string' | `snbt.text_component()` version_key 分支：json.dumps 双层序列化 |
+| enchantments 等包装组件 | levels 包装形与裸映射**均通过**（无强制差异） | 保留 ench_wrapped() 包装分支（更符合 1.21 规范） |
+| execute if items 谓词 | 列表形 `~[{...}]` 语义一致、直等形 `*[{...}]` 可用、复合形 `~{...}` 不存在 | 无需改动 |
+| waypoint / dialog / rotate / datapack create | 指令/子命令不存在 | 生成提示文本（datapack 仅 create 分支） |
+
+**产品改动（4 文件，默认 1.21.11 行为零变化）**：
+
+- `commands2.py`：`_ATTR_121_PREFIX` / `_ATTR_121_MISSING` /
+  `attr_id_121()` + attribute() 的 1.21 分支
+- `commands3.py`：`_RULE_121_RENAME` / `_RULE_121_MISSING` /
+  `_camel_rule()` + gamerule/waypoint/dialog/rotate/datapack 的
+  1.21 分支（提示文本以「（」开头，UI 原样展示）
+- `snbt.py`：text_component / component_value / text_component_lines
+  增加 version_key 参数（默认 1.21.11，向后兼容），1.21 输出
+  stringified 严格 JSON
+- `give.py`：custom_name / item_name / lore 透传 version_key；
+  attribute_modifiers 的 type 字段经 attr_id_121 前缀化（不存在
+  属性丢弃该 modifier 条目）
+
+**验证矩阵（三版本服务器 RCON + 本地回归全绿）**：
+
+| 轮次 | 163 探针 | 长命令探针 | 本地 probe_p012 |
+|---|---|---|---|
+| 1.21.11 | SYNTAX=0（OK65/EXEC81/DEV17） | B 组 8/8，A 组仅 A10 预期对照 | 38/38 |
+| 1.21 | 发送 150 条 SYNTAX=0 + 13 条 NOTICE 正确 | B 组 8/8（1.21 形状经 mcfunction 加载期全量解析），A 组 A09 NOTICE + A10 预期对照 | — |
+| 26.2 | SYNTAX=0 | B 组 8/8 + loot 回归 OK | — |
+
+**探针工装变更**（.temp/）：`rcon_probe.py` 与
+`rcon_probe_long.py` 增加 `MCH_PROBE_VER` 环境变量（默认
+1.21.11）驱动产品序列化器版本分支；长命令探针的 srv 目录
+`MCH_SRV_DIR` 须传**绝对路径**（相对名会在 CWD 下 makedirs 出
+垃圾目录）、pack 格式 `MCH_PACK_FORMAT`（26.2=107/1.21.11=88/
+1.21=48）与 `MCH_PACK_META`（1.21 需 single 单值形）；NOTICE
+分类（提示文本非指令不发送）；长命令探针结尾自清理函数包目录
+（26.2/1.21.11 无 datapack remove 指令，实测两种形式均 Incorrect；
+且 world/datapacks 带残留会导致下次启动注册表校验失败——
+cat_variant 等空注册表错误）。
+
+**gamerule 映射官方复核轮（12.8e 补充）**：推断改名的语义对应已用
+26.2 反编译 `net/minecraft/util/datafix/fixes/GameRuleRegistryFix.java`
+（官方数据迁移器，挂载 schema v4658，介于 3953/4671 之间）+ 1.21
+服务器复核实测收口：
+
+- 4 条推断裁决：advance_time/advance_weather/show_advancement_messages
+  官方确认直译；**fire_spread_radius_around_player 否定**——官方为 int
+  合成规则（doFireTick=false→0、true+默认→128、true+全域→-1），
+  3953 无 allowFireTicksAwayFromPlayer，产品降级为 doFireTick 布尔
+  （0→false，非 0→true，查询透传）。
+- MISSING 修正 2 条：respawn_radius→spawnRadius（默认 10）、
+  max_block_modifications→commandModificationBlockLimit（默认 32768）
+  ——官方真名与蛇形名差异大，首枚举候选未覆盖；其余 10 条保持
+  （spawnerBlocksEnabled/enableCommandBlocks 实测 1.21.2+ 才有、
+  3953 无；pvp/spawnMonsters/tntExplodes 实测 3953 无，官方迁移源
+  v4658 存在故加入版本在 3954~4658 间）。
+- 反转对：elytra_movement_check/raids 官方 convertBooleanInverted
+  ——只改名不取反语义相反（raids=true ≡ disableRaids false），
+  gamerule() 已加值取反。
+- 验证：probe_v121_rules2.py 段A 服务器裁决 + 段B 产品用例
+  27/27；163 全量探针复验 150 发送 SYNTAX=0（OK63/EXEC70/DEV17）；
+  本地 probe_p012 38/38（默认 1.21.11 零变化）。
+- 判定教训：1.21 gamerule 值类型错误的响应是 "Invalid boolean..."
+  （非 Incorrect argument），探针 BAD 模式需含 "Invalid "。
+- 提示文本措辞（用户决策「更简洁」）：全部 6 处生成点统一为
+  「（1.21 无 X）」格式（如「（1.21 无 pvp 规则）」「（1.21 无
+  dialog 指令）」「（1.21 无 xxx 属性）」），去掉「未生成/不支持/
+  26.x 新增」修饰；探针 NOTICE 判定按「（」开头不受影响。
+  改后复验：probe_v121_rules2 段B 16/16、163 全量探针 SYNTAX=0、
+  probe_p012 38/38。
+
 
 ## 12.9 声明式规格体系（新增指令的唯一成本）
 新增一条指令只需在 `cmd_specs.SPECS` 写一段规格：

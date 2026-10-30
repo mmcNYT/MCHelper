@@ -956,6 +956,12 @@ class CommandGeneratorWidget(BaseToolWidget):
         if len(text) > MAX_CMD_LEN:
             errors.append(f"✗ 超过指令长度上限 {MAX_CMD_LEN}")
 
+        # 必填项拦截：spec optional 缺省即必填，空值不再放行
+        form = getattr(self, "_form", None)
+        if form is not None and hasattr(form, "required_missing"):
+            for _k, label in form.required_missing():
+                errors.append(f"✗ 必填项未填：{label}")
+
         tgt = params.get("targets")
         if tgt and not str(tgt).startswith("@"):
             warns.append("⚠ 目标不是以 @ 开头的选择器（玩家名也可）")

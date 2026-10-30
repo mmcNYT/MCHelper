@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from Utils.CommandGenerator import struct_list as SL
 from Utils.CommandGenerator import snbt
+from .serialize_util import positional as _positional
 
 
 def _rid(name: str, ns_prefix: bool = True) -> str:
@@ -55,28 +56,6 @@ def enchant(params: dict, version_key: str = "1.21.11") -> str:
 # effect（EffectCommands.java L36-160）
 # ---------------------------------------------------------------------------
 
-def _positional(values: list, defaults: list) -> list:
-    """按位补齐可选参数（Brigadier 参数必须从左到右连续）。
-
-    values 为 UI 收集的可选值（None = 未填），defaults 为各自的
-    默认值。取「最后一个非 None 的下标」，把该下标之前的 None
-    用 defaults 填充，其后全部丢弃。
-
-    例：values=[None, 2, None], defaults=[1, 0, False]
-        -> 最后非 None 下标 1 -> 结果 [1, 2]
-    """
-    last = -1
-    for i, v in enumerate(values):
-        if v is not None:
-            last = i
-    if last < 0:
-        return []
-    out = []
-    for i in range(last + 1):
-        out.append(values[i] if values[i] is not None else defaults[i])
-    return out
-
-
 def effect(params: dict, version_key: str = "1.21.11") -> str:
     """`/effect` 三个分支（EffectCommands.java L36-160）：
 
@@ -86,9 +65,10 @@ def effect(params: dict, version_key: str = "1.21.11") -> str:
     - `give <targets> <effect> [seconds] [amplifier] [hideParticles]`
       （L62-117）—— effect 之后三个参数**逐级可选**（L69 的
         executes 证明 seconds 可省）；seconds 范围 (1,1000000)。
-    - `infinite <targets> <effect> [amplifier] [hideParticles]`
-      （L119-155）—— 注意**没有 seconds**，effect 后直接是
-        amplifier（L131）。
+    - `give <targets> <effect> infinite [amplifier] [hideParticles]`
+      （L115-155）—— 26.2 实测：`effect infinite ...` 不是合法
+        形状，infinite 是 give 下 effect 之后的 literal（服务器报
+        Incorrect argument）。
 
     Brigadier 要求参数从左到右连续，故用 `_positional` 补齐空洞：
     只填 amplifier 时必须补出 seconds（give）或直接放 amplifier
@@ -115,6 +95,9 @@ def effect(params: dict, version_key: str = "1.21.11") -> str:
     hide_v = None if hide is None else str(bool(hide)).lower()
 
     if branch == "infinite":
+        # infinite 是 give 下的 literal，而非顶层子命令（26.2 实测）
+        out = f"/effect give {targets or '@s'} " \
+              f"{_rid(eff or 'speed', ns_prefix)} infinite"
         # [amplifier, hideParticles]
         vals = _positional([params.get("amplifier"), hide_v], [0, "false"])
     else:
@@ -238,7 +221,10 @@ def locate(params: dict, version_key: str = "1.21.11") -> str:
     branch = params.get("branch") or "structure"
     target = (params.get("target") or "").strip()
     if not target:
-        target = "village_plains" if branch == "structure" else "plains"
+        # 兜底按分支取对应类型的合法 id（26.2 实测：poi 用 plains 会
+        # 报 Can't find element —— POI 与群系是两个注册表）
+        target = ("village_plains" if branch == "structure"
+                  else "armorer" if branch == "poi" else "plains")
     # 标签（# 开头）不加命名空间前缀，其余按资源 id 处理
     if target.startswith("#"):
         tgt = target

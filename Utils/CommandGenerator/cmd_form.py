@@ -371,7 +371,13 @@ class CommandForm(QWidget):
             labels = fs.get("labels", {})
             for c in fs.get("choices", []):
                 cb.addItem(labels.get(c, c), c)
-            if dflt is not None:
+            if fs.get("editable"):
+                # 开放集合（如 scoreboard 判据 custom:*）：允许手输
+                cb.setEditable(True)
+                cb.addItem("", None)   # 保留「未选」空位
+                if dflt is not None:
+                    cb.setCurrentText(str(dflt))
+            if dflt is not None and not fs.get("editable"):
                 i = cb.findData(dflt)
                 if i >= 0:
                     cb.setCurrentIndex(i)
@@ -489,6 +495,9 @@ class CommandForm(QWidget):
             "particle": ("PARTICLE_IDS", "PARTICLE_CN"),
             "block": ("BLOCK_IDS", "BLOCK_CN"),
             "loot_table": ("LOOT_TABLE_IDS", None),
+            "advancement": ("ADVANCEMENT_IDS", "ADVANCEMENT_CN"),
+            "dialog": ("DIALOG_IDS", None),
+            "dimension": ("DIMENSION_IDS", "DIMENSION_CN"),
         }
         if source == "structure":
             return [(x, SL.struct_label(x)) for x in SL.STRUCT_IDS]
@@ -552,23 +561,38 @@ class CommandForm(QWidget):
                 cb = entry[1]
                 rid = cb.currentData()
                 txt = cb.currentText().strip()
-                if "（" in txt and txt.endswith("）"):
+                if not txt:
+                    rid = ""          # 手输清空 = 空 id（必填拦截）
+                elif "（" in txt and txt.endswith("）"):
                     rid = txt.split("（")[-1][:-1]
-                elif txt and cb.findText(txt) < 0:
+                elif cb.findText(txt) < 0:
                     rid = txt
                 out[key] = rid
             elif kind == "resource":
                 cb = entry[1]
                 rid = cb.currentData()
                 txt = cb.currentText().strip()
+                if not txt:
+                    rid = ""          # 手输清空 = 空 id（必填拦截）
                 # 用户手输时以文本为准（去掉「中文（id）」外壳）
-                if "（" in txt and txt.endswith("）"):
+                elif "（" in txt and txt.endswith("）"):
                     rid = txt.split("（")[-1][:-1]
-                elif txt and cb.findText(txt) < 0:
+                elif cb.findText(txt) < 0:
                     rid = txt
                 out[key] = rid
             elif kind == "enum":
-                out[key] = entry[1].currentData()
+                cb = entry[1]
+                if cb.isEditable():
+                    # 手输自由值优先：文本不匹配任何项 -> 原样；
+                    # 匹配 -> 该项 data；空 -> 未选
+                    txt = cb.currentText().strip()
+                    if not txt:
+                        out[key] = None
+                    else:
+                        idx = cb.findText(txt)
+                        out[key] = cb.itemData(idx) if idx >= 0 else txt
+                else:
+                    out[key] = cb.currentData()
             elif kind == "int":
                 _k, sp, opt, lo = entry
                 out[key] = None if (opt and sp.value() < lo) \
@@ -583,6 +607,26 @@ class CommandForm(QWidget):
             if k in out and isinstance(out[k], str):
                 if not out[k].strip():
                     out[k] = None if fs.get("optional") else ""
+        return out
+
+    def required_missing(self):
+        """返回 [(key, label), ...]：必填字段当前为空。
+
+        spec 的 optional 缺省即必填；空值判定与 params() 的归一
+        口径一致（None 或空串）。被 show_when 隐藏的字段不参与
+        （params() 同样跳过它们）。
+        """
+        vals = self.params()
+        out = []
+        for fs in self._fields:
+            key = fs["key"]
+            if fs.get("optional"):
+                continue
+            if key in getattr(self, "_hidden", ()):
+                continue
+            v = vals.get(key)
+            if v is None or (isinstance(v, str) and not v.strip()):
+                out.append((key, fs.get("label", key)))
         return out
 
     def reset(self):

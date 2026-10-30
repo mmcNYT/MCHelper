@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """剩余 26 条指令的序列化（纯函数，无 Qt）。
 
-语法均逐行核对 1.21.11 反编译源码（骨架见 .temp/dump26.out 与
-detail26b.out）。按复杂度分三个 mixin 区块：
+语法逐行核对 MC 反编译源码：26.2 全量（.temp/mc262_decompile/，
+骨架见 .temp/dump26.out）+ 1.21.11 零散类（.temp/mc1211_classes/）。
+按复杂度分三个 mixin 区块：
   简单（单分支/少参数）、中等多分支、复合两段式。
+
+必填参数的空值在 UI 层由 required 校验拦截；本层兜底策略仅保
+直接调用 API 时不产出非法指令。
 """
 from __future__ import annotations
 
@@ -14,21 +18,7 @@ def _rid(name, ns_prefix=True):
     return snbt.res_id(name, ns_prefix)
 
 
-def _positional(values, defaults):
-    last = -1
-    for i, v in enumerate(values):
-        if v is not None and v != "":
-            last = i
-    if last < 0:
-        return []
-    return [(values[i] if values[i] not in (None, "")
-             else defaults[i]) for i in range(last + 1)]
-
-
-def _fmt(v):
-    if isinstance(v, bool):
-        return str(v).lower()
-    return str(v)
+from .serialize_util import fmt as _fmt, positional as _positional  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -49,31 +39,131 @@ def chase(p, v="1.21.11"):
 
 
 def debugconfig(p, v="1.21.11"):
-    """`/debugconfig config <player> <dialog>` / unconfig <player|uuid>"""
+    """`/debugconfig config <player>` / unconfig <uuid> /
+    dialog <uuid> <dialog>`（26.2 官方三分支，见
+    DebugConfigCommand.java L29-60）"""
     br = p.get("branch") or "config"
-    tgt = p.get("target") or "@s"
-    if br == "config":
-        dlg = p.get("dialog") or ""
-        return f"/debugconfig config {tgt} {_rid(dlg)}" if dlg else \
-            f"/debugconfig config {tgt}"
-    return f"/debugconfig unconfig {tgt}"
+    # unconfig/dialog 的 target 是 UuidArgument（空时兜底全零 UUID）
+    if br in ("unconfig", "dialog"):
+        uid = (p.get("target") or "").strip() or \
+            "00000000-0000-0000-0000-000000000000"
+        if br == "unconfig":
+            return f"/debugconfig unconfig {uid}"
+        dlg = (p.get("dialog") or "").strip() or "minecraft:quick_actions"
+        return f"/debugconfig dialog {uid} {_rid(dlg)}"
+    # config：官方无 dialog 参数（单玩家由 spec/必填校验保证）
+    tgt = (p.get("target") or "").strip() or "@s"
+    return f"/debugconfig config {tgt}"
 
 
 def dialog(p, v="1.21.11"):
-    """`/dialog show <targets> <dialog>` / clear"""
+    """`/dialog show <targets> <dialog>` / clear <targets>`
+    （DialogCommand.java L20-43，show/clear 的 targets 均必填）
+
+    1.21：指令不存在（26.x 新增），生成提示文本。
+    """
+    if v == "1.21":
+        return "（1.21 无 dialog 指令）"
     br = p.get("branch") or "show"
+    tgt = (p.get("targets") or "").strip() or "@s"
     if br == "clear":
-        return "/dialog clear @a"
-    tgt = p.get("targets") or "@s"
-    dlg = p.get("dialog") or ""
-    return f"/dialog show {tgt} {_rid(dlg)}" if dlg else \
-        f"/dialog show {tgt}"
+        return f"/dialog clear {tgt}"
+    dlg = (p.get("dialog") or "").strip() or "minecraft:quick_actions"
+    return f"/dialog show {tgt} {_rid(dlg)}"
+
+
+# 1.21 gamerule 规则名映射。权威依据：26.2 反编译
+# net/minecraft/util/datafix/fixes/GameRuleRegistryFix.java
+#（挂载 schema v4658，介于 3953/4671 之间）+ 1.21（3953）服务器
+# RCON 实测（probe_v121_rules2_out.txt / probe_v121_camel_out.txt）：
+#   - 官方改名 19 条（1.21 侧目标名已实测存在）；
+#   - elytra_movement_check / raids 为官方 convertBooleanInverted
+#     反转对，生成时布尔值取反（否则语义相反）；
+#   - fire_spread_radius_around_player 官方为 int 合成规则
+#     （doFireTick × allowFireTicksAwayFromPlayer：-1 全域/0 关/
+#     128 玩家半径内），1.21 无 allowFireTicksAwayFromPlayer，
+#     降级为 doFireTick 布尔（0→false，非 0→true）；
+#   - 驼峰同形（keep_inventory→keepInventory 等）由 _camel_rule
+#     兜底；
+#   - 1.21（3953）无对应的 10 条 → 提示文本（其中 pvp/
+#     spawn_monsters/tnt_explodes 为 1.21.2+~1.21.10 间新增、
+#     locator_bar 1.21.5+、command_blocks_work/spawner_blocks_work
+#     1.21.2+，均以 3953 实测为准）。
+_RULE_121_RENAME = {
+    "advance_time": "doDaylightCycle",
+    "advance_weather": "doWeatherCycle",
+    "show_advancement_messages": "announceAdvancements",
+    "spawn_mobs": "doMobSpawning",
+    "spawn_patrols": "doPatrolSpawning",
+    "spawn_phantoms": "doInsomnia",
+    "spawn_wandering_traders": "doTraderSpawning",
+    "spawn_wardens": "doWardenSpawning",
+    "spread_vines": "doVinesSpread",
+    "entity_drops": "doEntityDrops",
+    "block_drops": "doTileDrops",
+    "mob_drops": "doMobLoot",
+    "limited_crafting": "doLimitedCrafting",
+    "immediate_respawn": "doImmediateRespawn",
+    "natural_health_regeneration": "naturalRegeneration",
+    "max_snow_accumulation_height": "snowAccumulationHeight",
+    "max_command_sequence_length": "maxCommandChainLength",
+    "respawn_radius": "spawnRadius",
+    "max_block_modifications": "commandModificationBlockLimit",
+    "elytra_movement_check": "disableElytraMovementCheck",  # 值反转
+    "raids": "disableRaids",  # 值反转
+}
+
+# 官方 convertBooleanInverted 反转对（生成时布尔值取反）
+_RULE_121_INVERT = {"elytra_movement_check", "raids"}
+
+# 1.21 无对应规则（3953 实测不存在，见 _RULE_121_RENAME 注释）
+_RULE_121_MISSING = {
+    "allow_entering_nether_using_portals", "command_blocks_work",
+    "locator_bar", "max_command_forks", "max_minecart_speed",
+    "player_movement_check", "pvp", "spawner_blocks_work",
+    "spawn_monsters", "tnt_explodes",
+}
+
+
+def _camel_rule(name: str) -> str:
+    """snake_case -> camelCase（首词保持小写）。"""
+    parts = name.split("_")
+    return parts[0] + "".join(p[:1].upper() + p[1:] for p in parts[1:])
+
+
+def _to_bool(v):
+    """宽松布尔解析（bool 直通；true/1/yes → True，其余 False）。"""
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "yes")
 
 
 def gamerule(p, v="1.21.11"):
-    """`/gamerule <rule> [value]`（value 类型随规则变化）"""
+    """`/gamerule <rule> [value]`（value 类型随规则变化）
+
+    1.21：规则名为驼峰/旧命名（26.x 为蛇形）。改名与无对应见
+    _RULE_121_RENAME / _RULE_121_MISSING（官方 GameRuleRegistryFix
+    对照 + RCON 实测）；elytra_movement_check/raids 为官方反转对
+    （布尔取反）；fire_spread_radius_around_player 为 int 合成
+    规则，降级为 doFireTick 布尔（0→false，非 0→true）。
+    """
     rule = p.get("rule") or "keep_inventory"
     val = p.get("value")
+    if v == "1.21":
+        base = str(rule).strip().removeprefix("minecraft:")
+        if base in _RULE_121_MISSING:
+            return f"（1.21 无 {base} 规则）"
+        if base == "fire_spread_radius_around_player":
+            rule = "doFireTick"
+            if val is not None and val != "":
+                try:
+                    val = int(val) != 0
+                except (TypeError, ValueError):
+                    val = _to_bool(val)
+        else:
+            rule = _RULE_121_RENAME.get(base) or _camel_rule(base)
+            if base in _RULE_121_INVERT and val is not None and val != "":
+                val = not _to_bool(val)
     out = f"/gamerule {rule}"
     if val is not None and val != "":
         out += f" {_fmt(val)}"
@@ -97,31 +187,35 @@ def raid(p, v="1.21.11"):
 
 
 def random(p, v="1.21.11"):
-    """`/random [range]` / `reset [seed] [...]`"""
+    """`/random (roll|value) <range>` / `reset <sequence|*> [seed] [...]`
+    （26.2 实测：range 前必须有 roll/value literal；reset 后必须有
+    序列或 *，顺序为 sequence → seed → 含世界种子 → 含序列 id）"""
     if p.get("branch") == "reset":
-        out = "/random reset"
+        # sequence 必填，兜底 *（全部序列）
+        seq = (str(p.get("sequence") or "").strip() or "*")
+        out = f"/random reset {seq}"
+        if seq != "*":
+            out = f"/random reset {_rid(seq)}"
         vals = _positional(
             [p.get("seed"), p.get("include_world_seed"),
-             p.get("include_sequence_id"), p.get("sequence")],
-            [0, True, True, ""])
+             p.get("include_sequence_id")],
+            [None, None, None])
         if vals:
-            # reset 的可选参数须连续
+            # seed 之后的布尔须连续可选
             out += f" {int(vals[0])}"
             if len(vals) > 1:
                 out += f" {str(bool(vals[1])).lower()}"
                 if len(vals) > 2:
                     out += f" {str(bool(vals[2])).lower()}"
-                    if len(vals) > 3 and vals[3]:
-                        out += f" {_rid(vals[3])}"
         return out
-    rng = (p.get("range") or "").strip()
-    return f"/random {rng}" if rng else "/random 1..6"
+    rng = (p.get("range") or "").strip() or "1..6"
+    return f"/random roll {rng}"
 
 
 def schedule(p, v="1.21.11"):
     """`/schedule function <f> <time> [append|replace]` / clear <f>"""
     br = p.get("branch") or "function"
-    fn = p.get("function") or ""
+    fn = (p.get("function") or "").strip() or "custom:tick"
     ns_prefix = p.get("ns_prefix", True)
     if br == "clear":
         return f"/schedule clear {_rid(fn, ns_prefix)}".rstrip()
@@ -134,48 +228,81 @@ def schedule(p, v="1.21.11"):
 
 
 def tick(p, v="1.21.11"):
-    """`/tick` 各分支"""
+    """`/tick (query|rate <值>|step [时长]|step stop|sprint <时长>|
+    sprint stop|freeze|unfreeze)`（TickCommand.java L23-56）。
+    26.2 实测：无顶层 stop literal；stop 挂在 step/sprint 之下。
+    rate 值必填（兜底 20），sprint 时长必填（兜底 100）。"""
     br = p.get("branch") or "query"
     if br in ("rate", "step", "sprint"):
         val = p.get("rate") if p.get("rate") is not None else p.get("time")
-        out = f"/tick {br}"
-        if val is not None:
-            out += f" {val:g}" if isinstance(val, float) else f" {val}"
+        if val is None:
+            if br == "rate":
+                return "/tick rate 20"
+            if br == "sprint":
+                return "/tick sprint 100"
+            return "/tick step"          # 裸 step 合法 = 步进 1 刻
+        out = f"/tick {br} {val:g}" if isinstance(val, float) \
+            else f"/tick {br} {val}"
         return out
+    if br == "stop":
+        return "/tick step stop"
+    if br == "sprint_stop":
+        return "/tick sprint stop"
     return f"/tick {br}"
 
 
 def forceload(p, v="1.21.11"):
-    """`/forceload (add|remove|all|query)`（区块列坐标）"""
+    """`/forceload (add|remove) <from> [<to>] | remove all |
+    query [<pos>]`（ForceLoadCommand.java L38-95）。26.2 实测：
+    无顶层 all literal（all 挂在 remove 之下）；add/remove 的
+    from 必填（兜底 0 0，区块坐标）。"""
     br = p.get("branch") or "query"
-    out = f"/forceload {br}"
     frm = (p.get("from") or "").strip()
     to = (p.get("to") or "").strip()
-    if br in ("add", "remove") and frm:
-        out += f" {frm}"
+    if br == "all":
+        return "/forceload remove all"
+    if br in ("add", "remove"):
+        out = f"/forceload {br} {frm or '0 0'}"
         if to:
             out += f" {to}"
-    elif br == "query" and frm:
+        return out
+    out = f"/forceload query"
+    if frm:
         out += f" {frm}"
     return out
 
 
 def waypoint(p, v="1.21.11"):
-    """`/waypoint` 各分支"""
+    """`/waypoint list` / `modify <wp> color <named>|color hex <hex>|
+    color reset|style set <id>|style reset`
+    （WaypointCommand.java L35-90：hex/reset 是 color 下的 literal，
+    style 的 set/reset 同理）
+
+    1.21：指令不存在（1.21.5+ 新增），生成提示文本。
+    """
+    if v == "1.21":
+        return "（1.21 无 waypoint 指令）"
     br = p.get("branch") or "list"
-    out = f"/waypoint {br}"
-    wp = (p.get("waypoint") or "").strip()
-    if br == "modify" and wp:
-        out += f" {wp}"
-        sub = p.get("sub") or "color"
-        out += f" {sub}"
-        if sub == "color":
-            c = p.get("color")
-            out += f" {_fmt(c)}" if c is not None else " reset"
-        elif sub == "style":
-            out += f" {_rid(p.get('style') or 'default')}"
-    elif br in ("list",) and wp:
-        out += f" {wp}"
+    if br != "modify":
+        return f"/waypoint {br}"
+    wp = (p.get("waypoint") or "").strip() or "@e[limit=1]"
+    sub = p.get("sub") or "color"
+    out = f"/waypoint modify {wp}"
+    if sub == "color":
+        c = p.get("color")
+        # 命名色需带 color literal（26.2 实测：裸色值/裸 reset 不合法）
+        out += " color reset" if c in (None, "") else f" color {_fmt(c)}"
+    elif sub == "hex":
+        hx = (str(p.get("hex_color") or "")).strip().lstrip("#") or "FF0000"
+        # HexColorArgument 只吃 3/6 位十六进制裸串（# 非法未引号字符）
+        out += f" color hex {hx}"
+    elif sub == "color_reset":
+        out += " color reset"
+    elif sub == "style_set":
+        sty = (p.get("style") or "").strip() or "minecraft:default"
+        out += f" style set {_rid(sty)}"
+    else:  # style_reset
+        out += " style reset"
     return out
 
 
@@ -208,13 +335,16 @@ def title(p, v="1.21.11"):
         vals = _positional(
             [p.get("fade_in"), p.get("stay"), p.get("fade_out")],
             [10, 70, 20])
+        # times 后三个时长必填，全空时兜底官方默认 (10, 70, 20)
+        if not vals:
+            vals = [10, 70, 20]
         out = f"/title {tgt} times"
         for x in vals:
             out += f" {int(x)}"
         return out
-    txt = p.get("text") or ""
-    body = snbt.text_component(txt) if isinstance(txt, str) and txt \
-        else str(txt)
+    txt = p.get("text")
+    # text_component("") 输出合法空组件 `""`，不再产生尾随空格
+    body = snbt.text_component(str(txt if txt is not None else ""))
     return f"/title {tgt} {br} {body}"
 
 
@@ -236,37 +366,55 @@ def spreadplayers(p, v="1.21.11"):
 
 
 def teleport(p, v="1.21.11"):
-    """`/tp <targets> <location|destination>` [+ rotation/facing]"""
+    """`/tp <targets> <location|destination>` [+ rotation/facing]
+
+    26.2 服务器实测：rotation/facing 子节点只挂在
+    `<targets> <location>` 树下；裸位置形式（不带 targets）没有这
+    两个子节点，因此带 rotation/facing 时必须补 targets。"""
     ns_prefix = p.get("ns_prefix", True)
     tgt = (p.get("targets") or "").strip()
+    mode = p.get("mode") or "location"
+    fmode = p.get("facing_mode")
+    rot = (p.get("rotation") or "").strip()
+    # facing 仅存在于 location 树；destination 模式不接 facing
+    needs_targets = mode == "location" and (bool(fmode) or bool(rot))
     out = "/tp"
     if tgt:
         out += f" {tgt}"
-    mode = p.get("mode") or "location"
+    elif needs_targets:
+        out += " @s"
     if mode == "location":
         out += f" {p.get('location') or '~ ~ ~'}"
-        rot = (p.get("rotation") or "").strip()
-        if rot:
+        if not fmode and rot:
             out += f" {rot}"
+        if fmode == "entity":
+            # 官方顺序：facing entity <实体> [eyes|feet]
+            # （TeleportCommand.java L94-110，实体在前锚点在后）
+            out += (f" facing entity {p.get('facing_entity') or '@e[limit=1]'}"
+                    f" {_fmt(p.get('facing_anchor') or 'eyes')}")
+        elif fmode == "location":
+            out += f" facing {p.get('facing_location') or '~ ~ ~'}"
     else:
         out += f" {_rid(p.get('destination') or '@s', ns_prefix)}"
-    fmode = p.get("facing_mode")
-    if fmode == "entity":
-        out += (f" facing {_fmt(p.get('facing_anchor') or 'eyes')} "
-                f"{p.get('facing_entity') or '@e[limit=1]'}")
-    elif fmode == "location":
-        out += f" facing {p.get('facing_location') or '~ ~ ~'}"
     return out
 
 
 def rotate(p, v="1.21.11"):
-    """`/rotate <target> <rotation>` / `... facing (...)`"""
+    """`/rotate <target> <rotation>` / `... facing <pos>` /
+    `... facing entity <entity> [eyes|feet]`
+
+    1.21：指令不存在（1.21.2 新增），生成提示文本。
+    """
+    if v == "1.21":
+        return "（1.21 无 rotate 指令）"
     tgt = p.get("target") or "@s"
-    if p.get("facing_mode") == "entity":
-        return (f"/rotate {tgt} facing "
-                f"{_fmt(p.get('facing_anchor') or 'eyes')} "
-                f"{p.get('facing_entity') or '@e[limit=1]'}")
-    if p.get("facing_mode") == "location":
+    fmode = p.get("facing_mode")
+    if fmode == "entity":
+        # 官方顺序：实体在前，锚点在后
+        return (f"/rotate {tgt} facing entity "
+                f"{p.get('facing_entity') or '@e[limit=1]'} "
+                f"{_fmt(p.get('facing_anchor') or 'eyes')}")
+    if fmode == "location":
         return (f"/rotate {tgt} facing "
                 f"{p.get('facing_location') or '~ ~ ~'}")
     rot = p.get("rotation") or "0 0"
@@ -278,7 +426,7 @@ def datapack(p, v="1.21.11"):
     br = p.get("branch") or "list"
     out = f"/datapack {br}"
     if br in ("enable", "disable"):
-        name = (p.get("name") or "").strip()
+        name = (p.get("name") or "").strip() or "vanilla"
         out += f" {name}"
         if br == "enable":
             order = p.get("order")
@@ -290,10 +438,13 @@ def datapack(p, v="1.21.11"):
                 if before_after and existing:
                     out += f" {before_after} {existing}"
     elif br == "create":
-        out += f" {p.get('id') or ''}"
+        if v == "1.21":
+            # 1.21 无 create 子命令（26.x 新增），生成提示文本
+            return "（1.21 无 datapack create 子命令）"
+        # 26.2 实测：create <id> <描述>，描述必填（空描述给 ""）
+        out += f" {p.get('id') or 'custom'}"
         desc = p.get("description")
-        if desc:
-            out += f" {snbt.text_component(str(desc))}"
+        out += f" {snbt.text_component(str(desc)) if desc else '\"\"'}"
     elif br == "list":
         f = p.get("filter")
         if f:
@@ -371,11 +522,11 @@ def data(p, v="1.21.11"):
     get    (block <pos>|entity <e>) [path] [scale]
     merge  (block|entity) <目标> <nbt>
     remove (block|entity) <目标> <path>
-    modify (block|entity) <目标> <path> (set|merge|insert N|prepend|
-           append|from (block|entity) <源> [sourcePath]|string ...|
-           value <nbt>)
+    modify (block|entity) <目标> <path> <op> <来源>
+           <op> = set|merge|insert N|prepend|append
+           <来源> = value <nbt> | from (block <pos>|entity <e>) <srcPath>
     完整 modify 分支很深；这里覆盖最常用的 set/value、append 与
-    from，其余由用户改输出。
+    set from，其余由用户改输出。
     """
     ns_prefix = p.get("ns_prefix", True)
     br = p.get("branch") or "get"
@@ -399,28 +550,36 @@ def data(p, v="1.21.11"):
         nbt = (p.get("nbt") or "").strip() or "{}"
         return f"/data merge {_tgt()} {nbt}"
     if br == "remove":
-        path = (p.get("path") or "").strip()
-        return f"/data remove {_tgt()} {path}".rstrip()
+        # remove 的 path 官方必填，空时兜底合法路径
+        path = (p.get("path") or "").strip() or "CustomName"
+        return f"/data remove {_tgt()} {path}"
     # modify
-    path = (p.get("path") or "").strip()
-    op = p.get("modify_op") or "value"
-    out = f"/data modify {_tgt()} {path} {op}"
+    path = (p.get("path") or "").strip() or "CustomName"
+    # 26.2 无裸 value op（原默认 "value" 会产出非法形状），默认 set
+    op = p.get("modify_op") or "set"
+    # 26.2 服务器实测：from 是来源说明符，挂在操作之下；操作位必须是
+    # set/insert/prepend/append/merge（DataCommands.java
+    # decorateModification）。旧实现把 from 当操作产出缺操作的非法
+    # 形状，现固定补 set。
+    out = f"/data modify {_tgt()} {path} {'set' if op == 'from' else op}"
     if op in ("set", "merge", "prepend", "append"):
-        nbt = (p.get("nbt") or "").strip()
-        out += f" value {nbt}" if nbt else ""
-        if op in ("set", "merge", "prepend", "append") and nbt:
-            # set/merge/prepend/append 后直接跟 value <nbt>
-            out = out.replace(f" {op} value", f" {op} value")
-        return out.rstrip()
+        # set/merge/prepend/append 后必须跟 value <nbt>；
+        # 空 NBT 在 UI 层由必填校验拦截，这里兜底 "{}"
+        nbt = (p.get("nbt") or "").strip() or "{}"
+        out += f" value {nbt}"
+        return out
     if op == "from":
         skind = p.get("source_kind") or "entity"
         ssrc = (p.get("source_target") or "@s").strip()
         spath = (p.get("source_path") or "").strip()
         src = (f"block {p.get('source_pos') or '~ ~ ~'}"
                if skind == "block" else f"entity {ssrc}")
+        # 前面已补操作 set，此处显式写出来源说明符 from
         out += f" from {src}"
         if spath:
             out += f" {spath}"
+        else:
+            out += " CustomName"  # 兜底合法路径
         return out
     return out.rstrip()
 
@@ -515,8 +674,16 @@ def bossbar(p, v="1.21.11"):
     if br == "list":
         return "/bossbar list"
     bid = _rid(p.get("id") or "boss1", ns_prefix)
-    if br in ("add", "remove", "get"):
-        return f"/bossbar {br} {bid}"
+    if br == "add":
+        # 26.2 实测：add <id> <显示名>，显示名必填
+        nm = snbt.text_component(str(p.get("name") or "Bossbar"))
+        return f"/bossbar add {bid} {nm}"
+    if br == "get":
+        # 26.2 实测：get <id> <查询项>，查询项必填且仅
+        # value/max/visible/players（color/name/style 只在 set）
+        return f"/bossbar get {bid} {p.get('option') or 'value'}"
+    if br == "remove":
+        return f"/bossbar remove {bid}"
     # set
     sub = p.get("sub") or "name"
     out = f"/bossbar set {bid} {sub}"
@@ -549,7 +716,10 @@ def advancement(p, v="1.21.11"):
     mode = p.get("mode") or "everything"
     out = f"/advancement {br} {tgt} {mode}"
     if mode != "everything":
-        adv = p.get("advancement") or ""
+        adv = (p.get("advancement") or "").strip()
+        if not adv:
+            # 空 id：UI 层必填拦截；直接调用时退回 everything（合法）
+            return f"/advancement {br} {tgt} everything"
         out += f" {_rid(adv, ns_prefix)}"
         crit = (p.get("criterion") or "").strip()
         if crit and mode == "only":
@@ -569,12 +739,14 @@ def place(p, v="1.21.11"):
             out += f" {pos}"
         return out
     if br == "feature":
-        fid = p.get("feature") or ""
+        # feature id 官方必填（空 id UI 层拦截，这里兜底常用地物）
+        fid = (p.get("feature") or "").strip() or "minecraft:forest_rock"
         pos = (p.get("pos") or "").strip()
         return (f"/place feature {_rid(fid, ns_prefix)} " +
                 (pos or "~ ~ ~")).rstrip()
     if br == "template":
-        tid = p.get("template") or ""
+        # template id 官方必填（兜底合法 id，游戏内不存在时报缺失而非语法错）
+        tid = (p.get("template") or "").strip() or "minecraft:empty"
         pos = (p.get("pos") or "").strip()
         rot = p.get("rotation")
         mir = p.get("mirror")
@@ -587,9 +759,9 @@ def place(p, v="1.21.11"):
         for x in vals:
             out += f" {_fmt(x)}"
         return out
-    # jigsaw
-    pool = p.get("pool") or ""
-    tgt = p.get("target") or ""
+    # jigsaw：pool/target 官方必填（空 id 在 UI 层拦截，这里兜底）
+    pool = (p.get("pool") or "").strip() or "minecraft:village/plains/houses"
+    tgt = (p.get("target") or "").strip() or "minecraft:empty"
     out = (f"/place jigsaw {_rid(pool, ns_prefix)} {tgt} "
            f"{int(p.get('max_depth') or 7)}")
     pos = (p.get("position") or "").strip()
