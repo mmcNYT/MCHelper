@@ -3399,6 +3399,41 @@ L201-207 在 swamp y=62 处按 SWAMP 噪声把顶块置换成 WATER）在当前 
 .temp/rp_verify/shore_fix_ocean/frozen/mansion.png。待办：画廊无需为此全量重渲（变化仅
 h==62 一圈岸线）；git 提交未动。
 
+**5 类结构真实顶层渲染收官（2026-10-31~11-01，structure_render.py/block_render.py）**：
+用户要求丛林神庙/沙漠神殿/女巫小屋/海底废墟/海底神殿从 footprint 矩形升级为真实结构顶层
+渲染（水下结构=JM 同款：真实方块参与列顶竞争）；串行适配逐个验证，前四个探针全过+用户已
+确认，monument 2026-11-01 收官。通用验证范式（.temp/{jungle,desert,hut,ruin,monu}_verify.py）：
+枚举锚点→官方反编译逐行直译的 RNG 流独立复刻对拍（final state 全等+kind 序列/房间
+index/bbox/参数全等）→双渲染 diff（monkeypatch 当前锚点回退旧 footprint 基线，并集盒外
+必须 0）→heights 抬升/压低统计→ASCII 顶块地图→材质直方图。monument（最复杂）收官记录：
+①全链复刻 structure_render.ocean_monument_blocks（structure_render.py L935-2211）：OceanMonumentStructure
+L47 nextInt(4) 朝向 → MonumentBuilding.generateRoomGraph L228-341（46 房网格连接+Util.shuffle
+L1107+findSource 关门保连通循环）→ 构造器 fitter L186-207（entry/core→Y/XZ/XY/Z/DX/DY/DYZ/TOP
+顺序+simple 房间 design）→ wingRandom nextInt L218 → postProcess 全序（主水盒
+waterHeight=63+64−39=25 L353、两翼、拱门、入口墙、顶件、三墙、7×7 柱网 fill_down、外圈阶梯
+水盒、子 piece generateWaterBox L1507 clip 参数=chunkBB 故圈外列真实放置不裁剪），坐标变换
+StructurePiece L135-165。返回 (top_blocks, caps)：caps=每水盒列「盒底−1」清海床（min 语义压
+heights，盒底以下地形未动故精确），结构列 beard=False（地形高于结构顶的列保持地形=官方俯视
+语义），模拟抛错才回退 footprint。②本日修复 2 bug：`_monu_wz` SOUTH 分支误写 bb[2]+x →
+Java L161 `case SOUTH -> minZ() + z`（修复前 SOUTH 锚点块被 x/z 挤压只剩 166 块）；
+name2bid 缺 prismarine/prismarine_bricks/dark_prismarine/sea_lantern（native sblob 不生成
+的海洋材质）→ beard=False 下 n2b.get 落空只抬 heights 不写 blocks 通道，4d 按海床材质渲、
+top_block 全丢——按 blue_ice `_EXTRA` 补录先例加入 `_STRUCTURE_MATERIALS`（140→144 项）。
+③验证（monu_verify.py，±2560 共 18 锚点）：RNG 流 18/18 全等 fail=0；块集恒 3230
+（prismarine_bricks×2134+prismarine×1096）、ymax=60、bbox⊆[ax−29,ax+28]；dict 级核查 4 朝向
+gold=8（core L1639 2×2×2 唯一处）/pent/entry/gold_pos 全对；caps=4624（range 38..46）；4 朝向
+双渲染盒外 diff=0、heights 抬升 2757~3230/压低 12~829、ASCII 顶块地图完整（外圈墙/房间网格/
+roof/入口缺口/阶梯区）。④俯视遮挡语义（monu_diag.py 实证）：gold=8/sea_lantern/dark_prismarine
+全部存在于 blocks dict 但被同列更高块压制 → top_blocks 只输出棱晶族=官方俯视真相（探针断言
+用 dict 级而非 top 级）。⑤rgb「水色覆盖」疑点解除（monu_rgb_diag.py 像素级）：4 朝向
+diff=520/520/521/520 恰等于 footprint 面积 20×26 纯数值巧合（组成=footprint 覆盖的 506 结构
+列+14 非结构列全被冲掉，roof 100 列全在 footprint 内）；roof 列 h55-60 浅水混合实测
+(48,87,154)/(53,94,161) 与 JM 公式手算逐通道精确闭合；mid/deep 3130 列纯水 (47,87,167)=JM
+mapBathymetry=false 官方俯视语义（水深≥8 不可见、≤7 海床 15% 权重透出）——深水结构被水盖住
+是官方行为非缺陷，与 ocean_ruin 先例同语义（其 diff 亦仅 14/180）。ruin 回归（扩表后重跑
+ruin_verify.py）diff 14/180/180 与扩表前完全一致。对比图 .temp/rp_verify/zoom5_{hut,ruin,monu}.png
+（左旧右新 NEAREST×8，zoom5_compare.py），用户确认后代码+docs 一并 git 提交。
+
 # 7. 种子逆推核心库（Utils/SeedReverser · 算法）
 
 > 覆盖范围：`Utils/SeedReverser` 包内 6 个算法/数据模块，以及 `_native/` 下 2 个 pybind11 构建脚本。
