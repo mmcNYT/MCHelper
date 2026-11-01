@@ -1210,7 +1210,9 @@ MCHelper/
 | `_on_move` | `_on_move(self, ev) -> bool` | 拖拽中：增量滚动水平/垂直滚动条（Chrome 式跟随）、隐藏端点坐标标签、清零续批轮次、启动两个定时器、重建网格；非拖拽则 `_update_hover(pos)` 悬停查询。 |
 | `_on_release` | `_on_release(self, ev) -> bool` | 结束拖拽（光标还原）；若本次按下未发生拖拽且是左键，则视为点击 → `_click_map(pos)` 复制。 |
 | `_scene_block` | `_scene_block(self, view_pos) -> tuple[int, int] \| None` | 视图坐标 → 世界方块坐标（场景坐标即方块坐标，取整）。 |
-| `_update_hover` | `_update_hover(self, pos) -> None` | 悬停查询：`biomes` 矩阵按噪声格索引（`方块 >> 2`，群系判定层与游戏 F3 一致）取 id，`labelHover` 显示 "X x Z z | 群系中文名 (id n)"；索引落在初始矩阵范围外（无限地图新区域）时改走 `_probe_biome` 单点探测，失败只显示坐标；范围内还调 `_update_marker_tip` 弹标记提示。 |
+| `_hover_fine_txt` | `_hover_fine_txt(self, bx: int, bz: int) -> str \| None` | 精细瓦片命中时的悬停前缀 `"X .. Y .. Z .. | 块中文名"`（内部调 `_fine_block_at`）；未开精细/无该瓦片返回 None。 |
+| `_fine_block_at` | `_fine_block_at(self, bx: int, bz: int) -> tuple \| None` | 精细模式下查该方块的 `(块名, 顶面Y)`：按 `(bx//64, bz//64)` 取 `_fine_blocks` 的 `(top_block, ox, oz, scale, heights)`，坐标减 origin 后按形状比例映射到瓦片内偏移；越界/无数据返回 None。 |
+| `_update_hover` | `_update_hover(self, pos) -> None` | 悬停查询：先 `_hover_fine_txt` 取精细前缀（精细瓦片不依赖初始矩阵，矩阵内外统一查询——2026-10-30 修复：原实现只在矩阵内分支查询，导致离原点较远处悬停缺失方块类型与 Y 坐标）；`biomes` 矩阵按噪声格索引（`方块 >> 2`，群系判定层与游戏 F3 一致）取 id，`labelHover` 显示 "X x Y y Z z \| 块中文名 \| 群系"（无精细时 "X x Z z \| 群系中文名 (id n)"）；矩阵范围外（无限地图新区域）改走 `_probe_biome` 单点探测（探测失败但有精细前缀时仍显示 X/Y/Z\|块）；矩阵内还调 `_update_marker_tip` 弹标记提示。 |
 | `_dim_probe_sampler` | `_dim_probe_sampler(self, dim: str)` | 悬停探测用维度采样器，按 `(seed, dim)` 缓存实例（`_probe_samplers`）：nether → `NetherSampler`、end → `EndSampler`（函数内懒 import）；避免 MouseMove 高频重建 256 次洗牌的 Perlin 初始化。 |
 | `_probe_biome` | `_probe_biome(self, bx: int, bz: int) -> int \| None` | 范围外悬停的单点群系探测：下界按噪声格 `biome_at(bx>>2, bz>>2)`；末地按 chunk 级 `biome_at_chunk(bx>>4, bz>>4)`（与地图渲染每像素=所在 chunk 群系一致）；主世界用 `sample_region(bx & ~3, bz & ~3, 4, 4, surface_mode=True)` 取 `[0,0]`（与渲染同语义）；任何异常返回 None（零 UI 阻塞风险）。 |
 | `_marker_at` | `_marker_at(self, scene_pos)` | 标记命中判定：遍历 `_markers`，用 data(1) 存的锚点坐标算距离平方取最近者，距离 ≤ `_MARKER_HIT_R=14`（场景单位=方块）才命中；不依赖 item 几何（图标项与椭圆项 shape/rect 语义不同）；点击复制与悬停 tooltip 共用。 |
@@ -2981,6 +2983,422 @@ fortress = NOT bastion 等规则在 `structure_map.py` 侧实现（复用本模�
 | `FLAGS` | list[str] | 编译开关：`/nologo /std:c++20 /utf-8 /O2 /EHsc /MD /LD` + 两个 `/I` 头文件路径。`/MD` 与官方 Python 发行版运行时一致（vcruntime 由 python313.dll 提供）；`/LD` 产出动态链接库；`/utf-8` 保证源码中文注释正确编码。 |
 | `LINK` | list[str] | 链接开关：`/link /LIBPATH:{PY_LIBS} python313.lib`，显式链接 Python 3.13 导入库。 |
 
+## `Utils/MapPreviewer/_native/_density_module.cpp`（精细渲染原生扩展）
+
+**功能**：精细渲染（1 方块 = 1 像素）的逐方块地形采样引擎（pybind11 →
+`_density_sampler.pyd`，由 `block_render.py` 导入）。两条主管线：
+`fill_top_grid`（逐列自 max_y 向下扫密度树 + 含水层，返回最高实心 y）与
+`surface_grid`（反序列化 surface 规则树 blob，按列求 SurfaceRules 得表层方块）。
+同一密度树由 `eval` 递归求值，OP_INTERPOLATED 带 thread_local 角点缓存（8 角点
+按 4×8×4 cell 哈希，40 万上限）。
+
+**性能优化记录（2026-10-30 轮，瓦片中位 0.493 → 0.184 s/瓦片，2.68x）**：
+按收益排序的四项改动（均经 golden 12 数组 / 多 seed 63 数组逐位对照实证）：
+1. **surface 求值缓存复用**（`get_min_surface_level`）：原先每列 4 次直调
+   `df_prelim` 树（绕过缓存），现改为调 `Aquifer::prelim_surface` 走
+   `prelim_cache`（4 角按 16×16 chunk 共享，worker 线程私有 aq 无竞争）。
+   surface 阶段 eval_calls 6.5M → 225K。
+2. **fill 高空剪枝（已撤销，见下方 2026-10-30 第三轮）**：26.2 `skipSamplingAboveY`（`chunk_skip_y`，chunk 内
+   max(prelim+8)+20 保守导出）之上官方采样即视为空气；列扫描循环先判
+   `y > skip` 再 eval，省掉高空区每列约 200 次树求值。root_evals 1.35M → 238K，
+   fill 0.256 → 0.050s。当时经禁用剪枝的 AB 对照（3 seed × 7 瓦片）逐位实证——
+   但 AB 场景未覆盖「prelim 系统性低估地表」的列，后证为误用官方语义的 bug。
+3. **stone_below 下探截断**（`surface_column`）：树中读 stone_below 的只有
+   STONE_DEPTH(ceiling) 条件，阈值 `1 + offset + surface_depth + sec` 为列内
+   常数；先遍历 conds 取阈值上限 cap，下探至 cap+1 停（与探到底等价，cap 只允许
+   偏大）。原先平均挖 ~97 层/列（solid_at 与 fill 同判据，top_y 以下近乎全石）。
+4. **surface blob 解析缓存**：`surface_grid` 开头的 `load_surface_blob`
+   （21KB 反序列化 + NormalNoise 建表）按 blob 内容缓存（static mutex + 8 条
+   上限淘汰）；biome 温度全局表写入幂等、与 seed 无关，跨线程并发 load 无害。
+
+**失败尝试（避免重蹈）**：OP_CACHE2D 列级 memo——CACHE2D 子树占比小，memo 查找
+与分支开销反超（fill +49%），已回滚；fill 大步长粗探（16 格跳跃 + 回退细扫）——
+solid 性沿 y 非单调（洞穴/起伏），粗探点之间的 solid 会被漏掉（golden 10 DIFF），
+已回滚，被 skip 剪枝替代。
+
+**性能优化记录（2026-10-30 第二轮，biome 采样移 C++，瓦片中位 0.184 → 0.103 s/瓦片）**：
+未新写 C++：`block_render.py` 复用 SeedReverser 已有的 `_biome_refine.pyd`
+（`Utils/SeedReverser/_native/_biome_refine.cpp`，cubiomes 位级复刻与
+`biome_noise.py` 逐行同源）的 `sample_point` 导出。原先渲染循环每噪声格调
+`climate_point_xz` + `biome_at` 两次（后者内部重算 climate）；现 `_get_pack`
+try-import `_biome_refine`，`set_btree` 推版本树（模块级 `_BRT_BTREES` 去重），
+循环内一次 `brt.sample_point(seed64, brt_name, x>>2, ny, z>>2)` 同时拿 np6 +
+biome_id。扩展缺失/异常时自动降级纯 Python 原路径。接口要点：`sample_point`
+参数为噪声格坐标 (x, y, z)；seed 须无符号化（`& 0xFFFFFFFFFFFFFFFF`）；
+`biome_noise.get_btree` 只收版本键（如 "26.2"），btree 名取其 `.name`（"btree262"）。
+正确性：`probe_biome_ab.py` 5 seed × 600 点 Python vs C++ np6/bid 全等
+（含 float32 量化路径逐位一致）；golden 12 数组 ALL-BITWISE-EQUAL。实测
+biome 阶段 0.060 → 0.010s（约 6x）；fill/biome/surface 三项合计 ≈0.067s，
+其余 ≈0.036s 为配色/植被/结构的 numpy 部分。
+
+**岸线白色伪影修复记录（2026-10-30，block_render.py 配色层两轮）**：
+① 沉船/废弃传送门天生生成在岸边浅水，其方块把水下列抬出水面
+（heights≥海平面），而 `_render_rect` 的 wet 掩码在结构放置**前**计算、
+4d 统一配色复用旧 wet，把这些已露出水面的列按水色重画，dep=0 恰好触发
+近岸白 (201,236,255)——表现为岸线断续 1px 白条。修复：4d 配色前按最终
+heights 重算 `wet = heights < _SEA`。② 非寒冷群系岸线仍有连续 1~3px
+淡蓝白边：探针证实 100% 来自水色段的「近岸白特判」（dep==1 混 50% 官方白，
+seed=1 全图 5116 px 命中、其余水列 0 命中），系当年对照官方瓦片刻意添加。
+用户定夺**完全移除**（岸线自然过渡，浅→深梯度仍由 alpha 逐层叠加保证）；
+已重跑白边探针（白边色水列命中 0）+ golden ALL-BITWISE-EQUAL。
+③ 排查中还确认：**陆侧岸坎白斑**（全图 1299 px）是 populateSlopes 山脊
+提亮（×1.2，clamp [0.2,1.7] 官方反编译值）叠加亮底色（覆雪草/sand）的
+clip 过曝，属官方 JourneyMap 原版行为（GUI hillshade=True 一直存在），
+用户定夺**保持不修**；冻洋区 `_SNOW_COVERABLE` 含 gravel 会让冰面绘制
+（_ice_mask）后被覆雪段以 0.28/0.72 洗成雪白 (225,236,255)，与官方
+frozen_ocean 深蓝瓦片不符（官方实测 (42,41,148)），**尚未处理**。
+
+**诊断基建**：`DF_PROFILE_OPS` 宏（`build_density.py` 读同名环境变量追加
+`/DDF_PROFILE_OPS`）编译进 eval 分布计数器（root_evals/eval_calls/noise/perlin/
+spline/interp/blended，`profile_stats`/`profile_reset` 导出）与 surface 阶段
+chrono 计时（join 后打 `[stime]` 到 stderr）。正式版不带宏、零开销。
+
+**基准与验证流程**（`.temp/`，项目 venv）：
+- `probe_fine_render.py`：5 地形点 × 3 次取中位（进程首次调用有 ~1-3s 冷启动，
+  必须多次取最小/中位）；`probe_native_split2.py`：fill/biome/surface 分解；
+- `probe_native_golden.py save/check`：3 瓦片 × fill/tops/blocks/bid 12 数组
+  黄金基准（`native_golden.npz`），每次改 native 必跑，要求 ALL-BITWISE-EQUAL；
+- `probe_skip_ab.py save/check`：3 seed × 7 瓦片 63 数组，用于剪枝类改动的
+  禁用对照；`probe_opdist.py`：op 级求值分布；`probe_biome_ab.py`：biome
+  Python vs C++ 采样对拍（np6 + biome_id）。
+- 配色层白边探针（hillshade=True 忠实 GUI 观感）：`probe_white5.py`
+  （来源验证 + 方案逆推对比图，利用 P=γ(0.5W+0.5N) 的可逆性）、
+  `probe_white6.py`（修复后全图回归：白边色命中/陆地白像素双 0 判定）、
+  `probe_white7.py`（复刻 γ+bevel 收尾段并逐位自校验后做过曝量化与
+  slope 修复方案对比图）。
+- 编译：`.temp/_build_env.bat`（正式版）/ `.temp/_build_profile.bat`（计数器版），
+  内部先加载 vcvars64.bat（cl.exe 不在 PATH）。
+
+**skip 剪枝 bug 修复 + y 无关子树缓存（2026-10-30 第三轮）**：
+① **bug 根因**：seed=1 风袭丘陵/画廊多图出现 16/chunk 对齐的完美直线截断（恒定
+平台 82/58/34、大面积矩形水域）。排查链：修正窗口重渲 diff 仅 0.73%（非缓存
+污染）→ 无结构版同样平台跳变（排除结构 stamping）→ brt 气候参数平滑（排除
+参数端）→ 仅 seed=1 有 2 条直线（其余 4 seed 全 0，种子相关）→ prelim
+矩阵对比锁定。官方语义（26.2 反编译）：`Aquifer.skipSamplingAboveY` 只在
+`computeSubstance` 内使用，而 `computeSubstance` 仅在 density≤0 时才被调用
+（density>0 恒实心不看 skip）——官方 skip 从不是「地形上界」。
+`fill_top_grid` 循环级 `if (y > skip) continue;` 把高于 skip 的真实地形整片吞成
+空气 → top 钳在 skip（12k+10 平台）。平台公式闭环：
+skip = floor((prelim_max+20)/12)*12+22，prelim 本身是 find_top_surface
+cell_height=8 输出（8 倍量化系官方语义）。seed=1 触发是因为小种子下
+preliminary_surface_level 输出恰好落在低平台值拼图（0/8/16/24/40/48）。
+② **修复**：删除 fill_top_grid 循环级剪枝，逐 y 全量求值；剪枝由
+compute_substance 内部（对应官方 Aquifer L159）在 density≤0 分支生效。
+修复后 seed=1 直线 2→0，wet 43.0%→33.5%，其余 seed 逐位不变；性能回归
+18.1→75.1s（4.1x，全列全量求值的代价）。
+③ **y 无关子树缓存（无损提速）**：`DNode.y_indep` 静态标注
+（`compute_y_independence`/`yi_mark`，保守规则：OP_NOISE p1==0、SHIFT_A/B
+恒无关、Y_GRAD/SHIFT/OLD_BLENDED/INTERPOLATED/FIND_TOP 恒相关、SPLINE 需
+coordinate+全部样点 child 无关、INTERVAL_SELECT 需 input+全部分支无关、
+RANGE_CHOICE 需条件+两分支三分支全查——首版 default 分支漏了 RANGE_CHOICE
+的 a1/a2，重读时修掉）+ eval 拆分：y_indep 节点走 thread_local `ycache`
+（键 CKey{idx, d2bits(x), d2bits(z)}，上限 40 万清空，owner 切换清空），
+缓存值==重算值逐位一致。`build_from_blob` 末尾必须调
+`compute_y_independence()`（漏调则全 false，不出错但零加速）。
+实测 75.1 → 24.88s（3.0x）；golden ALL-BITWISE-EQUAL；probe_cut5 五 seed
+直线全 0。相比 bug 版（错误剪枝）18.1s 慢 37%——被剪的地形真实存在，
+属正确性必要代价。正确性优先，性能优化到此收尾。
+④ **验证基建**：`probe_cut1b.py`（正确窗口复现+直线检测）、`probe_cut5.py`
+（多 seed 直线统计，修复验证）、`probe_cut6.py`（prelim 矩阵）等 7 个
+排查探针（.temp/probe_cut1~cut7，cut1 窗口用错已废弃）。
+
+**远古城市地表 stamping bug 修复（2026-10-30，block_render.py）**：
+裸岩山峰画廊 (-2816,0) 图中央出现整座远古城市裸露地表。根因：
+`_apply_structures` 的 TEMPLATE 路径对全部模板结构统一用「锚点 fill_top
+地表高度且强制 ≥65」作 base_y（适合地表结构 pillager_outpost/igloo），
+但 ancient_city 官方 start_height=-27（deep_dark 洞穴层，beard_box）、
+trail_ruins start_height=-15（project WORLD_SURFACE_WG + bury 整体掩埋），
+俯视地图被地表完整覆盖本不可见，却被整座抬高拼接列地表。修复：新增
+`_UNDERGROUND_STRUCTURES = {ancient_city, trail_ruins}`，从枚举键与
+stamping 循环双重排除。验证：该区域确实枚举到 2 个 ancient_city 实例
+((-2848,-176)/(-2896,0))；同窗口重渲 diff 8426px（3.25%，即被移除的城市
+方块+阴影联动，范围与两实例换算像素位置吻合）；目视远古城市消失、地形
+正常；前哨站实例小窗回归正常（地表模板结构不受影响）。
+
+**竹林群系渲染修复（2026-10-31，jm_colors.py/vegetation.py/tree_placement.py/block_render.py）**：
+用户报竹林渲染异常，两轮修复；方法论转折：用户指示**渲染机制与配色以 JourneyMap
+反编译源码为权威基准**（不再从游戏截图反推）——用 vineflower 反编译
+journeymap-fabric-1.21.11-6.0.0.jar（用户实际游玩版本）到 .temp/jm_decomp/（621 文件）。
+关键语义（全部有源码行号依据）：①`VanillaBlockHandler` 分类表（L62-109）：竹子=Plant
+旗标、alpha=1.0（俯视整格显示自身纯色）；植物/作物 NoShadow（不抬地图高度，
+`BlockMD.hasNoShadow` L413）；树叶 OpenToSky+Foliage+NoTopo；甘蔗 alpha=0.2、玻璃
+0.4、水 0.25。②`VanillaBlockColorProxy.getBlockColor`（L61-71）：树叶色=贴图均值×0.8
+×群系 foliage tint（证实既有 0.8 系数）；草=贴图×grass tint；竹子不在 tint 列表→原色。
+③`ColorManager.calculateAverageColor`（L236-279）：所有 sprite 全部 alpha>0 像素的
+R/G/B 简单平均。④`SurfaceRenderer`（L74-296）：列采样→地层堆栈→alpha 混合→
+bevelSlope 坡度着色。JM 竹 sprite（模型 UP 面/粒子贴图、强制 age=1）=bamboo_stalk.png，
+jar 实测全像素均值 (94,144,20)；podzol_top 均值 (92,63,24)。
+① **jm_colors.py 灰叶修复**：tinted_color 原按贴图灰度极差≤8 判定是否需要 tint，
+jungle_leaves 极差 13.1 被误判为彩色贴图跳过群系 tint，竹林树叶呈灰 (166,164,156)
+（灰像素 98.6% 为 jungle_leaves）。按官方 26.2 BlockColors 名单重构树叶 tint 语义：
+foliage tint=oak/jungle/acacia/dark_oak/mangrove(+vine)；spruce=0x619961、
+birch=0x80A755 为固定色；cherry/azalea/flowering_azalea/pale_oak 无注册保持贴图原色
+（pale_oak 极差 7.3 也会踩灰度判定坑）。竹林低饱和灰像素 44249→650（-98.5%），10 种
+树叶单元对照全部符合官方语义；spruce/birch 顺带修正为固定色（影响所有含树图）。
+② **竹林内容修复**（用户：竹林里没有这么多树、应全是竹子、地面有灰化土）。官方 26.2
+语义：biome/bamboo_jungle.json 第 9 步**无任何树 feature**；placed bamboo=
+bamboo_some_podzol（probability 0.2 打半径 1~4 灰化土盘，BENEATH_BAMBOO_PODZOL_
+REPLACEABLE）+ noise_based_count(80/0.3/160)（Perlin 噪声驱动，高值区 ~176 次/chunk，
+空间强聚集）；bamboo_vegetation（30.1 次/chunk）是 random_selector（70% mega_jungle_
+tree/15% jungle_bush/5% fancy_oak/10% grass_jungle）且树为 checked 特征、密竹林大量
+放置失败→实际树稀疏。三处实现缺陷：(a) vegetation.py 把 bamboo_vegetation 全量当树
+（30.1/256=0.1176）且 noise_based_count 的 count 类型未处理（竹记 1 次/chunk）→ 新增
+_BIOME_VEG_OVERRIDE["bamboo_jungle"]（tree 1.2、crop 36、podzol_p 20，均 /256；
+species=jungle、crop_kind=bamboo；override 在 biome_vegetation() 末尾合并）；(b)
+tree_placement.py 缺官方 minecraft:biome placement 过滤，周边稀疏丛林树跨群系长进
+竹林格 → place_trees_in_rect 落点群系≠chunk 中心群系则丢弃；(c) block_render.py 的
+crop/flower/grass 数组只创建未绘制（死代码），竹从未画过 → 新增 _apply_bamboo_dots
+（4d 统一配色后直接覆写 rgb——竹子不在 block_names 无法走方块通道；NoShadow 不抬
+高度）+ podzol 圆盘走方块通道（out_blocks=podzol id，高度不变），盘心与竹点共用
+salt 13 hash（恒有 p_disk<p_dot→盘心必有竹）。空间聚集：新增 _purity_field（积分图
+O(1) 求 16×16 盒内目标群系占比，作官方 Perlin 噪声的空间代理），竹点密度
+×(0.15+2.2×pure)、土盘 ×(0.15+1.6×pure)——核心区密集成片、边缘零散，与游戏观感
+一致。竹色保留实测值硬编码并注明出处：block_top_colors.json（18 键）无 bamboo/podzol
+条目且项目内无生成方、block_textures.build_atlas 链按 name2bid 方块名驱动（bamboo 不
+在其中），强行接入需动调用方且零视觉收益 → 与 _TOP_COLORS podzol 硬编码先例一致。
+③ 目视校准三轮（参考图=游戏同区域截图）：v2 竹点均匀随机、太稀太散→引入纯度场；
+v3 JM 对齐色值后树冠仍偏密→树 2.5→1.2 棵/chunk；v4 用户反馈鲜绿竹点太多、灰化土
+不够→竹 crop 48→36、土盘 8→20/chunk。v4 统计（竹林窗 512×512，中心 (-5632,-7168)，
+seed=1，渲染 19.3s）：podzol 32652（竹林地面 ~77%）、竹点≈4799、jungle_leaves 19423、
+grass_block 83726；forest 对照窗（中心 (-7936,-8192)）零扩散（podzol/竹色格/jungle
+leaves 均 0，oak 树正常）。全部改动在 Python 层，未动 native，无需 golden。验证探针
+.temp/probe_bamboo*.py（植被画像/jar 贴图实测/窗口渲染统计+对照窗）。**待办**：v4 图
+（.temp/probe_bamboo_fixed2.png）待用户目视确认；确认后议画廊重渲范围
+（.temp/biome_check/ 51 张——spruce/birch 树色修正影响所有含树图）。（已闭环：竹林 v4
+经目视确认，画廊全量重渲已完成，见下方 2026-10-31 第二条记录）
+
+**26.2 tint/水色表官方化与水面群系混合（2026-10-31，jm_colors.py/block_render.py）**：
+用户指示 tint/水色一律以 26.2 官方源码为权威、不沿用历史反推值。①草/叶 tint 表全量替换为
+官方生成版：按 26.2 反编译 GrassColors/FoliageColors（66 群系）重生成 jm_colors.py 两张表，
+全量核验 grass/foliage 各 0 mismatch；swamp 草色改逐坐标场（biome 修正器 SWAMP 的噪声带状
+混合：4×4 同簇率 95.1%、邻接同类率 91.7~98.1%；swamp 窗单元验证 64/64 全等、竹林窗基线
+逐位一致）；红树林 mangrove_swamp 按 26.2 源码取值（草 swamp 场、叶 foliage 0x8DB127、
+水 0x3A7A6A；mangrove_propagule 无 tint 注册、lily_pad 官方固定双层 tint，均不另行处理）。
+②水色表全量重建：旧表 46 群系走 fallback 恰好正确、10 处错误——5 值错（mangrove_swamp/
+swamp/lukewarm_ocean/deep_lukewarm_ocean/snowy_beach）+ 5 缺键（cherry_grove/meadow/
+pale_garden/snowy_taiga/sulfur_caves，此前错染默认蓝）；按 26.2 JSON 全量生成 66 群系+1
+兼容键替换旧表，双向对照 10 处修正全部归零。水面合成链：水色=海床×0.45^dep+
+(tint×188/255)×(1-0.45^dep) 再 γ0.94 影调；v8 探针逐像素 diff 方向性验证通过（swamp 窗
+22% 像素变化且中位差与 tint 差吻合、深水归属验证 lukewarm/mangrove 新水色各自生效）。
+③水面 5×5 群系混合（block_render.py 水色段）：对齐 JM mapBlendWater=true（用户 config
+确认为 true、biomeBlendRadius:2），水色 tint 按 5×5 邻域群系加权，消除群系边界水色直线
+接缝。④画廊全量重渲：.temp/biome_check/ 52 张（51 主画廊 + 60 温水深海补遗，脚本
+probe_biome_gallery.py/gallery2），旧版备份 biome_check_old/；61 蘑菇岛岸三轮搜索（邻域±2k、全域±30720 step256、47 个
+蘑菇岛命中点岛缘细搜，probe_mushroom_search.py）均不可达后定性：**26.2 已移除该群系**
+——worldgen/26.2/biome/ 67 个群系 JSON 无此文件，worldgen 全目录与 26.2 反编译均无生成
+端引用（仅旧存档 datafix 历史名），btree262 不产出 id=15，搜索必然为空，画廊定稿 52 张。
+**待办**：52 张图待用户目视验收；git 提交未动。
+
+**树冠台阶高度场与竹点坡度（2026-10-31，vegetation.py/block_render.py）**：
+用户以游戏内截图指出树冠立体感差距：JM 树冠内部有 2~3 级明暗台阶、北亮南暗、南侧地面
+有投影；我方树冠同高平坦层内 slope 恒 1 全平。根因：JM 立体感来自真实树冠分层高度场——
+树叶由 26.2 叶放置器逐层摆放（FoliagePlacer.placeLeavesRow，26.2 反编译 foliageplacers/
+全部 10 种几何逐一核对），冠顶窄下层宽，JM heightmap（precipitationHeight 含树叶）在冠内
+形成台阶 → populateSlopes 施加 bevel。修复（Python 层，未动 native，无需 golden）：
+①vegetation.py 新增 crown_step(species,dx,dy)（逐格降差剖面：blob=oak/birch/jungle 核
+3×3 在冠顶外环 -2；fancy/cherry 顶帽+圆角三层 0/1/2；acacia/dark_oak/mega_jungle 上小下大
+两层 0/1；spruce 锥形交替环带 0/1/4；pine 顶单格+十字 0/1/2；mangrove=random_spread 核 0
+环 1）与 crown_top(species)（冠顶干高近似，取 26.2 trunk_placer 均值：oak/birch+5、
+fancy/cherry/dark_oak+8、spruce+6、pine/mega_pine+8、jungle/mega_jungle+12、acacia+7、
+swamp/mangrove+6，default+5；参数提取自 worldgen/26.2/configured_feature/ 树种 JSON）。
+②block_render.py 树冠循环改为逐格 H=top_y+crown_top(sp)、ch_h=H−crown_step(sp,dx,dy)
+（首版 H=top_y+2 过低致外环台阶压到地表、树冠缩水 43%：forest 叶格 44540→25314，修正后
+恢复）。③竹点 NoShadow→showSlope=false 语义补齐（SurfaceRenderer L103：顶块 NoShadow
+的列不加 bevel）：竹点高度场 slope 置 1 平涂；同步删除树冠循环内 tvar/fol/leaf_art 写后即被
+4d 统一配色覆盖的死代码。验证（seed=1，canopy_v10b）：forest/swamp 窗远区 0 像素改动、
+bamboo 窗 3336px 全为竹点平涂（竹色 unique=1）；单树 9×9 网格逐值与 bevel 公式手工推算
+吻合（核心平涂 66~71、北/西外缘提亮 79~84、南/东内缘压暗 30~37）；叶格 unique 色 85→113
+（台阶层级生效）；北缘均亮 76.2 vs 南缘 51.1（强不对称）；AI 目视复核：暗像素沿冠缘成连续
+弧带（非噪点）、全图统一西北光照、树冠轮廓零变化、冠南地面新增与轮廓匹配的投影带。JM
+语义依据：populateSlopes 两遍法（primary ×0.65/1.2 + secondary ×0.95/1.05 仅 slope==1.0 时
+启用）+ +depth 阻尼、bevel R/G×0.85、clamp [0.2,1.7]（与 RenderingProperties 默认值全部
+吻合，jm_colors.py L334-409 既有实现未动）。对比图 .temp/canopy_cmp_forest/swamp/
+bamboo.png、canopy_v10b_mangrove.png。
+
+**冻洋冰山与 JM 冰面穿透语义（2026-10-31，iceberg_placement.py 新建/block_render.py）**：
+用户指出冻洋冰山平坦无立体感、死白、水冰交界生硬。像素诊断（probe_iceberg_diag.py）+
+官方语义链闭环：①MC blocksMotion()=碰撞 bounds>=0.729 或满块（BlockBehaviour L502-545）
+→1 层 snow layer(0.125) 不算、ice 算；MOTION_BLOCKING=blocksMotion()||流体（Heightmap
+L151）。②JM VanillaBlockHandler L67-68 把 ice/frosted_ice 标 BlockFlag.Ignore（冰在 JM
+地图从不显示）；SurfaceRenderer.getBlockHeight L143-179 从 precipitationHeight 向下扫遇
+Ignore 穿透 → 冻洋/冻河冰面列（ice+snow layer）穿透冰停在水面 → 按 mapBathymetry=false
+显示深蓝水色（官方 frozen_ocean 瓦片 (42,41,148)）——旧版「冰面平涂冰色」是错的，删。
+③旧版覆雪把水下海床也覆雪（freeze_top_layer 官方语义只覆「上方为空气」者）→ 冻洋
+174373 px gravel 死白的根因；修复：water_mask 改为全部 wet 列后 `&~water_mask` 恰好排除
+水下列。④_FREEZE_BIOMES 移除 cold_ocean/deep_cold_ocean（温度 0.5>0.15 官方不结冰不覆
+雪，此前误含致冷海涂白）。⑤冰山本体：新建 iceberg_placement.py 逐行复刻 IcebergFeature
+.java（.temp/mc262_decompile/，296 行）：椭圆(30%)/圆两形态、overWaterHeight 椭圆 6~11/圆
+3~17（圆再 10% 追加 7~25 巨型）、underWaterHeight<=18、width<=11、30% 雪帽（snow_top=
+nextDouble>0.7）、边缘 10% 跳过、smooth 清悬浮冰+三面临空孤立冰、cutOut 椭圆 90%/圆 30%
+开洞（水下开水水上开空气）；放置链 rarity_filter(1/16, 1/200)→in_square(nextInt(16)×2)→
+biome（frozen_ocean/deep_frozen_ocean），decoration step=2（LOCAL_MODIFICATIONS），与树
+同链 get_population_seed+decorrelated。rng 流关键：Java for 条件逐次求值（cutOut 水下循环
+nextInt(5) 每轮消耗）、nextBoolean()?-1:1 方向映射、a/c=0 时 Java double 除零=±Inf/NaN
+（sd<0 恒 false 天然跳过，Python 需显式返回 inf）。只返回出水部分（水下 JM 不显示）。
+⑥接入 block_render.py：_EXTRA 补 blue_ice（atlas 无此贴图条目，packed_ice 已在）、
+_render_rect 4a+ 段在树（step=9）之前写入 blocks/heights 每列最高竞争、冰面平涂段删除、
+覆雪段注释更新、顺手修 wet=None 兜底分支未定义 ice_or_snow 隐患。验证：单元三项全过
+（冻洋窗 512² 25 簇/1549 出水列/packed 73%·雪帽 22%·blue 4.6% 与官方 rarity 期望吻合、
+窗口不变性 572=572 逐位一致（±11 冰山半径跨界截断需 27 缓冲后比）、冷海窗 0 误生成、
+0.95s/窗）；渲染五窗全过（冻洋死白 176789→0、水列深蓝 (50,66,159)、heights>63 中
+packed_ice 7349→8199+snow_block 632 新增；冻河/冰冻深海/冷海同步正常；冷水海洋窗 diff
+83823 全部归因 deep_cold_ocean/cold_ocean 水列洗白修复；海洋/沙漠回归窗 diff 全部归因
+冻结群系水域+画廊历史黑像素故障——gallery 脚本 01/03/60 均有 y=0-5/16-18 黑条（历史环境
+故障与代码无关），当前渲染管线黑像素 0；iceberg_placement.py 曾有 2 处 rng 流 bug
+（cutOut 符号方向反、水下 carve nextInt(5) 应逐轮消耗）修复后才过窗口不变性）。对比图
+.temp/iceberg_v9_cmp_frozen/cold/river.png。待用户目视验收；画廊冻/冷 5 张（09/10/34/37/38）
+待重渲；git 提交未动。
+
+**废弃传送门官方放置链复刻（2026-10-31，ruined_portal_pieces.py/structure_render.py/block_render.py）**：
+用户指出 MapPreviewer 旧版「只是简单把结构放地上」，真实情况是门框周边延申下界岩/岩浆。按
+26.2 反编译源码复刻官方全链，替代旧的「稳定哈希选模板 + base_y 强制 ≥65 贴地」路径：
+①考证：官方 findGenerationPoint → findSuitableY（bb 中心列取真实地表 newY；4 角投影=自
+newY 向下找 ≥3/4 角 WORLD_SURFACE_WG/OCEAN_FLOOR_WG 实心，y0=max(minY, min(newY, 第 3 大
+值))，无 RNG；getRandomWithinInterval 有 lo<hi 守卫——真实地形下 underground 的
+surface−sy 可 ≤lo=−49，官方直接取 max 不消耗 RNG）。锚点=get_structure_pos 区块角=模板
+最小角，与 _RPSim 口径一致；check_structure_at 对 ruined_portal 恒 (True,−1) 不采样群系
+→变体自采 pack["bs"].biome_at(ax>>2, max(surf,−64)>>2, az>>2)（BiomeSampler.BIOME_ID 即
+cubiomes id，variant_for_biome 直接兼容）；cold=26.2 biome/*.json 顶层 temperature<0.15
+（官方 coldEnoughToSnow 的高山高度衰减项未模拟，仅影响山地高海拔个案）。
+②ruined_portal_pieces.py：_RPSim.__init__ 新增可选 surface_fn（(x,z)→列实心顶）/cold，
+默认 None 保持平坦口径（StructurePreviewer 行为不变，平坦等价性冒烟 bad=0）；注入后
+findSuitableY=bb 中心真实地表 + 4 角投影（in_nether 除外）、underground 补 lo<hi 守卫、
+_mound 逐列 target = surf（surface 类）/min(y0, surf)（其余），替代平坦恒 64。
+③structure_render.py 新增 ruined_portal_blocks(seed, ax, az, pack, threads)：73×73 网格
+（_RP_GRID_HALF=36，覆盖土堆半径 14+模板边）→surface_fn 闭包→变体/cold→_RPSim→材质映射
+_RP_MAT→滤除 y<列实心顶 的方块（underground/in_mountain 与滴柱俯视不可见=官方行为）；
+structure_render._PICK 移除 ruined_portal（退出哈希选模板旧路径）。
+④block_render.py：_STRUCTURE_MATERIALS +5（crying_obsidian/mossy_stone_brick_slab/
+mossy_stone_brick_stairs/stone_slab/vine）→140 项；_apply_structures 加 ruined_portal 专用
+分支（调 ruined_portal_blocks，抛错才回退 footprint；成功但空=完全掩埋不画矩形）；旧
+TEMPLATE 路径的 max(_by,_SEA+1) clamp 从此不影响传送门。
+⑤水面语义（沿用既有链）：深水不透底（wet 列按 dep 逐层 alpha 叠加，dep≈15 时海床残留≈0）
+→深海海床传送门不可见与沉船一致，非缺陷；沼泽浅水可透出结构。
+验证：材质探针 13 模板全键已映射（模板无 vine 格、每模板恰 1 chest 体素）；seed=1 ±12288
+锚点分布 standard 472 陆地/436 地下、ocean 405、jungle 69、mountain 33+27、swamp 30、
+desert 16（.temp/rp_pick_anchors_out.txt）；集成冒烟 14 锚点 9 出块、6 空锚点经 diag 确认
+全为 underground/in_mountain 完全掩埋（above_terrain=0，官方行为）；6 变体渲染窗 512²
+（.temp/rp_verify/rp_*.png）+ 96² 裁剪 2 倍拼图 rp_crop_montage.png：5/6 目视过（std
+黑曜石框+下界岩土堆、desert 石砖、jungle 石砖（叶覆盖红像素 0=官方 overgrown）、swamp
+浅水透出、mount_cold 无岩浆块=cold 判定生效）；ocean 窗纯海水=深水统一语义；缺配色警告仅
+minecraft:air（无害）。
+待办：传送门影响面小，画廊无需为此全量重渲（如需可按枚举对含传送门窗口重渲）；画廊冻/冷
+5 张重渲与 git 提交沿用前记录挂起状态。
+
+**footprint 结构被 4d 统一配色冲掉修复（2026-10-31，block_render.py）**：
+用户报林地府邸地图上不可见（应为可见）。A/B 实证（.temp/probe_footprint_ab.py，
+structures=True/False 逐像素 diff）：mansion 窗口 diff=0、desert_pyramid 锚点 bbox
+diff=0——**全部 footprint 结构（mansion/monument/desert_pyramid/jungle_temple/swamp_hut/
+desert_well/ocean_ruin 及 real-block 失败回退）在当前渲染管线均不可见**：_stamp_rect 只写
+rgb，而 4c 步在 4d「按最终 blocks 通道整体重画 rgb」之前执行，盖章被整体冲掉（竹林竹点
+当年为此移到 4e 配色之后，footprint 漏改）。修复：_apply_structures 加 footprints_out
+队列——footprint 分支只收集 (key,ax,az,land) 不落笔（footprints_out=None 时保持旧即时
+盖章行为）；新增 _flush_footprints 在 4d 之后、影调/竹点之前统一盖章（_FOOTPRINTS 表与
+_stamp_rect 不动，real-block 结构路径零变化）。验证：mansion 锚点 bbox diff=616=恰
+22×28 全矩形、首像素 (54,41,33)≈fill(58,42,30) 经 γ0.94+坡度 bevel；desert_pyramid
+bbox diff=400=恰 20×20、(199,181,125)≈fill(222,208,158)；rp_std_land_river 回归窗
+diff=35px 全部归因两个 ocean_ruin footprint 归位（窗内 5×5=25px+右缘裁剪 10px，
+(125,127,125)/(101,103,101) 与 fill/border 期望精确吻合），real-block 结构（废弃传送门/
+沉船/村庄）逐像素不变。府邸中心放大图 .temp/rp_verify/mansion_zoom6.png。
+②府邸真实块升级（同日第二轮，用户确认纯色块不够、要求真实内容）：structure_render.mansion_blocks
+复用 mansion_pieces.assemble_mansion（MansionGrid+createMansion 逐行转写、对拍 6 案例 ALL
+PASS；结构线 setLargeFeatureSeed → rotation nextInt(4) → 拼装，锚点 chunkBlock(7,7)，模块
+内 y=64 平坦）+ 本模块补官方 y：getLowestYIn5by5BoxOffset7Blocks（Structure.java L184-199）
+= chunkBlock(7,7) 起、尺寸随 rotation（NONE(5,5)/CW90(-5,5)/CW180(-5,-5)/CCW90(5,-5)，
+允许为负）的 4 角 getFirstOccupiedHeight(WORLD_SURFACE_WG) 取 min；y<60 官方拒绝生成
+（返回 []，不回退 footprint）；piece y 平移 delta=y0−64；材质直出模板 palette 原名
+（俯视只需基名）。_apply_structures 加 mansion 专用分支（抛错才回退 footprint；beard=False
+——地形高于结构顶的列保持地形=官方俯视语义，避免 beard=True 在山坡把 heights 压出凹坑；
+俯视可见=每列最高结构方块=真实屋顶）。验证：单元 42218 块 [0.14s]、bbox 61×79、y0=89、
+材质 top=dark_oak_planks 16741/birch_planks 9111/cobblestone 2825/dark_oak_stairs 1681/
+red_carpet 1670（官方府邸含桦木板内墙）；窗口 A/B diff=3809px 完整归因（府邸真实屋顶+1 个
+ocean_ruin footprint 归位，其余 24 个枚举结构全为地下不渲染），rp 回归窗 diff=35px 不变。
+图 .temp/rp_verify/mansion_real.png、mansion_real_zoom8.png。
+③植被/结构绘制顺序修复（同日第三轮，用户确认府邸形状已对但树冠蔓延到屋顶上）：根因=
+管线顺序与官方装饰顺序相反——官方 SURFACE_STRUCTURES(step=4) 在树 VEGETAL_DECORATION
+(step=9) 之前，树放置的土壤检查在结构材质上失败故不长上结构；此前结构画在植被之后，
+府邸列（beard=False 保持地形+4b 先画的树冠冠层）屋顶被周边树冠越界覆盖。修复：
+_apply_structures 调用（含 fp_queue 收集）整体挪到 _apply_vegetation 之前（新 4b 结构/
+新 4c 植被；冰山 4a+ 不动仍在最前，_flush_footprints 时机不变），树冠 growable 材质检查
+基于进入植被时的 blocks 快照→结构列（planks/石砖等∉_GROWABLE）天然不长；
+_FOOTPRINTS/_flush_footprints 注释 4c→4b 指代同步。验证：mansion 窗新旧 diff=1323px
+（旧值=树冠绿系 (56,105,31) 等→新值=planks 深褐系 (71,47,23) 738px）；bbox 内残留
+leaves 445 列逐列分类归因（.temp/verify_veg_reorder2.py）=104 空隙列（bbox 方形与结构
+外缘间≤4px 窄缝，官方同样长树）+341 结构列全为埋入列（结构顶≤地形，官方地表 grass
+同样可种树）+B2 异常列（结构顶>地形仍 leaves）=0——修复零漏洞；逻辑闭环：顶块=leaves
+⟹ 进入植被时顶块可生长 ⟹ 结构未写入该列 ⟹（beard=False）结构顶≤真地形⟹官方一致。
+rp 回归窗 diff=35px 与修复前完全相同（2 个 ocean_ruin 归位），顺序调整零副作用。
+图 .temp/rp_verify/mansion_veg_fixed.png、mansion_veg_fixed_zoom8.png。
+③补：右下角"重叠"澄清（同日，用户反馈右下角仍有树冠与结构重叠，逐列归因证实为官方
+行为而非缺陷）——fill_top_grid 实证**不含树**（341/341 重叠列 fill≠渲染 heights，
+91~112 vs 100~118，即管线首层 heights=纯 WG 地形，树在 4c 才参与）；府邸 bbox 内真地形
+山包 max=114 ≥ 右下翼该处结构顶 106~108 → 结构覆盖 4713 列=露出 4312+埋入 401（341
+山包树冠+60 山包裸地），**露出列树冠=0**。官方依据：Structures.java L91 WOODLAND_MANSION
+单参 StructureSettings 构造（L289→L272 默认）=terrain_adaptation **NONE** 官方不削山；
+树 step=9 晚于结构 step=4，山包地表 grass 可种树、树叶只查目标格为空气故可长进相邻露出
+结构上方的空气格；JM MOTION_BLOCKING heightmap 含树叶→官方 JM 同样显示埋入列树冠与露出
+结构犬牙交错。诊断图 mansion_buried_diag.png（红罩=埋入列/蓝边=露出结构边界）。
+
+**JM 水色精确公式复刻（2026-10-31，block_render.py/jm_colors.py）**：
+用户主诉浅水不透底 + 与原版 JM 配色有差距。以 JM 反编译（.temp/jm_decomp/）+ 用户 26.2-
+NeoForge 实例 config（全默认：mapTransparency=true、mapBathymetry=false、mapBlendWater=
+true、tweakWaterColorBlend=0.5、tweakBrightenDaylightDiff=0.06）为权威全链复刻：①源码链
+=buildStrata（SurfaceRenderer L198-229）自水面 y=62 向下最多 push maxDepth=8 层遇不透明海床
+break（水层数 n≤7 海床入栈、n≥8 栈内全水）；nextUp（Strata.java L117-139）ignoreMiddleFluid
+跳过所有中间水层，只有海床（lightAttenuation=n）与顶层水（=0）参与合成；setStratumColors
+（BaseRenderer L117-166）海床 var8=(15−n)/15+0.06→day=blendWith(bed×var8, wc, 0.5)、顶层水
+var8=1.06→day=wc×1.06；paintStrata（L237-252）render=blendWith(海床day, 顶层水day, 0.7)。
+展开：**result=0.892×wc+0.15×bed×((15−n)/15+0.06)（n≤7）；n≥8 纯 wc×1.06**。②wc 标定：
+water_still.png 为纯灰贴图，1.21.11 jar 32 帧全帧均值 **177.09**（alpha=180 恒定）×biome
+water tint（5×5 整除平均=mapBlendWater+biomeBlendRadius:2）；预期纯水色 ocean (47,87,167)/
+frozen (42,41,148)/cold (45,64,158) 与官方瓦片实测闭合；旧 188/255 系数恰为 177.09×1.06
+的近似（把顶层水亮度吸进基色）、旧 0.45^dep 逐层叠加把 cold 深水误当深度梯度拟合——一并废
+弃。③heights 语义实证=顶方块 y（fill_top_grid/surface 均返回 top=y）：水列 heights=海床、
+水面顶方块 y=62 → 水层数 n=62−heights、h==62=恰好海平面的实心滩涂（无水）、h≤61 才有水覆
+盖。④JM 顺序=先合成后 bevel：calculateSlope 输入水列=水面 62（mapBathymetry=false break
+在水面）→ 坡度段 disp=np.maximum(heights, 62)，删旧「水列强制 slope=1」（岸线水列相对更高
+陆地 <1 自然得 bevel，与 paintStrata L265-273 对合成后水色应用 bevel 一致）。⑤block_render
+.py 4 处编辑：γ 段水列不吃 γ0.94（排除集=heights≤61 ∪ (heights==62 & 顶块 ice)，再剔除
+footprint 盖章列——其亮度是含 γ 拟合的既有验证值）；水色 mask=wet & heights≤61 + ice 顶块
+(heights==62) 特例；公式段 tint 5×5 整除平均×177.09/255 逐级 round 复刻 getBlockColor 的
+toInteger 量化链。⑥冰面：ice/frosted_ice 被 JM 标 Ignore 穿透显示水色；实测 sblob 不产 ice
+顶块（冰面列 heights≤61 走普通水色分支等效正确），minecraft:ice 顶块分支保险保留。验证
+（seed=1，.temp/calc_water_tex_avg.py/fill_water_semantics.py/water_formula_verify2.py）：
+ocean 窗 (0,0) 93721 纯深水列 99.7%=(47,87,167)、非预期 291px=邻浅水台阶 bevel 列 (37,70,
+158)+25px 海底废墟盖章；浅水 h=55..61 七档互异、亮度 95→101 越浅越亮（透底生效）；冻洋窗
+(6144,−6144) frozen (42,41,148)×101469 + cold (45,64,158)×12554 双 tint 各自闭合；mansion
+窗 (18176,−24320) 回归 diff=67736px 分类 water=63383/shore=3654/bad=699（bad 全 h==62 dirt
+系——即次日黄褐修复的目标列）。图 .temp/rp_verify/water_formula_ocean/frozen/mansion.png。
+
+**接壤黄褐色块修复=firstWater 语义对齐官方逐 y 扫描（2026-11-01，_density_module.cpp 重编译）**：
+用户反馈水色公式改版后「陆地与水域接壤处出现大量黄褐色色块，推测是没有处理好的泥土」。诊
+断（.temp/diagnose_shore_brown.py→shore_brown_out.txt）：ocean/mansion 两窗 h==62（恰好顶
+到海平面）非水列 11863px 中 **dirt 9007px（76%）**、最大连通片 675px 成片黄褐；top_block==
+water px=0（沼泽水洼候选排除）；sand 滩涂 2763px 为正常（beach 群系 sand 无 water 条件依赖
+，JM 同样显示沙色）。根因：surface_grid 列循环 `firstWater=(fillTop<seaLevel)?seaLevel:MIN`
+对 fillTop==62 的列也传 water_height=63 → COND_WATER（offset 0，aboveWater）62≥63=FALSE →
+SurfaceRuleData.java L77 grassOrDirtIfUnderwater 走 DIRT 分支；官方 SurfaceSystem.java
+buildSurface L126-157 是**逐 y 扫描**——遇空气即重置 waterHeight=MIN，故 fillTop==62 列的
+顶块处 waterHeight=MIN → aboveWater=TRUE → **grass_block**（寒冷群系经 biomeSurfaceRule 覆
+SNOW_BLOCK）。COND_WATER 移植（_density_module.cpp L2097-2101）与官方 WaterConditionSource
+（L869-878）逐字一致，唯一分歧即 waterHeight 传入语义。修复：surface_grid worker（L2631）
+与 surface_col_dbg 调试探针（L2865）两处改 `(fillTop < seaLevel - 1)`（fillTop≤61 才有水
+覆盖，与官方逐 y 语义等价：顶块上方存在流体 ⟺ fillTop≤seaLevel−2）；Python 镜像
+density_sampler.py 的 under_water 由调用方传入且无渲染主路径调用方，不改。构建：cl 不在裸
+shell PATH，需 vswhere 定位 VS18 Community 加载 vcvars64.bat 后跑 _native/build_density.py
+重编译 _density_sampler.pyd。验证：①诊断复跑 dirt→grass_block 数量精确对应（ocean 6872、
+mansion 2135），sand/stone/gravel 不变；②三窗新旧渲染 diff（.temp/verify_shore_fix.py，
+窗口约定 ocean=(0,0)、frozen=(6144,−6144)、mansion=(18176,−24320)）ocean=6872/frozen=220/
+mansion=3512 **全部落在 h==62、水列内 0、h≠62 为 0——零副作用**；frozen 窗 23 列
+snow_block 覆雪生效（旧黄褐 (139,101,72)/(76,55,46) → 雪白/寒带草色）；黄褐近水像素 ocean
+3881→962、mansion 3533→1557（剩余=sand 滩涂/木构件，属 JM 同款正常显示）。经验：mansion
+回归 diff 必须用府邸中心窗 (AX−256, AZ−256)——上一轮 verify 脚本即因把锚点 (18432,−24064)
+直接当窗左上角偏移 256 格而误报全图 diff。已知剩余差异：沼泽水洼（官方 SurfaceRuleData
+L201-207 在 swamp y=62 处按 SWAMP 噪声把顶块置换成 WATER）在当前 blob 规则未生效（top_block
+==water px=0），沼泽边缘本应 ~50% 蓝色小水洼处显示为草块——与本次主诉无关，暂挂。图
+.temp/rp_verify/shore_fix_ocean/frozen/mansion.png。待办：画廊无需为此全量重渲（变化仅
+h==62 一圈岸线）；git 提交未动。
+
 # 7. 种子逆推核心库（Utils/SeedReverser · 算法）
 
 > 覆盖范围：`Utils/SeedReverser` 包内 6 个算法/数据模块，以及 `_native/` 下 2 个 pybind11 构建脚本。
@@ -3385,7 +3803,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 
 ## `Utils/SeedReverser/_native/build_biome.py`（68 行，简要）
 
-**功能**：构建 SeedReverser 二期世界种子精化扩展：用 MSVC `cl.exe` 直接编译同目录 `_biome_refine.cpp` → `_biome_refine.pyd`（pybind11 扩展，不依赖 setuptools）。产物缺失或加载失败时 `world_seed_refine.py` 自动降级纯 Python 路径。
+**功能**：构建 SeedReverser 二期世界种子精化扩展：用 MSVC `cl.exe` 直接编译同目录 `_biome_refine.cpp` → `_biome_refine.pyd`（pybind11 扩展，不依赖 setuptools）。产物缺失或加载失败时 `world_seed_refine.py` 自动降级纯 Python 路径。该 pyd 亦被 `Utils/MapPreviewer/block_render.py` 复用作精细渲染的 biome 采样加速（`sample_point` 导出，见第 6 章 `_density_module.cpp` 节第二轮优化记录）。
 
 **要点**：编译参数 `/nologo /std:c++20 /utf-8 /O2 /EHsc /MD /LD`，include 路径为 pybind11 与 Python 头文件（`sysconfig.get_paths()["include"]`）；链接 `/LIBPATH:{sys.base_prefix}/libs python313.lib`（注释说明：sysconfig 的 nt 方案无 "libs" 键，python313.lib 位于安装根的 libs/ 下；`/MD` 与官方 Python 发行版运行时一致，vcruntime 由 python313.dll 提供）。编译输出（stdout+stderr）写入 `_build_biome_log.txt`。退出码：0 成功（且 .pyd 存在）、2 源文件缺失或「编译器返回 0 但未找到 .pyd」、其余为编译器返回码。环境要求：cl.exe 在 PATH（建议 "x64 Native Tools Command Prompt for VS"）、venv 已装 pybind11。
 
@@ -4125,7 +4543,7 @@ UI「验证候选种子」的唯一语义来源，与手动验证按钮、层 3 
 | `compose_ruined_portal`（L1209） | `compose_ruined_portal(world_seed: int, block_x: int, block_z: int, biome_id: int = -1, version_key: str = "1.21") -> Composition` | 废弃传送门全量组合（6 主世界变体）。流程见下 |
 | `compose_buried_treasure`（L1253） | `compose_buried_treasure(world_seed: int, block_x: int, block_z: int, version_key: str = "1.21") -> Composition` | 埋藏的宝藏全量组合：`ruined_portal_pieces._BTSim`（锚点 = 区块 (9, 9)，fhi L19 `minBlock+9` 同口径）；单箱 chests/buried_treasure，seed = postProcess 流首 nextLong（找地表无 RNG，与 `loot_seed_for_chest` skips=0 等价）；`extra = {world_seed, n_containers}`；variant_name/rotation/mirror 固定 |
 
-`compose_ruined_portal` 流程（RNG 消耗顺序，fid.a L41-94 照抄）：① `variant = variant_for_biome(biome_id)`（1.21.11 biome tag 数组序首个命中，全不命中 fallback standard；tag 展开 .temp/rp_tags_out.txt）；② `_RPSim`：setup 流 = `chunk_generate_rnd` → setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5）→ air_pocket（p=0/1 短路，否则 1 nextFloat）→ giant 门 nextFloat<0.05 → 模板 nextInt(3)/nextInt(10) → rotation nextInt(4) → mirror nextFloat<0.5→FRONT_BACK → findSuitableY 平坦口径（in_mountain 恒 0 消耗、underground 恒 1 nextInt、partly_buried nextInt(7)+2、on_land_surface/on_ocean_floor 0 消耗）；③ postProcess 流（Xoroshiro128++，salt 变体各档）：块处理器链走位置哈希独立流（fjm.getRandom 铁证）→ 流首个 nextLong = 模板单箱 LootTableSeed；Piece.pos y = sim.y0。`extra = {world_seed, variant, variant_cn, placement, placement_cn, template, giant, air_pocket, mossiness, overgrown, vines, cold, mirror_fb, y0, n_containers}`。
+`compose_ruined_portal` 流程（RNG 消耗顺序，fid.a L41-94 照抄）：① `variant = variant_for_biome(biome_id)`（1.21.11 biome tag 数组序首个命中，全不命中 fallback standard；tag 展开 .temp/rp_tags_out.txt）；② `_RPSim`：setup 流 = `chunk_generate_rnd` → setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5）→ air_pocket（p=0/1 短路，否则 1 nextFloat）→ giant 门 nextFloat<0.05 → 模板 nextInt(3)/nextInt(10) → rotation nextInt(4) → mirror nextFloat<0.5→FRONT_BACK → findSuitableY 平坦口径（in_mountain 恒 0 消耗、underground 恒 1 nextInt、partly_buried nextInt(7)+2、on_land_surface/on_ocean_floor 0 消耗）；③ postProcess 流（Xoroshiro128++，salt 变体各档）：块处理器链走位置哈希独立流（fjm.getRandom 铁证）→ 流首个 nextLong = 模板单箱 LootTableSeed；Piece.pos y = sim.y0。`extra = {world_seed, variant, variant_cn, placement, placement_cn, template, giant, air_pocket, mossiness, overgrown, vines, cold, mirror_fb, y0, n_containers}`。2026-10-31 起 `_RPSim` 支持可选 surface_fn/cold 真实地形注入（MapPreviewer 结构渲染经 `structure_render.ruined_portal_blocks` 直用）；本入口仍平坦口径，行为不变。
 
 ### 公共入口与显示模型
 
@@ -4756,7 +5174,7 @@ RNG 与结构信息表：
 **功能**：废弃传送门（ruined_portal）/ 埋藏的宝藏（buried_treasure）**postProcess 逐方块转写层**——把 `composition.compose_ruined_portal/compose_buried_treasure` 的变体/朝向与锚点展开为模型体素 dict `{(x,y,z): 值}`，并在模拟流中同步产出箱子 LootTableSeed。考证基准：1.21.11 jar 反编译（Vineflower + client_mappings.txt 符号还原，`.temp/decomp/readable2/`、`.temp/rp_procs/`、`.temp/rp_fjm/`）：`fid`（RuinedPortalStructure setup 流）/ `fic`（RuinedPortalPiece 处理器链 + 土堆/支撑柱/vines/叶修饰 + VerticalPlacement 枚举 a:on_land_surface/b:partly_buried/c:on_ocean_floor/d:in_mountain/e:underground/f:in_nether）/ `fhh`（BuriedTreasurePiece 找地表无 RNG + createChest）/ `fhi`（BuriedTreasureStructure 锚点 minBlock+9）/ `ffs`（StructurePiece createChest 1 nextLong + 自动朝向 fallback 链）/ `fjm`（StructurePlaceSettings.getRandom：settings 未 setRandom 时 = `RandomSource.create(Mth.getSeed(worldPos))` 每方块独立流——处理器随机源与 postProcess 流完全无关的铁证）。13 个模板 NBT 已就位 `assets/SeedReverser/templates/ruined_portal__*.nbt`（尺寸/箱子局部坐标/朝向码经 NBT 统计核对）。
 
 **RNG 双流**（与 igloo/pyramid 口径一致）：
-- setup 流 = `chunk_generate_rnd`（Legacy LCG；ffo.java GenerationContext `setLargeFeatureSeed` 铁证）。消耗序（fid.a L41-94）：setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5，逐项减 weight/sum，<0 选定；单 setup 变体无此消耗）→ air_pocket 概率（p=0.0/1.0 直接短路，仅 0<p<1 消耗 1 nextFloat）→ giant 门 `nextFloat<0.05` → 模板 `nextInt(3)`（giant）否则 `nextInt(10)` → rotation `nextInt(4)`（Plane.HORIZONTAL faces {N,E,S,W}）→ mirror `nextFloat<0.5 → FRONT_BACK`（eev 枚举 a=NONE/b=LEFT_RIGHT/c=FRONT_BACK；FRONT_BACK 镜像为 x' = 2*px − x，fjq transform）→ findSuitableY 平坦口径（in_mountain lo=70 恒 0 消耗；underground lo=−49 恒 1 nextInt；partly_buried nextInt(7)+2；on_land_surface/on_ocean_floor 0 消耗、y=64；四角向下扫描平坦恒首格命中）。
+- setup 流 = `chunk_generate_rnd`（Legacy LCG；ffo.java GenerationContext `setLargeFeatureSeed` 铁证）。消耗序（fid.a L41-94）：setups>1 权重判定 1 nextFloat（standard/mountain 各 2 setup 各 weight 0.5，逐项减 weight/sum，<0 选定；单 setup 变体无此消耗）→ air_pocket 概率（p=0.0/1.0 直接短路，仅 0<p<1 消耗 1 nextFloat）→ giant 门 `nextFloat<0.05` → 模板 `nextInt(3)`（giant）否则 `nextInt(10)` → rotation `nextInt(4)`（Plane.HORIZONTAL faces {N,E,S,W}）→ mirror `nextFloat<0.5 → FRONT_BACK`（eev 枚举 a=NONE/b=LEFT_RIGHT/c=FRONT_BACK；FRONT_BACK 镜像为 x' = 2*px − x，fjq transform）→ findSuitableY 平坦口径（in_mountain lo=70 恒 0 消耗；underground lo=−49 恒 1 nextInt；partly_buried nextInt(7)+2；on_land_surface/on_ocean_floor 0 消耗、y=64；四角向下扫描平坦恒首格命中；surface_fn 注入时 y=bb 中心真实地表 + 4 角投影，underground 消耗变条件性——lo<hi 才 nextInt，否则官方取 max 不消耗，见 6 章末 2026-10-31 废弃传送门记录）。
 - postProcess 流（Xoroshiro128++）= population_seed(anchor 区块) + decorator + 10000*step（salt：ruined_portal 各变体 step=4，decorator standard=10/desert=11/jungle=12/mountain=13/ocean=15/swamp=16；buried_treasure step=3、decorator 0）。模板 placeInWorld 的 RandomizableContainer 分支每容器 1 nextLong（ruined 每模板恰 1 箱），**块处理器链（fjj/fiq）的随机源全部走位置哈希独立流、不消耗 postProcess 流**（fjm L110-116）→ 流首个 nextLong = 模板单箱 LootTableSeed（与块序无关）；buried_treasure 找地表/清液体全程无 RNG（fhh L18-48）→ 流首 nextLong 即箱子 seed（与 `loot_seed_for_chest` skips=0 等价）。
 
 **块处理器链**（块序 = NBT blocks 序；fjj 与 fiq 各自独立位置哈希流，`LegacyRandomSource(Mth.getSeed(worldPos))`）：
@@ -4777,7 +5195,7 @@ RNG 与结构信息表：
 | `_PILE_WEIGHTS` | tuple | 土堆 14 项权重表（fic L144 原文 1.0×7 + 0.9/0.9/0.8/0.7/0.6/0.4/0.2）。 |
 | `_load_template` | `@lru_cache(16) (fname: str) -> dict` | 模板 NBT → 体素 dict（局部坐标，NBT blocks 序；只读共享，`structure_models._voxels_from_template_file`）。 |
 | `_rand_stairs` | `(rng) -> (quad, half)` | fiq L71 随机 stairs：FACING = Plane.HORIZONTAL[nextInt(4)]、HALF = Half.values()[nextInt(2)]。 |
-| `_RPSim` | 类 | 废弃传送门单 piece 模拟器。`__init__`（setup 流全序 + postProcess 建流 + 箱 seed = 首个 nextLong + 立即逐块 `_place_template`）；`_t`（局部→世界：先 mirror FRONT_BACK（x' = 2*px − x）后 rot 绕 pivot (sx//2, 0, sz//2) 的 CW90=(−z,x)/CW180=(−x,−z)/CCW90=(z,−x)，与 `_rotate_voxels` R_raw 同向）；`_put/_get`（世界体素写入/查询，None=AIR 挖空）；`_process_fjj`（RuleProcessor 3 规则，位置哈希流）；`_process_fiq`（BlockAgeProcessor 全语义，见上）；`_place_template`（NBT blocks 序逐块 mirror/rot 变换 + 形状码 `shape_mirror(FRONT_BACK)`/`shape_rotation` 同步 + 处理器链 + 箱子 createChest 路径）；`_fill`（土堆块：cold 0 消耗否则 nextFloat<0.07→magma）；`_extend_down`（起点填 + while nextFloat<0.5 向下 ≤8 格）；`_leaves`（1 nextFloat<0.5）；`_mound`（菱形土堆主循环）；`_support`（支撑柱）；`_decor`（vines/overgrown 全格遍历）。属性：`chests = [(世界 x, z, y, 表, seed)]`、`rot/mirror_fb/placement/mossiness/overgrown/vines/cold/y0/...`。 |
+| `_RPSim` | 类 | 废弃传送门单 piece 模拟器。`__init__`（setup 流全序 + postProcess 建流 + 箱 seed = 首个 nextLong + 立即逐块 `_place_template`；可选 surface_fn（(x,z)→列实心顶，MapPreviewer 注入 73×73 真实网格）与 cold——注入后 findSuitableY=bb 中心真实地表 + 4 角投影（in_nether 除外）、underground 补 lo<hi 守卫、_mound 逐列以真实地表为目标；缺省 None 平坦口径）；`_t`（局部→世界：先 mirror FRONT_BACK（x' = 2*px − x）后 rot 绕 pivot (sx//2, 0, sz//2) 的 CW90=(−z,x)/CW180=(−x,−z)/CCW90=(z,−x)，与 `_rotate_voxels` R_raw 同向）；`_put/_get`（世界体素写入/查询，None=AIR 挖空）；`_process_fjj`（RuleProcessor 3 规则，位置哈希流）；`_process_fiq`（BlockAgeProcessor 全语义，见上）；`_place_template`（NBT blocks 序逐块 mirror/rot 变换 + 形状码 `shape_mirror(FRONT_BACK)`/`shape_rotation` 同步 + 处理器链 + 箱子 createChest 路径）；`_fill`（土堆块：cold 0 消耗否则 nextFloat<0.07→magma）；`_extend_down`（起点填 + while nextFloat<0.5 向下 ≤8 格）；`_leaves`（1 nextFloat<0.5）；`_mound`（菱形土堆主循环）；`_support`（支撑柱）；`_decor`（vines/overgrown 全格遍历）。属性：`chests = [(世界 x, z, y, 表, seed)]`、`rot/mirror_fb/placement/mossiness/overgrown/vines/cold/y0/...`。 |
 | `_BTSim` | 类 | 埋藏的宝藏模拟（无 setup 流）：箱在 (minBlockX+9, 63, minBlockZ+9)（fhi L19 锚点 +9、fhh 地表下 1 格平坦口径）；postProcess 流首 nextLong = 箱 seed；体素 = 箱（`chest:e:single`，按"四周全埋" createChest fallback 链取 EAST）+ 顶盖沙 + 3x3 砂岩示意。 |
 | `sim_ruined_portal` | `(world_seed, ax, az, variant) -> _RPSim` | 变体选择 + 双流模拟（compose 与 display 共用，保证同源）。 |
 | `build_ruined_portal_voxels` | `(comp) -> (dict, set)` | 入口（display 调用）：重跑 `_RPSim`，返回（体素 dict（模型系 = 世界−anchor、y−64）, 箱 (x,z) 相对偏移集合）。 |
@@ -4794,7 +5212,7 @@ RNG 与结构信息表：
 | `_HORIZONTAL`/`_DIR_VEC`/`_OPPOSITE` | faces {N,E,S,W} 序 / 方向向量 / 反向表。 |
 | `_FIQ_STONE`/`_FIQ_SLABS`/`_FIQ_WALLS`/`_HALVES` | fiq 输入块集（stairs/slabs/walls tag 判定按模板内唯一成员：stairs 仅 stone brick stairs、slab 仅 stone brick slab/stone slab、无 wall——NBT 材质统计实证）/ Half 枚举序 (t, b)。 |
 
-**已知妥协**（模块 docstring 声明）：土堆/支撑柱的地表采样平坦口径恒 64（RNG 消耗序列自洽，箱子 seed 不受影响——箱在模板 placeInWorld 内先行抽取）；vines 支撑面简化为"邻位空气即可挂"；buried_treasure 真实 y/沙层厚度不可从种子预测（平坦画地表下一格 + 3x3 砂岩示意，LootTableSeed 与真实游戏严格一致）；buried_treasure 箱子朝向取"四周全埋" fallback 链的 EAST（随地形开口变化，无 RNG 不可判）；fiq 随机 stairs 的 HALF 按枚举序 (TOP, BOTTOM)（1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
+**已知妥协**（模块 docstring 声明）：土堆/支撑柱的地表采样平坦口径恒 64（RNG 消耗序列自洽，箱子 seed 不受影响——箱在模板 placeInWorld 内先行抽取；2026-10-31 起 _RPSim 支持可选 surface_fn/cold 真实地形注入，MapPreviewer 结构渲染已接入，注入后残余近似仅 cold 的高山温度衰减项——temperature<0.15 简化判定，见 6 章末废弃传送门记录）；vines 支撑面简化为"邻位空气即可挂"；buried_treasure 真实 y/沙层厚度不可从种子预测（平坦画地表下一格 + 3x3 砂岩示意，LootTableSeed 与真实游戏严格一致）；buried_treasure 箱子朝向取"四周全埋" fallback 链的 EAST（随地形开口变化，无 RNG 不可判）；fiq 随机 stairs 的 HALF 按枚举序 (TOP, BOTTOM)（1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
 
 ---
 
