@@ -146,9 +146,17 @@ ocean, nether，第一个 tag 命中者胜出；全不命中时 fallback standar
   - buried_treasure 箱子朝向按"四周全埋"的 createChest fallback
     链（NORTH 被占->SOUTH->WEST->EAST，ffs L321-336）取 EAST，
     真实朝向随地形开口变化（无 RNG，预览不可判）；
-  - fiq stairs 随机朝向的 FACING 用 Plane.HORIZONTAL（nextInt(4)，
-    faces[N,E,S,W]）、HALF 用 Half.values()[nextInt(2)]（TOP,BOTTOM
-    序——1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
+ - fiq stairs 随机朝向的 FACING 用 Plane.HORIZONTAL（nextInt(4)，
+   faces[N,E,S,W]）、HALF 用 Half.values()[nextInt(2)]（TOP,BOTTOM
+   序——1.21.11 未单独反编译 ep 枚举，按 Mojang 源序）。
+ - 可选真实地形扩展（MapPreviewer 专用，默认参数不改变上述平坦口径）：
+   surface_fn(x, z) 逐列实心顶查询（fill_top 网格，等价 getBaseHeight
+   -1；WORLD_SURFACE_WG 的水面口径差异——官方 world surface 含水，
+   fill_top 不含，仅影响 on_land_surface 土堆延伸到水面的个案）；
+   findSuitableY 用 bb 中心真实地表 + 4 角投影扫描（无 RNG）；
+   underground 的 getRandomWithinInterval 补 lo<hi 守卫（深海底
+   surface-sy<=lo 时官方直接取 max 无消耗）；cold 参数覆盖
+   can_be_cold 静态口径（真实 coldEnoughToSnow 评估）。
 """
 from __future__ import annotations
 
@@ -321,12 +329,17 @@ class _RPSim:
     """废弃传送门单 piece 模拟（setup 流 + 处理器链 + postProcess 修饰）。"""
 
     def __init__(self, world_seed: int, ax: int, az: int,
-                 variant_key: str) -> None:
+                 variant_key: str, surface_fn=None,
+                 cold: bool | None = None) -> None:
         self.voxels: dict = {}        # (世界x, 世界y, 世界z) -> 值
         self.chests: list = []        # (wx, wz, y_world, table, seed)
         self.ax = ax
         self.az = az
         self.variant = variant_key
+        # 真实地表采样口（MapPreviewer 传入 fill_top_grid 网格查询；
+        # None = 平坦口径 64，StructurePreviewer 行为不变）：
+        # 官方 getSurfaceY/getBaseHeight 无 RNG，逐列/逐点采样不影响流。
+        self.surface_fn = surface_fn
 
         # ---------------- setup 流（Legacy LCG，chunk_generate_rnd） --
         from Utils.Public import structure_map
@@ -347,6 +360,8 @@ class _RPSim:
             setup = setups[0]
         (self.placement, p_air, self.mossiness, self.overgrown,
          self.vines, self.cold, self.blackstone, _w) = setup
+        if cold is not None:   # 真实 coldEnoughToSnow 评估（MapPreviewer）
+            self.cold = cold
         if p_air == 0.0:                          # fid L104-110
             self.air_pocket = False
         elif p_air == 1.0:
@@ -372,8 +387,16 @@ class _RPSim:
         self.px = self.sx // 2
         self.pz = self.sz // 2
 
-        # ---------------- findSuitableY（fid L116-158 平坦口径） ----
-        surface = 64                 # getBaseHeight(type)-1 平坦基准
+        # ---------------- findSuitableY（fid L116-158） -------------
+        # 平坦口径 surface=64（getBaseHeight(type)-1 基准）；传入
+        # surface_fn 时按官方取 bb 中心列真实地表（fid L112-116，无 RNG）。
+        if surface_fn is not None:
+            bx0, bz0, bx1, bz1 = self._bb()
+            ccx = bx0 + (bx1 - bx0 + 1) // 2      # BoundingBox.getCenter
+            ccz = bz0 + (bz1 - bz0 + 1) // 2
+            surface = surface_fn(ccx, ccz)
+        else:
+            surface = 64                 # getBaseHeight(type)-1 平坦基准
         if self.placement == "in_nether":
             self.y0 = surface        # 主世界不出现，防御分支
         elif self.placement == "in_mountain":
@@ -385,13 +408,29 @@ class _RPSim:
                 self.y0 = hi
         elif self.placement == "underground":
             lo, hi = -49, surface - self.sy    # getMinY()+15 = -49
-            yv, state = mc_random.next_int(state, hi - lo + 1)
-            self.y0 = yv + lo
+            # getRandomWithinInterval 守卫（lo<hi 才消耗）：真实地形下
+            # 深海海床 surface-sy 可能 <= lo，官方直接取 max 无 RNG。
+            if lo < hi:
+                yv, state = mc_random.next_int(state, hi - lo + 1)
+                self.y0 = yv + lo
+            else:
+                self.y0 = hi
         elif self.placement == "partly_buried":
             off, state = mc_random.next_int(state, 7)
             self.y0 = surface - self.sy + off + 2
         else:   # on_land_surface / on_ocean_floor
             self.y0 = surface
+        # 真实地形：4 角投影扫描（fid L206-233）。角柱 getBaseColumn 按
+        # heightmap 类型（OCEAN_FLOOR_WG/WORLD_SURFACE_WG）判不透明——
+        # density 口径下 water 均不拦，等价 y <= 该列实心顶（fill_top）。
+        # 自 newY 向下首个「3/4 角实心」y = min(newY, 角顶第 3 大值)，
+        # 全程无 RNG；平底恒 min(newY,64)=newY 不改变旧行为，故仅
+        # surface_fn 模式启用。
+        if surface_fn is not None and self.placement != "in_nether":
+            tops = sorted((surface_fn(x, z) for x, z in
+                           ((bx0, bz0), (bx1, bz0),
+                            (bx0, bz1), (bx1, bz1))), reverse=True)
+            self.y0 = max(-49, min(self.y0, tops[2]))
 
         # ---------------- postProcess 流（Xoroshiro） ----------------
         step, decorator = loot_rng.salt_configs_for_version(
@@ -600,8 +639,12 @@ class _RPSim:
             self._put(wx, wy + 1, wz, JUNGLE_LEAVES)
 
     def _mound(self) -> None:
-        """fic b(bgr,dwp)（L139-173）菱形 netherrack 土堆（平坦口径：
-        地表采样恒 64；a() 判定用体素 dict——非空且非黑曜石/熔岩）。"""
+        """fic b(bgr,dwp)（L139-173）菱形 netherrack 土堆。
+
+        官方 y = followGroundSurface(on_land_surface/on_ocean_floor) ?
+        逐列 getSurfaceY : min(bb.minY, 逐列 getSurfaceY)（|y-bb.minY|<=3
+        在 y 计算后判定，fic L161）；平坦口径恒 64。逐列采样无 RNG，
+        紧接 nextDouble 概率门之后的消耗序不变。"""
         bb0x, bb0z, bb1x, bb1z = self._bb()
         cx = bb0x + (bb1x - bb0x + 1) // 2       # BoundingBox.getCenter
         cz = bb0z + (bb1z - bb0z + 1) // 2
@@ -609,7 +652,6 @@ class _RPSim:
         pile_off = self.rng.next_int(max(1, 8 - span2 // 2))
         surface_like = self.placement in ("on_land_surface",
                                           "on_ocean_floor")
-        target = 64 if surface_like else min(self.y0, 64)
         for dx in range(-14, 15):                # x 外层 z 内层
             for dz in range(-14, 15):
                 dist = max(0, abs(dx) + abs(dz) + pile_off)
@@ -618,6 +660,12 @@ class _RPSim:
                 if self.rng.next_double() >= _PILE_WEIGHTS[dist]:
                     continue
                 wx, wz = cx + dx, cz + dz
+                if self.surface_fn is not None:
+                    surf = self.surface_fn(wx, wz)   # 逐列 getSurfaceY
+                    target = surf if surface_like \
+                        else min(self.y0, surf)
+                else:
+                    target = 64 if surface_like else min(self.y0, 64)
                 cur = self._get(wx, target, wz)
                 if cur is not None and cur in (OBSIDIAN, LAVA):
                     continue                     # a() 判定不过

@@ -2392,6 +2392,21 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
                 top_y = None
         return str(nm), top_y
 
+    def _hover_fine_txt(self, bx: int, bz: int):
+        """精细瓦片命中时的悬停前缀 "X .. Y .. Z .. | 块中文名"；
+        未命中（未开精细/无该瓦片）返回 None。"""
+        fb = self._fine_block_at(bx, bz)
+        if not fb:
+            return None
+        bname, by = fb
+        try:
+            from Utils.MapPreviewer.block_names_cn import block_cn_name
+            cn = block_cn_name(bname)
+        except Exception:
+            cn = bname.split(":")[-1]
+        ytxt = "Y -" if by is None else f"Y {by}"
+        return f"X {bx}  {ytxt}  Z {bz}  |  {cn}"
+
     def _update_hover(self, pos) -> None:
         blk = self._scene_block(pos)
         if blk is None:
@@ -2406,30 +2421,28 @@ class MapPreviewerWidget(BaseToolWidget, Ui_mapPreviewer):
         col = (bx - origin_bx) >> 2
         row = (bz - origin_bz) >> 2
         h, w = biomes.shape[:2]
+        # 精细瓦片不依赖初始矩阵范围：远处（矩阵外）悬停同样要给
+        # 方块类型/Y 坐标，否则离原点较远处永远缺失块名与 Y
+        # （2026-10-30 用户实测反馈：原实现只在矩阵内分支查询）
+        fine_pre = self._hover_fine_txt(bx, bz)
         if not (0 <= row < h and 0 <= col < w):
             # 初始矩阵范围外（无限地图新区域）：按需采样该噪声格
             bid = self._probe_biome(bx, bz)
             if bid is None:
-                self.labelHover.setText(f"X {bx}  Z {bz}")
+                self.labelHover.setText(fine_pre or f"X {bx}  Z {bz}")
                 self._clear_marker_tip()
                 return
-            self.labelHover.setText(
-                f"X {bx}  Z {bz}  |  {biome_cn_name(bid)} (id {bid})")
+            if fine_pre:
+                self.labelHover.setText(
+                    f"{fine_pre}  |  {biome_cn_name(bid)} (id {bid})")
+            else:
+                self.labelHover.setText(
+                    f"X {bx}  Z {bz}  |  {biome_cn_name(bid)} (id {bid})")
             self._clear_marker_tip()
             return
         bid = int(biomes[row, col])
-        # 精细渲染开启时优先显示该点的真实顶块
-        fb = self._fine_block_at(bx, bz)
-        if fb:
-            bname, by = fb
-            try:
-                from Utils.MapPreviewer.block_names_cn import block_cn_name
-                cn = block_cn_name(bname)
-            except Exception:
-                cn = bname.split(":")[-1]
-            ytxt = "Y -" if by is None else f"Y {by}"
-            self.labelHover.setText(
-                f"X {bx}  {ytxt}  Z {bz}  |  {cn}  |  {biome_cn_name(bid)}")
+        if fine_pre:
+            self.labelHover.setText(f"{fine_pre}  |  {biome_cn_name(bid)}")
         else:
             self.labelHover.setText(
                 f"X {bx}  Z {bz}  |  {biome_cn_name(bid)} (id {bid})")

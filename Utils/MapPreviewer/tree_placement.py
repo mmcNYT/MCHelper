@@ -138,5 +138,10 @@ def place_trees_in_rect(seed: int, x0: int, z0: int, w: int, h: int,
             for (bx, bz, sp, rad, col) in chunk_trees(seed, cx, cz, bkey, sub):
                 px, pz = bx - x0, bz - z0
                 if 0 <= px < w and 0 <= pz < h:
+                    # 官方 placed_feature 的 minecraft:biome placement
+                    # filter：落点群系必须等于特征所属群系（这里以 chunk
+                    # 中心群系近似），否则稀疏丛林的树会跨群系长进竹林格。
+                    if id2key.get(int(biome_grid[pz, px]), "") != bkey:
+                        continue
                     trees.append((px, pz, sp, rad, col, int(heights[pz, px])))
     return trees

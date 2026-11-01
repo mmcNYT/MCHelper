@@ -62,7 +62,10 @@ _TOP_COLORS: dict[str, tuple[int, int, int]] = {
     "minecraft:deepslate": (88, 86, 84),
     "minecraft:dirt": (142, 106, 76),
     "minecraft:coarse_dirt": (130, 96, 68),
-    "minecraft:podzol": (98, 78, 42),
+    # JM 语义：podzol 颜色 = podzol_top 贴图全像素均值（反编译确认
+    # calculateAverageColor = 所有 sprite 全部 alpha>0 像素的 R/G/B 简单平均；
+    # podzol 不在 grass/foliage/water tint 列表 -> 原色）。jar 实测 (92,63,24)
+    "minecraft:podzol": (92, 63, 24),
     "minecraft:mycelium": (112, 102, 104),
     "minecraft:farmland": (120, 85, 56),
     "minecraft:sand": (228, 214, 170),
@@ -146,6 +149,9 @@ def is_available() -> bool:
 
 _PACK_CACHE: dict[int, dict] = {}
 
+# native 群系扩展（_biome_refine）已推入的 btree 版本名（避免重复推数据）
+_BRT_BTREES: set = set()
+
 
 def _get_pack(seed: int) -> dict:
     """构建并缓存 native 渲染包：密度 ctx + surface blob + 方块名表 + biome 采样器。"""
@@ -195,6 +201,9 @@ def _get_pack(seed: int) -> dict:
         "minecraft:oak_slab", "minecraft:oak_planks", "minecraft:cobblestone",
         "minecraft:glass_pane", "minecraft:oak_fence", "minecraft:oak_log",
         "minecraft:dirt_path", "minecraft:wheat", "minecraft:torch",
+        # 冰山 feature（IcebergFeature）出水主块：blue_ice 不在 surface
+        # blob 的 id 空间（packed_ice 已有），需补录才能参与最高方块竞争
+        "minecraft:blue_ice",
     ] + _STRUCTURE_MATERIALS
     _have = set(block_names)
     for _nm in _EXTRA:
@@ -226,6 +235,26 @@ def _get_pack(seed: int) -> dict:
         "id2key": id2key,
         "bs": BiomeSampler(seed, "26.2"),
     }
+    # native 群系网格加速（SeedReverser 二期 C++ 扩展，对拍 3000 点逐位一致）：
+    # biome 循环逐格一次拿到 np6 + bid（Python 路径每格要算两遍 climate）；
+    # 扩展缺失或推树失败时为 None，走纯 Python 降级路径。
+    try:
+        from Utils.SeedReverser._native import _biome_refine as _brt
+        _bt = bn.get_btree("26.2")
+        if _bt.name not in _BRT_BTREES:
+            _brt.set_btree(
+                _bt.name,
+                np.ascontiguousarray(_bt.steps, dtype=np.uint32),
+                np.ascontiguousarray(_bt.param, dtype=np.int64),
+                np.ascontiguousarray(_bt.nodes, dtype=np.uint64),
+                _bt.order,
+            )
+            _BRT_BTREES.add(_bt.name)
+        pack["brt"] = _brt
+        pack["brt_name"] = _bt.name
+    except Exception:
+        pack["brt"] = None
+        pack["brt_name"] = ""
     _PACK_CACHE.clear()          # 只缓存一个 seed（切 seed 重建）
     _PACK_CACHE[seed] = pack
     return pack
@@ -404,6 +433,9 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
 
     # ---- 2) biome 网格（列顶处，4x4 量化后广播）----
     bs = pack["bs"]
+    brt = pack.get("brt")
+    brt_name = pack.get("brt_name", "")
+    seed64 = seed & 0xFFFFFFFFFFFFFFFF
     qh, qw = (h + 3) // 4, (w + 3) // 4
     qbid = np.zeros((qh, qw), dtype=np.int32)
     qt = np.zeros((qh, qw), dtype=np.float32)
@@ -414,10 +446,19 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
             x = x0 + qc * 4
             top = int(heights[min(qr * 4, h - 1), min(qc * 4, w - 1)])
             ny = max(-64, min(319, top)) >> 2
-            cp = bs.climate_point_xz(x >> 2, z >> 2, ny)
-            qbid[qr, qc] = bs.biome_at(x >> 2, ny, z >> 2)
-            qt[qr, qc] = cp[0]
-            qh2[qr, qc] = cp[1]
+            if brt is not None:
+                # C++ 单点采样（与 biome_noise.py 对拍 3000 点逐位一致），
+                # np6 与 bid 一次拿到（Python 路径每格要算两遍 climate）
+                r = brt.sample_point(seed64, brt_name, x >> 2, ny, z >> 2)
+                np6 = r["np6"]
+                qbid[qr, qc] = r["biome_id"]
+                qt[qr, qc] = np6[0]
+                qh2[qr, qc] = np6[1]
+            else:
+                cp = bs.climate_point_xz(x >> 2, z >> 2, ny)
+                qbid[qr, qc] = bs.biome_at(x >> 2, ny, z >> 2)
+                qt[qr, qc] = cp[0]
+                qh2[qr, qc] = cp[1]
     biome_grid = np.repeat(np.repeat(qbid, 4, axis=0), 4, axis=1)[:h, :w]
     tq = np.repeat(np.repeat(qt, 4, axis=0), 4, axis=1)[:h, :w]
     hq = np.repeat(np.repeat(qh2, 4, axis=0), 4, axis=1)[:h, :w]
@@ -441,31 +482,98 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
                            x0, z0, wet=wet)
 
-    # ---- 4b) 植被：写入 blocks/heights 参与「每列最高方块」竞争 ----
-    # 真俯视图的语义：树叶高于地面 -> 该列顶块变成 leaves。
-    # 不再"覆盖颜色"，而是改变该列的最高方块，最后统一配色。
-    if _veg is not None and want_surface:
-        _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
-                          out_blocks=blocks, out_heights=heights)
+    # ---- 4a+) 冰山：官方 IcebergFeature 复刻（frozen_ocean/
+    # deep_frozen_ocean，features[2] LOCAL_MODIFICATIONS，官方装饰顺序在
+    # 树 step=9 之前）----
+    # 出水部分写入 blocks/heights 参与「每列最高方块」竞争（JM 语义：
+    # packed_ice/blue_ice/snow_block 均 motion blocking，正常显示冰色/雪帽
+    # + heightmap 台阶 bevel；海面冰层 ice/snow layer 被 JM Ignore 穿透
+    # 显示水色，见 _colorize_blocks 冰面注释）。
+    if want_surface:
+        from Utils.MapPreviewer import iceberg_placement as _ibp
+        _bergs = _ibp.iceberg_placements(seed, x0, z0, w, h, heights,
+                                         biome_grid, pack["id2key"], _SEA)
+        for _bx, _bz, _by, _bn in _bergs:
+            _gy = _bz - z0
+            _gx = _bx - x0
+            _nid = pack["name2bid"].get(_bn)
+            if _nid is not None and _by > heights[_gy, _gx]:
+                heights[_gy, _gx] = _by
+                blocks[_gy, _gx] = _nid
 
-    # ---- 4c) 结构：同样是参与最高方块竞争 ----
+    # ---- 4b) 结构：官方装饰顺序 SURFACE_STRUCTURES(step=4) 在树
+    # VEGETAL_DECORATION(step=9) 之前，同为参与「每列最高方块」竞争 ----
+    # 画在植被之前的官方语义：树在结构之后放置，树放置的土壤检查在
+    # 木板/石砖等结构材质上失败 -> 树不会长在结构上（26.2 官方行为）。
+    # 此前结构画在植被之后，府邸周边树冠越过屋顶边缘（用户实证）。
+    # footprint 近似结构（府邸/海底神殿等）无真实方块 id 进不了 blocks
+    # 通道，在 4d 统一配色里会被整体冲掉——此处只收集，4d 之后由
+    # _flush_footprints 盖章（同竹点 4e 移到配色之后的原因）。
+    fp_queue: list = []
     if structures and want_surface:
         _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, "26.2",
-                          pack=pack)
+                          pack=pack, footprints_out=fp_queue)
+
+    # ---- 4c) 植被：写入 blocks/heights 参与「每列最高方块」竞争 ----
+    # 真俯视图的语义：树叶高于地面 -> 该列顶块变成 leaves。
+    # 不再"覆盖颜色"，而是改变该列的最高方块，最后统一配色。
+    # 树冠的 growable 材质检查基于**此时**的 blocks 快照：4b 已写入结构
+    # 材质（planks/石砖等不在 _GROWABLE），树冠天然不长上结构。
+    if _veg is not None and want_surface:
+        bamboo_cells = _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
+                          out_blocks=blocks, out_heights=heights)
+    else:
+        bamboo_cells = None
 
     # ---- 4d) 统一配色：按最终 blocks（每列最高方块）重新上色 ----
+    # wet 必须按**最终 heights** 重算：结构（岸边的沉船/废弃传送门）会把
+    # 原本水下的列抬出水面（heights>=海平面），若沿用结构前的旧 wet，
+    # 第二次配色会把这些列按水色重画——且 dep=_SEA-heights=0 恰好触发
+    # 近岸白 (201,236,255)，表现为岸线上断续的 1px 白条（沉船露出部分）。
+    wet = heights < _SEA
     rgb = _colorize_blocks(blocks, heights, tq, hq, biome_grid, pack,
                            x0, z0, wet=wet)
+
+    # ---- 4e') footprint 结构覆盖：必须在 4d 之后（同竹点 4e 的原因，
+    # 否则被统一配色整体冲掉——mansion/monument/desert_pyramid 等全灭
+    # 的实证见 probe_footprint_ab：mansion 窗口 A/B diff=0）。之后仍吃
+    # hillshade 坡度阴影。
+    if fp_queue:
+        _flush_footprints(rgb, heights, fp_queue)
 
     # ---- 5) 影调 → 颗粒 → 山体阴影（分级）----
     # 顺序很重要：影调和颗粒必须在乘法式阴影之前完成，否则会把已量化的
     # shade 层级重新打散，失去"每层分明"的平台感。
     rgb = rgb.astype(np.float32)
+    # ---- 4e) 竹子点缀（竹林专属）：竹子不在 block_names，只能在此
+    # （4d 统一配色之后）直接覆盖 rgb；之后仍会吃 hillshade 坡度阴影。
+    if bamboo_cells is not None:
+        _apply_bamboo_dots(rgb, bamboo_cells[1])
     if hillshade:
         # 影调：参考实测方块亮度范围 32~207、色阶 158 级，说明亮部要拉高、
         # 色阶要丰富。仅做轻微 γ 与高光软膝（膝点上移到 0.86，不再压扁）。
+        # 水列不做 γ：4d 的水色是按 JM 源码精确合成的绝对色（官方深水
+        # 实测三群系闭合），JM 渲染链没有这一步整体提亮——吃 γ 会使深水
+        # (46,87,168) 偏亮到 (51,93,172)。排除集=真实水列(heights<=61)
+        # +海面单层冰列(heights==62 顶块 ice)，再剔除 footprint 盖章列
+        # （海底神殿/海底废墟等水下矩形色的亮度是含 γ 拟合的既有验证值，
+        # 保持原处理）。
+        _wgamma = (heights < _SEA - 1) | ((heights == _SEA - 1)
+                                          & (blocks == pack["name2bid"]
+                                             .get("minecraft:ice", -1)))
+        for _fk, _fax, _faz, _fland in fp_queue:
+            _fw, _fl = _FOOTPRINTS[_fk][:2]
+            _rx0 = max(0, _fax - _fw // 2)
+            _rz0 = max(0, _faz - _fl // 2)
+            _hr = heights[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw]
+            _sub = _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw].copy()
+            if _fland:
+                _sub &= _hr >= _SEA
+            else:
+                _sub &= _hr < _SEA
+            _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw] = _sub
         t = np.clip(rgb, 0.0, 255.0) / 255.0
-        t = np.power(t, 0.94)
+        t = np.where(_wgamma[..., None], t, np.power(t, 0.94))
         # 不做高光压缩：官方瓦片实测平地雪保持 (255,255,255)
         # （132220 像素为纯白，占已探索像素的第三位），
         # 原来的 knee 会把 249 压到 238，使雪面发灰。
@@ -473,15 +581,33 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
     # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
     # 地表完全不做色彩抖动：同一地形层必须同色，否则画面破碎。
-    # 色相/亮度变异只保留在树冠（_apply_vegetation 的球面光照 + 树种混生）。
+    # 亮度变异只来自坡度（JM bevelSlope，树冠台阶见 _veg.crown_step）与树种混生。
     if hillshade:
         # JourneyMap 斜坡阴影：按邻列高度差算坡度因子，再对 RGB 做
         # bevel（R/G 额外 *0.85、B 只乘 slope）-> 斜坡变暗且偏蓝。
         # 坡度纯由地形决定，同坡同色，不随机。
+        # 显示高度修复（接壤配色差异数值根因）：JM calculateSlope 的输入
+        # 是 getBlockHeight（SurfaceRenderer L142-196），mapBathymetry=
+        # false 时水列停在**水面顶方块 y=62**，与海床深度无关——水面内
+        # 部恒平（slope=1），岸线坡度只来自真实地形高差。此前直接传海床
+        # heights，把水下深度梯度当坡度，岸线一圈出现 JM 没有的强 bevel。
+        # heights 语义=顶方块 y（fill_top_grid 返回 top=y），故水列显示
+        # 高度=np.maximum(heights, 62)。
         from Utils.MapPreviewer import jm_colors as _jm
-        slope = _jm.slope_from_heights(heights, x0, z0)
-        water_mask = heights < _SEA
-        slope = np.where(water_mask, 1.0, slope).astype(np.float32)
+        disp = np.maximum(heights.astype(np.float32), float(_SEA - 1))
+        slope = _jm.slope_from_heights(disp, x0, z0)
+        # （旧「水列强制 slope=1」已删：水列 slope 由水面平齐语义自然给
+        # 出；岸线水列相对更高陆地 <1 -> bevelSlope 生效，与 JM
+        # paintStrata L265-273 对合成后水色应用 bevel 的顺序一致。）
+        # 竹点 NoShadow（VanillaBlockHandler：竹 NoShadow 旗标）-> JM
+        # showSlope=false（SurfaceRenderer L103：顶块带 NoShadow 的列不加
+        # bevel），竹色保持平涂
+        if bamboo_cells and bamboo_cells[1]:
+            _dy = np.fromiter((c[0] for c in bamboo_cells[1]), np.int64,
+                              len(bamboo_cells[1]))
+            _dx = np.fromiter((c[1] for c in bamboo_cells[1]), np.int64,
+                              len(bamboo_cells[1]))
+            slope[np.clip(_dy, 0, h - 1), np.clip(_dx, 0, w - 1)] = 1.0
         rb = slope < 1.0
         f = np.where(rb, _jm.BEVEL_DARKEN, 1.0).astype(np.float32)
         rgb = rgb.astype(np.float32)
@@ -538,11 +664,16 @@ _BIOME_GRASS_DEFAULT = (108, 142, 76)
 
 
 def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
-                         gray: float = None) -> np.ndarray:
+                         gray: float = None, x0: int = 0, z0: int = 0) -> np.ndarray:
     """按群系给出草色（同群系同色，不随温湿度逐点渐变）。
 
     统一走 MC 官方公式：final = biome_grass_tint * texture_gray / 255。
-    色表来自 jm_colors._BIOME_TINTS（已用官方 JourneyMap 瓦片反推验证）。
+    色表来自 jm_colors._BIOME_TINTS（26.2 官方语义全量生成）。
+    例外：swamp/mangrove_swamp 草色是官方 SWAMP modifier 的逐坐标
+    噪声二值（BiomeSpecialEffects.GrassColorModifier.SWAMP，BIOME_INFO_NOISE
+    seed 2345），JM 再叠 biomeBlendRadius² 网格平均（JmBlockAccess
+    method_23752，用户 biomeBlendRadius=2 -> 5×5），无法用表值，
+    由 _swamp_grass_field 逐方块复刻。
     """
     from Utils.MapPreviewer import jm_colors as _jm
     h, w = biome_grid.shape
@@ -553,9 +684,20 @@ def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
         gb = pal.get("minecraft:grass_block")
         gray = float(gb[1]) if gb else 147.0
     cache: dict[int, tuple] = {}
+    swamp_bids = {bid for bid, k in id2key.items()
+                  if k.split(":")[-1] in ("swamp", "mangrove_swamp")}
+    swamp_field = None
     for r in range(h):
         for c in range(w):
             bid = int(biome_grid[r, c])
+            # swamp 系是逐坐标噪声场，严禁按 bid 缓存（同 bid 不同位
+            # 置颜色不同），逐像素取场值（同样乘贴图灰度）
+            if bid in swamp_bids:
+                if swamp_field is None:
+                    swamp_field = _swamp_grass_field(
+                        biome_grid, id2key, x0, z0)
+                out[r, c] = swamp_field[r, c] * (gray / 255.0)
+                continue
             col = cache.get(bid)
             if col is None:
                 k = id2key.get(bid, "")
@@ -563,6 +705,65 @@ def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
                 col = tuple(int(round(v * gray / 255.0)) for v in t)
                 cache[bid] = col
             out[r, c] = col
+    return out
+
+
+# 官方 SWAMP modifier 二值色（BiomeSpecialEffects.java L87-92：
+# groundValue < -0.1 ? -11766212 : -9801671，即 0x4C603C / 0x6A7039）
+_SWAMP_COLD = (76, 96, 60)      # noise < -0.1
+_SWAMP_WARM = (106, 112, 57)    # noise >= -0.1
+_SWAMP_BLEND = 2                # 用户 biomeBlendRadius=2 -> 5×5 网格
+
+
+def _swamp_grass_field(biome_grid: np.ndarray, id2key: dict,
+                       x0: int, z0: int) -> np.ndarray:
+    """swamp/mangrove_swamp 草色场：官方 SWAMP modifier + JM blend。
+
+    每方块 (bx,bz)：noise(bx*0.0225, bz*0.0225) < -0.1 ?
+    (76,96,60) : (106,112,57)（BIOME_INFO_NOISE = PerlinSimplexNoise
+    seed 2345 octave [0]，与世界种子无关），再对以该方块为中心的
+    (2*dist+1)² 网格逐通道整除平均（JmBlockAccess.method_23752）。
+    为性能预计算掩码 bbox 外扩 dist 的噪声图，滑窗求和向量化。
+    """
+    from Utils.MapPreviewer.density_sampler import _biome_info_noise
+    noise = _biome_info_noise()
+    h, w = biome_grid.shape
+    d = _SWAMP_BLEND
+    # swamp 系掩码 bbox（全像素精确判定，与其他段一致）
+    mask = np.zeros((h, w), bool)
+    for r in range(h):
+        for c in range(w):
+            if id2key.get(int(biome_grid[r, c]), "").split(":")[-1] in (
+                    "swamp", "mangrove_swamp"):
+                mask[r, c] = True
+    out = np.zeros((h, w, 3), np.float32)
+    rs, cs = np.nonzero(mask)
+    if rs.size == 0:
+        return out
+    r0, r1 = int(rs.min()), int(rs.max())
+    c0, c1 = int(cs.min()), int(cs.max())
+    hh, ww = r1 - r0 + 1, c1 - c0 + 1
+    # bbox 外扩 d 的噪声图：row=世界 z、col=世界 x
+    nh, nw = hh + 2 * d, ww + 2 * d
+    vals = np.empty((nh, nw), np.float32)
+    for rr in range(nh):
+        bz = z0 + r0 - d + rr
+        bx = x0 + c0 - d
+        for cc in range(nw):
+            vals[rr, cc] = noise.get_value(
+                (bx + cc) * 0.0225, bz * 0.0225, False)
+    below = (vals < -0.1).astype(np.int32)
+    # 滑窗 (2d+1)² 计数：s[r,c] = 邻域内 <-0.1 的点数
+    s = np.zeros((hh, ww), np.int32)
+    total = (2 * d + 1) ** 2
+    for dy in range(2 * d + 1):
+        for dx in range(2 * d + 1):
+            s += below[dy:dy + hh, dx:dx + ww]
+    # 逐通道整除平均（Java 整除语义）
+    for i in range(3):
+        out[r0:r1 + 1, c0:c1 + 1, i] = (
+            (_SWAMP_COLD[i] * s + _SWAMP_WARM[i] * (total - s)) // total
+        )
     return out
 
 
@@ -671,9 +872,11 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
 
     # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
     # 逐点 tint 会让同一高度层出现上百种绿，画面破碎（实测同层 143 色）。
+    # swamp/mangrove_swamp 由 _grass_tint_by_biome 内部逐坐标复刻
+    # 官方 SWAMP modifier（噪声二值 + 5×5 平均），不再硬编码经验色。
     gmask = np.isin(nm, list(_GRASS_BLOCKS))
     if gmask.any():
-        _gt = _grass_tint_by_biome(biome_grid, pack)
+        _gt = _grass_tint_by_biome(biome_grid, pack, x0=x0, z0=z0)
         rgb[gmask] = _gt[gmask]
 
     # 寒冷群系覆雪：MC 的雪由 biome 的 freeze_top_layer feature 实现，
@@ -689,18 +892,6 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         sc = gmask & cold
         if sc.any():
             rgb[sc] = colors.get("minecraft:snow_block", (150, 158, 176))
-
-    # 沼泽/红树林草地：参考实测暗黄绿 (64,74,44)，比通用草 tint 更暗偏黄
-    if gmask.any():
-        sw = np.zeros((h, w), bool)
-        for r in range(0, h, 4):
-            for c in range(0, w, 4):
-                k = pack["id2key"].get(int(biome_grid[r, c]), "")
-                if k.split(":")[-1] in ("swamp", "mangrove_swamp"):
-                    sw[r:r + 4, c:c + 4] = True
-        swm = gmask & sw
-        if swm.any():
-            rgb[swm] = (68, 82, 48)
 
     # 冰/雪：走色表固有色（参考截图为冷蓝灰，非亮白），不受水深/草色影响
     for bset, dflt in ((_ICE_BLOCKS, (126, 146, 186)),
@@ -736,14 +927,23 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     # 冻结海面：冰/浮冰之下的水体在 MC 里仍属海洋，JourneyMap 也按水色
     # 显示（官方 frozen_ocean 瓦片实测为深蓝 (42,41,148)）。
     # 故 _ICE_BLOCKS 不排除水面判定，只排除雪（雪是真正的地表覆盖）。
-    # ---- 寒冷群系水面结冰（复刻 biome feature freeze_top_layer）----
-    # MC 的冰不是密度函数产物：biome 的 features[10] 里 freeze_top_layer
-    # 会把「顶面是水」的列替换成 ice。故这里按群系规则补冰层。
-    # 判据：群系在 _FREEZE_BIOMES 内 且 该列是开阔水面 且 高度贴海平面。
+    # ---- 寒冷群系覆雪判定（freeze_top_layer）+ JM 冰面穿透语义 ----
+    # 官方语义链（26.2 反编译 + JM 反编译）：
+    #   MC blocksMotion() = 碰撞 bounds>=0.729 或满块（BlockBehaviour
+    #   L502-545）-> 1 层 snow layer(0.125) 不算、ice 算；MOTION_BLOCKING
+    #   = blocksMotion() || 流体（Heightmap L151）。
+    #   JM VanillaBlockHandler L67-68 把 ice/frosted_ice 标 BlockFlag.Ignore
+    #   （冰在 JM 地图从不显示）；SurfaceRenderer.getBlockHeight L143-179
+    #   从 precipitationHeight 向下扫遇 Ignore 穿透 -> 冻洋/冻河冰面列
+    #   （ice+snow layer）穿透冰停在水面 -> 按 mapBathymetry=false 显示
+    #   水色（官方 frozen_ocean 瓦片深蓝 (42,41,148)）。故水面一律走
+    #   水色，不再平涂冰色（旧版 _ice_mask 平涂是错的）。
+    #   冰山（IcebergFeature，4a+ 已写入 blocks/heights）出水的
+    #   packed_ice/blue_ice/snow_block 是 motion blocking 满块，其列
+    #   heights>=海平面不在 water_mask，正常显示冰色/雪帽 + bevel 台阶。
     _frz = np.zeros((h, w), bool)
     if wet is not None:
-        # 逐列判定（4x4 量化会漏掉河岸，实测冻河 98.9% 列是水域，
-        # 量化后只覆盖到 26%，导致冰面残缺）
+        # 逐列判定群系是否触发 freeze_top_layer（用于下方覆雪）
         _id2key = pack["id2key"]
         for _r in range(h):
             for _c in range(w):
@@ -751,78 +951,111 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                     int(biome_grid[_r, _c]), "").split(":")[-1]
                 if _bk in _FREEZE_BIOMES:
                     _frz[_r, _c] = True
-    # 结冰列：寒冷群系里的开阔水面（冻河的顶块是 gravel，不含 ice 方块，
-    # 所以不能靠顶块类型判断是否已结冰）
-    _ice_mask = np.zeros((h, w), bool)
-    if wet is not None and _frz.any():
-        _ice_mask = _frz & np.asarray(wet, bool)
 
     if wet is not None:
-        # native 精确判定（该列海平面处确为开阔水体）。
-        # 有 wet 掩码时不再按方块类型排除：雪/冰覆盖的水面仍属水域
-        # （官方 frozen_ocean 瓦片显示为深蓝，而非白色冰面）。
-        water_mask = np.asarray(wet, bool)
-        # 已结冰的列不再按水色渲染（否则水色会把冰盖掉）
-        water_mask = water_mask & ~_ice_mask
+        # 真实水列（heights 语义=顶方块 y，fill_top_grid/surface 均返回
+        # top=y，seed=1 跨海剖面实证水列=海床 25~45）：海面顶方块 y=62
+        # -> heights<=61 才有水覆盖；heights==62 是恰好海平面的实心滩涂
+        # （无水），旧 heights<_SEA 会把这 1px 误判成水。
+        water_mask = np.asarray(wet, bool) & (heights < _SEA - 1)
+        # 海面单层冰列：JM VanillaBlockHandler L67-68 把 ice/frosted_ice
+        # 标 BlockFlag.Ignore -> SurfaceRenderer.getBlockHeight 穿透冰停
+        # 在水面 -> 水色链。仅限 minecraft:ice（1 层海冰/冻河冰）；
+        # packed_ice/blue_ice（冰山）不 Ignore，正常冰色。冰面列
+        # heights==62 无海厚信息 -> 归入纯水色近似（冰下水深普遍 >7）。
+        _ice_bid = (pack or {}).get("name2bid", {}).get("minecraft:ice", -1)
+        if _ice_bid >= 0:
+            water_mask = water_mask | ((blocks == _ice_bid)
+                                       & (heights == _SEA - 1))
     else:
-        # 兜底启发式
+        # 兜底启发式（wet=None 时；冰/雪列不算水）
         deep = heights < (_SEA - 6)
-        water_mask = (is_water_blk | (is_seabed & deep)) & ~ice_or_snow
+        _ice_snow = np.isin(nm, list(_ICE_BLOCKS | _SNOW_BLOCKS))
+        water_mask = (is_water_blk | (is_seabed & deep)) & ~_ice_snow
     if water_mask.any():
-        # 水色梯度按官方 JourneyMap 瓦片标定（7,-19.png 实测）：
-        #   浅水 (131,163,232)  中水 (47,87,167)  深水 (45,64,158)
-        # 深度归一区间取 0..24 格（实测海域深度多在 17~30，
-        # 原来 /45 导致永远停在浅色档，这也是水色偏亮的原因）。
-        # 复刻 JourneyMap 的「水层 alpha 叠加」：
-        # water 基础色经 biome tint 后 (63,118,228)，水是透明方块，
-        # 每叠一层就与下方（海床）混合一次 alpha，越深越接近水色本身、
-        # 同时海床亮色被逐步压掉 -> 呈现由浅到深的自然梯度。
-        # 实测水深 1..26，用 0.55 的每层不透明度叠加上限封顶即可
-        # 覆盖官方 (201,236,255)->(131,163,232)->(47,87,167)->(45,64,158) 的走向。
-        # 水色取官方深水实测值（JourneyMap 的水在叠加后会明显偏深，
-        # 用 tint 原色 (63,118,228) 会整体偏亮）
+        # ==== JM 水色精确复刻（源码链 + 官方深水实测三群系闭合）====
+        # 源码链（mapTransparency=true、mapBathymetry=false、
+        # tweakWaterColorBlend=0.5、tweakBrightenDaylightDiff=0.06，
+        # 用户 26.2-NeoForge 实例配置与默认值逐项一致）：
+        #   buildStrata（SurfaceRenderer L198-229）：自水面 y=62 向下最多
+        #   push maxDepth=8 层，遇不透明海床 break -> 水层数 n<=7 时海床
+        #   入栈，n>=8 栈内全水。
+        #   nextUp（Strata L117-139）：中间水层被 ignoreMiddleFluid 跳过，
+        #   只处理海床（lightAttenuation=n）与顶层水（=0）。
+        #   setStratumColors（BaseRenderer L117-166）：
+        #     海床 var8=(15-n)/15+0.06 -> day=blendWith(bed*var8, wc, 0.5)
+        #     顶层水 var8=1.06          -> day=wc*1.06
+        #   paintStrata（SurfaceRenderer L237-252）：
+        #     render=blendWith(海床day, 顶层水day, alpha=0.7)
+        #   展开：result = 0.892*wc + 0.15*bed*((15-n)/15+0.06)
+        #   n>=8（及冰面列）: result = wc*1.06（纯水色）
+        # wc = water_still 贴图均值 x biome water tint(5x5 整除平均)。
+        # 贴图 1.21.11 jar 实测为纯灰 (177.09,177.09,177.09)（32 帧全帧
+        # 平均，alpha=180 恒定）：
+        #   ocean 深水=(46.4,86.9,167.8)   <-> 官方 (47,87,167)
+        #   frozen_ocean=(42.0,41.2,148.0) <-> 官方 (42,41,148)
+        #   cold_ocean=(44.9,64.0,157.7)   <-> 官方 (45,64,158)
+        # 旧 188/255 系数恰为 177.09*1.06 的近似（把顶层水亮度吸进基色），
+        # 且旧 0.55 逐层叠加把 cold_ocean 深水误当深度梯度拟合、浅水海床
+        # 权重 45% 远超 JM 的 15%——一并废弃。
+        # 浅水透底（用户主诉）：n<=7 海床以 15% 权重混入且亮度 (15-n)/15
+        # 递减 -> 7 级渐进色阶；n>=8 纯水（JM mapBathymetry=false 语义）。
         from Utils.MapPreviewer import jm_colors as _jm2
-        # 水色基色按**群系**取（MC water_color，官方瓦片已验证逐位精确）
-        # 用 4x4 量化：水体成片，量化边界不影响观感，且保证同群系同色
-        _WCg = np.empty((h, w, 3), np.float32)
-        _wc_cache = {}
-        for _r in range(0, h, 4):
-            for _c in range(0, w, 4):
-                _bk = pack["id2key"].get(
-                    int(biome_grid[_r, _c]), "").split(":")[-1]
-                _t = _wc_cache.get(_bk)
-                if _t is None:
-                    _t = np.array(
-                        _jm2.tint_for_biome("water", _bk), np.float32) \
-                        * (188.0 / 255.0)
-                    _wc_cache[_bk] = _t
-                _WCg[_r:_r + 4, _c:_c + 4] = _t
-        dep = np.clip((_SEA - heights).astype(np.float32), 0.0, 30.0)
-        # 逐层叠加：result = bed*(1-a)^n + water*(1-(1-a)^n)
-        _a = 0.55
-        _keep = np.power(1.0 - _a, dep)[..., None]          # 海床残留比例
-        # 底层用**该列真实海床方块的色**（此时 rgb 尚未被水覆盖，仍是
-        # 沙/砾石/泥的固有色）。JourneyMap 的 paintStrata 就是把水层
-        # blendWith 到实际下方方块上；用固定灰会让浅水发灰，
-        # 而官方浅水 (72,104,165) 保留沙的暖调。
-        _bed = rgb.astype(np.float32)
-        wr = _bed * _keep + _WCg * (1.0 - _keep)
-        # 极浅处（1~2 格）偏亮，模拟官方 (201,236,255) 的近岸白边
-        _sh = (dep <= 2.0)
-        if _sh.any():
-            _t = (dep[_sh] / 2.0)[:, None]
-            wr[_sh] = (np.array([201.0, 236.0, 255.0], np.float32) * (1 - _t)
-                       + wr[_sh] * _t)
-        rgb[water_mask] = wr[water_mask]
+        # 水色 tint 混合（复刻 JM mapBlendWater=true，用户 core config
+        # 实测 "mapBlendWater": "true"）：VanillaBlockColorProxy
+        # getColorMultiplier L86-89 水分支 -> BiomeColors
+        # .getAverageWaterColor(blockPos)（WATER_COLOR_RESOLVER
+        # = biome.getWaterColor()，无坐标依赖）-> JmBlockAccess
+        # method_23752 L196-230：以方块为中心取 (2r+1)^2 网格（r = MC
+        # 视频设置 biomeBlendRadius，用户 options.txt = 2 -> 5x5=25 点），
+        # 逐点取该点群系的 water_color，逐通道求和**整除实际点数**
+        # （地图边缘缺失 biome 不计入，对应 count<25）。
+        # tint 原值（整数）整除平均后再乘贴图灰度、round 成 int
+        # （getBlockColor 的 RGB.multiply->toInteger 量化语义）——
+        # method_23752 的整数截断在 tint 域发生，顺序不可交换。
+        _maxbid = max(pack["id2key"].keys()) + 1
+        _wlut = np.empty((_maxbid, 3), np.int32)
+        _wlut[:] = _jm2._BIOME_WATER_DEFAULT
+        for _bid, _key in pack["id2key"].items():
+            _wlut[_bid] = _jm2.tint_for_biome("water", _key.split(":")[-1])
+        _px = _wlut[np.clip(biome_grid, 0, _maxbid - 1)]     # (h,w,3)
+        _pad = np.full((h + 4, w + 4, 3), -1, np.int32)
+        _pad[2:2 + h, 2:2 + w] = _px
+        _sum = np.zeros((h, w, 3), np.int32)
+        _cnt = np.zeros((h, w), np.int32)
+        for _dy in range(-2, 3):
+            for _dx in range(-2, 3):
+                _win = _pad[2 + _dy:2 + _dy + h, 2 + _dx:2 + _dx + w]
+                _ok = _win[..., 0] >= 0
+                _sum += np.where(_ok[..., None], _win, 0)
+                _cnt += _ok
+        _WCg = np.round((_sum // np.maximum(_cnt, 1)[..., None])
+                        * (177.09 / 255.0))
+        # n=水层数=62-heights（水面顶块 y=62、水列海床 heights<=61 ->
+        # n>=1）；冰面列 heights==62 -> n=0 归入纯水分支。
+        _n = np.clip((62 - heights).astype(np.float32), 0.0, 7.0)
+        _shallow = water_mask & (heights >= 55)  # n in [1,7] <=> h in [55,61]
+        # 逐级 int 量化复刻（adjustBrightness/blendWith 每步 toInteger，
+        # 四舍五入）：bevelSlope 不在此处——JM 顺序是先合成后 bevel
+        #（paintStrata L265-273），由 _render_rect 的坡度段统一应用。
+        _b = ((15.0 - _n) / 15.0 + 0.06)[..., None]
+        _wc1 = np.round(_WCg * 1.06)                     # 顶层水 day
+        _bed_adj = np.round(rgb[_shallow].astype(np.float32)
+                            * _b[_shallow])              # 海床亮度
+        _bed_day = np.round(_bed_adj * 0.5 + _WCg[_shallow] * 0.5)
+        _wr_sh = np.round(_wc1[_shallow] * 0.7 + _bed_day * 0.3)
+        wr = np.broadcast_to(_wc1, (h, w, 3)).copy()
+        wr[_shallow] = _wr_sh
+        rgb[water_mask] = wr[water_mask].astype(np.uint8)
 
-    # 冰面最后绘制（压过水色）：冻河/冻洋表面应整片覆冰
-    if _ice_mask.any():
-        _icec = colors.get("minecraft:ice") or _ICE_RGB
-        rgb[_ice_mask] = _icec
-
-    # ---- 积雪针叶林：树冠上表面覆雪（freeze_top_layer 的另一半）----
-    # MC 的 freeze_top_layer 除了让水结冰，还会在「上方为空气」的方块
-    # 顶面放雪层，包括树叶。故寒冷群系里的树叶/草/土顶面都覆一层雪。
+    # ---- 积雪：树冠上表面覆雪（freeze_top_layer 的另一半）----
+    # MC 的 freeze_top_layer 只在「上方为空气」的方块顶面放雪层，包括树叶。
+    # 水下列上方是水不是空气 -> 海床不覆雪。water_mask 含全部真实水列
+    # （heights<=61）与海面单层冰列（JM Ignore 穿透语义），
+    # & ~water_mask 恰好同时排除水下列与冰面列；heights==62 的海平面
+    # 滩涂列不算水 -> 寒冷群系下可正常覆雪（JM：顶块 sand 上方是空气，
+    # freeze_top_layer 放雪）。修复此前
+    # 冻洋水下海床被覆雪洗白（174373 px gravel 死白）的 bug。
     if _frz.any():
         _leaf_like = np.isin(nm, list(_SNOW_COVERABLE))
         _snow_mask = _frz & _leaf_like & ~water_mask
@@ -856,12 +1089,13 @@ _NO_VEG_BIOMES = {
     "wooded_badlands", "desert",
 }
 
-# 会触发 freeze_top_layer 的寒冷群系（MC biome features[10] 含该特征）
+# 会触发 freeze_top_layer 的寒冷群系（MC biome features[10] 含该特征；
+# 生效条件温度 <= 0.15——26.2 全部群系实测：cold_ocean/deep_cold_ocean
+# 温度 0.5，官方不结冰不覆雪，此前误含导致冷水海洋水面/海床被涂白）
 _FREEZE_BIOMES = {
     "frozen_river", "frozen_ocean", "deep_frozen_ocean", "ice_spikes",
     "snowy_plains", "snowy_taiga", "snowy_beach", "snowy_slopes",
-    "frozen_peaks", "jagged_peaks", "grove", "deep_cold_ocean",
-    "cold_ocean",
+    "frozen_peaks", "jagged_peaks", "grove",
 }
 
 # 寒冷群系里会被 freeze_top_layer 覆雪的方块（上方为空气时积雪层）
@@ -878,8 +1112,10 @@ _SNOW_COVERABLE = {
     "minecraft:cobblestone", "minecraft:short_grass", "minecraft:fern",
 }
 
-# 陆地结构模板用到的材质（135 项，由 structure_render 汇总实测得到）。
-# 必须预先纳入 id 空间，否则结构方块无法参与「每列最高」竞争。
+# 陆地结构模板用到的材质（140 项，由 structure_render 汇总实测得到；
+# 后 5 项为废弃传送门官方全链新引入：fiq 降解输出 mossy_stairs/slab、
+# stone_slab、obsidian 0.15 哭泣、postProcess 藤）。必须预先纳入
+# id 空间，否则结构方块无法参与「每列最高」竞争。
 _STRUCTURE_MATERIALS = [
     "minecraft:barrel", "minecraft:basalt", "minecraft:blackstone",
     "minecraft:blackstone_stairs", "minecraft:blue_terracotta",
@@ -888,7 +1124,8 @@ _STRUCTURE_MATERIALS = [
     "minecraft:chiseled_deepslate", "minecraft:chiseled_polished_blackstone",
     "minecraft:chiseled_stone_bricks", "minecraft:chiseled_tuff",
     "minecraft:chiseled_tuff_bricks", "minecraft:cobbled_deepslate",
-    "minecraft:cobweb", "minecraft:cracked_deepslate_bricks",
+    "minecraft:cobweb", "minecraft:crying_obsidian",
+    "minecraft:cracked_deepslate_bricks",
     "minecraft:cracked_deepslate_tiles",
     "minecraft:cracked_polished_blackstone_bricks",
     "minecraft:cracked_stone_bricks", "minecraft:crafting_table",
@@ -907,6 +1144,7 @@ _STRUCTURE_MATERIALS = [
     "minecraft:light_blue_carpet", "minecraft:light_blue_wool",
     "minecraft:light_gray_carpet", "minecraft:light_gray_glazed_terracotta",
     "minecraft:light_gray_terracotta", "minecraft:magma_block",
+    "minecraft:mossy_stone_brick_slab", "minecraft:mossy_stone_brick_stairs",
     "minecraft:mossy_stone_bricks", "minecraft:mud_brick_slab",
     "minecraft:mud_brick_stairs", "minecraft:mud_bricks",
     "minecraft:netherrack", "minecraft:oak_button", "minecraft:oak_trapdoor",
@@ -922,6 +1160,7 @@ _STRUCTURE_MATERIALS = [
     "minecraft:spruce_fence", "minecraft:spruce_planks", "minecraft:spruce_slab",
     "minecraft:spruce_stairs", "minecraft:stone_brick_slab",
     "minecraft:stone_brick_stairs", "minecraft:stone_bricks",
+    "minecraft:stone_slab", "minecraft:vine",
     "minecraft:tuff_bricks", "minecraft:wall_torch",
     "minecraft:waxed_copper_block", "minecraft:waxed_cut_copper",
     "minecraft:waxed_oxidized_cut_copper",
@@ -955,6 +1194,10 @@ _GROWABLE = {
     "minecraft:mud",
 }
 
+# 竹下灰化土与竹子的官方放置链见 bamboo_placement.py（26.2 反编译
+# 逐行复刻：SUPPORTS_BAMBOO / BENEATH_BAMBOO_PODZOL_REPLACEABLE 官方
+# tag 已展开为该模块内的方块名集合）。
+
 
 def _hash01_grid(seed: int, x0: int, z0: int, h: int, w: int, salt: int):
     rr = (np.arange(h, dtype=np.int64)[:, None] + z0).astype(np.uint64)
@@ -974,10 +1217,11 @@ def _hash01_grid(seed: int, x0: int, z0: int, h: int, w: int, salt: int):
 
 def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
                       out_blocks=None, out_heights=None):
-    """按 biome 密度做确定性植被叠加（就地改 rgb float32）。
+    """按官方放置链做确定性植被叠加（就地改 rgb float32 / blocks / heights）。
 
-    树：trunk 概率=tree_p，命中处按树种半径铺冠层（深色覆盖）；
-    花/作物：单块色点；草：微弱绿调。优先级 冠层>作物>花>草>地表。
+    树：官方 per-chunk 放置算法摆位，树冠按 26.2 叶放置器几何写逐格
+    台阶高度场（vegetation.crown_step）+ blocks 通道叶子 id；竹子：官方
+    BambooFeature 放置链（podzol 盘 + 竹点）。返回 (disk_cells, dot_cells)。
     """
     h, w = rgb.shape[:2]
     names = pack["block_names"]
@@ -1030,28 +1274,20 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
     trees = _tp.place_trees_in_rect(seed, x0, z0, w, h, heights,
                                     biome_grid, pack["id2key"])
     canopy = np.zeros((h, w), bool)
-    fol = _hash01_grid(seed, x0, z0, h, w, 7)      # 叶面亮度噪声
-    tvar = _hash01_grid(seed, x0, z0, h, w, 8)     # 逐棵树明暗
-    # 叶片材质（按树种取对应 leaves 贴图）
-    _tex = pack.get("tex") or {}
-    leaf_art = None
-    leaf_mean = 1.0
-    for (_tx, _tz, _sp, _r, _c, _y) in trees[:1]:
-        _ln = "minecraft:%s_leaves" % _sp
-        leaf_art = _tex.get(_ln)
-        if leaf_art is None:
-            leaf_art = _tex.get("minecraft:oak_leaves")
-        if leaf_art is not None:
-            leaf_mean = max(float(leaf_art.mean()), 1.0)
-        break
 
-    for (tx, tz, sp, rad, col, top_y) in trees:
-        # JourneyMap 的树冠是**每方块单色**（取叶片贴图均值 * 群系 tint），
-        # 不做球面光照渐变。立体感由地形坡度(bevelSlope)提供，树冠保持纯色。
-        # 之前加的球面梯度会让相邻像素 |dL| p50 高达 11.6，而参考图仅 0.6。
-        base = np.asarray(col, np.float32)
-        lum_t = np.float32(0.90 + 0.20 * tvar[tz, tx])
-        ccol = base * lum_t
+    for (tx, tz, sp, rad, _col, top_y) in trees:
+        # JourneyMap 的树冠是**每方块单色**（叶片贴图均值 × 群系 tint，由
+        # 4d 统一配色按 blocks 通道给出，此处不写 rgb——写了也会被覆盖）。
+        # 立体感全部来自真实树冠的**分层高度场**：真实树叶由叶放置器逐层
+        # 摆放（冠顶窄、下层宽），JM heightmap（precipitationHeight 含树叶）
+        # 在冠内就有台阶 -> populateSlopes 对台阶施加 bevel（北缘亮、南缘
+        # 暗、南侧地面投影、冠内 2~3 级明暗，见参考截图）。此前树冠是同高
+        # 平坦层，冠内 slope 恒 1（全平），与 JM 相比缺少台阶状立体感。
+        # 逐格降差剖面见 _veg.crown_step（26.2 反编译叶放置器几何）。
+        # 冠顶基准 = 地表 + 干高近似（vegetation.crown_top，26.2
+        # trunk_placer 均值）；必须高于台阶最大降差，否则外环压到地表
+        # 高度以下会失去树冠资格（真实树叶也只长在空气格）。
+        H = int(top_y) + _veg.crown_top(sp)
         lim = rad * rad + rad
         for dy in range(-rad, rad + 1):
             yy = tz + dy
@@ -1067,27 +1303,62 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
                 if not growable[yy, xx]:
                     continue
                 canopy[yy, xx] = True
-                rgb[yy, xx] = ccol
+                # 该列冠层高度 = 冠顶 H - 剖面降差（真实树冠分层几何）
+                ch_h = H - _veg.crown_step(sp, dx, dy)
                 # 真俯视：树叶参与「每列最高方块」竞争（树冠高于地面）
                 if out_blocks is not None:
                     lid = _LEAF_BID.get("minecraft:%s_leaves" % sp)
                     if lid is None:
                         lid = _LEAF_BID.get("minecraft:oak_leaves")
-                    if lid is not None:
-                        leaf_y = int(top_y) + max(1, rad // 2 + 1)
-                        if leaf_y > out_heights[yy, xx]:
-                            out_heights[yy, xx] = leaf_y
-                            out_blocks[yy, xx] = lid
-                # 树冠抬高该列高度：树叶是实体方块，会抬高 getBlockHeight。
-                # 但树冠顶面是**平坦的一层**（同高），只有树冠与周围地面之间
-                # 的高度差才产生坡度 -> 树冠整体被同一 slope 着色（有立体感
-                # 但不碎），而不是内部锥形梯度（那会让 p50 飙到 10+）。
-                ch_h = int(top_y) + max(1, rad // 2 + 1)
+                    if lid is not None and ch_h > out_heights[yy, xx]:
+                        out_heights[yy, xx] = ch_h
+                        out_blocks[yy, xx] = lid
+                # 树叶无 NoShadow 旗标（VanillaBlockHandler：leaves 只加
+                # OpenToSky+Foliage+NoTopo），照常抬高 getBlockHeight
                 if ch_h > heights[yy, xx]:
                     heights[yy, xx] = ch_h
 
-# ---- 结构 footprint 近似（逐方块；占地尺寸/材质为代表性近似）----
+    # ---- 官方竹子放置链（26.2 BambooFeature；bamboo_placement.py 逐行
+    # 复刻 noise_based_count/in_square/heightmap/biome + 逐尝试 RNG）----
+    # placed bamboo = bamboo_some_podzol(probability 0.2)：每株竹 20% 概率
+    # 在脚下打半径 1~4 的 podzol 圆盘（官方先盘后竹）。盘走方块通道
+    # （blocks=podzol id，高度不变：podzol 与地表同层），4d 统一配色会按
+    # podzol 上色；竹点在 4d 后覆盖回竹色（盘心必有竹，与官方几何一致：
+    # 竹秆列顶高于 podzol）。
+    from Utils.MapPreviewer import bamboo_placement as _bp
+    disk_cells, dot_cells = _bp.bamboo_placements(
+        seed, x0, z0, w, h, heights, top_name, biome_grid,
+        pack["id2key"], canopy=canopy, sea_level=_SEA)
+    pid = _n2b.get("minecraft:podzol")
+    if pid is not None:
+        for yy, xx in disk_cells:
+            out_blocks[yy, xx] = pid
+    return disk_cells, dot_cells
+
+
+def _apply_bamboo_dots(rgb, cells):
+    """竹林竹子格（必须在 4d 统一配色之后调用：直接覆盖最终 rgb）。
+
+    JM 语义（反编译 VanillaBlockHandler/VanillaBlockColorProxy）：竹子 =
+    Plant 旗标、alpha=1.0 -> 俯视整格显示自身颜色；NoShadow -> 不抬地图
+    高度；不在 grass/foliage/water tint 列表 -> 颜色 = bamboo_stalk 贴图
+    全像素均值 (94,144,20)，无 tint 无随机抖动（JM 同 sprite 同群系同色，
+    格间明暗只来自坡度 bevel）。位置由 bamboo_placement.官方链计算
+    （_apply_vegetation 返回值传入），盘心与竹点同格：竹秆列顶高于
+    podzol，俯视显示竹色。
+    """
+    if not cells:
+        return
+    base = np.asarray((94, 144, 20), np.float32)   # bamboo_stalk 贴图均值
+    for yy, xx in cells:
+        rgb[yy, xx] = base
+
+
+# ---- 结构 footprint 近似（占地尺寸/材质为代表性近似）----
 # key: (宽, 长, 主体色, 边框/屋顶色)；村庄单独按房屋簇渲染。
+# 盖章时机：4d 统一配色之后（_flush_footprints）——此前在 4b 直接写
+# rgb 会被 4d 整体重画冲掉（mansion/monument/desert_pyramid 等全部
+# 不可见，probe_footprint_ab 实证 diff=0）。
 _FOOTPRINTS = {
     "pillager_outpost": (9, 9, (70, 52, 34), (110, 110, 112)),
     "mansion":          (22, 28, (58, 42, 30), (40, 30, 24)),
@@ -1115,6 +1386,15 @@ _TEMPLATE_STRUCTURES = {
     "ancient_city", "trail_ruins",
 }
 
+# 地下结构（官方 step=underground_decoration/underground_structures，
+# terrain_adaptation=beard_box/bury，start_height 在地表之下）：
+#   ancient_city: start_height=-27，生成于 deep_dark 洞穴层；
+#   trail_ruins:  start_height=-15，project WORLD_SURFACE_WG 后整体掩埋。
+# 俯视地图上它们被地表完整覆盖，不可见。此前误共用地表结构的
+# base_y 逻辑（锚点 fill_top 地表高度且强制 ≥65），把整座远古城市
+# 拼接到地表 stamping（stony_peaks 画廊 (-2816,0) 实证）。渲染中排除。
+_UNDERGROUND_STRUCTURES = {"ancient_city", "trail_ruins"}
+
 # 水上结构（其余按陆地结构处理）
 _WATER_STRUCTURES = {"monument", "ocean_ruin", "shipwreck", "buried_treasure"}
 
@@ -1134,16 +1414,33 @@ def _stamp_rect(rgb, heights, cx, cy, w, l, fill, border, h, wd, land=True):
             rgb[zz, xx] = border if edge else fill
 
 
+def _flush_footprints(rgb, heights, queue):
+    """4d 统一配色之后的 footprint 近似矩形盖章（含边框色）。
+
+    4d 按最终 blocks 通道整体重画 rgb，任何在 4b 写入 rgb 的 footprint
+    都会被冲掉（竹林竹点为此移到 4e，同因）。footprint 结构（林地府邸/
+    海底神殿/沙漠神殿/沼泽小屋/沙漠水井/海底废墟等纯程序化或无模板
+    回退）没有真实方块 id 可进 blocks 通道，只能在最终 rgb 上直接盖章。
+    """
+    h, w = rgb.shape[:2]
+    for key, ax, az, land in queue:
+        wl, ll, fill, border = _FOOTPRINTS[key]
+        _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
+
+
 def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
-                      pack=None):
-    """枚举区域结构并按 footprint 近似逐方块 stamp（覆盖地表/植被）。"""
+                      pack=None, footprints_out=None):
+    """枚举区域结构：真实模板/jigsaw/全链结构在此 stamp（参与每列最高
+    方块竞争）；footprint 近似结构只收集到 footprints_out，由 4d 之后的
+    _flush_footprints 统一盖章（否则会被统一配色冲掉）。"""
     try:
         from Utils.Public import structure_map as smap
     except Exception:
         return
     # 枚举键必须同时包含 footprint 近似与真实模板结构，
-    # 否则 trail_ruins / ancient_city / bastion 根本不会被枚举到。
-    keys = sorted(set(_FOOTPRINTS) | _TEMPLATE_STRUCTURES | {"village"})
+    # 否则 bastion 根本不会被枚举到。地下结构不渲染，也不枚举。
+    keys = sorted((set(_FOOTPRINTS) | _TEMPLATE_STRUCTURES | {"village"})
+                  - _UNDERGROUND_STRUCTURES)
     # 结构会跨越瓦片边界：村庄实测可达 115x80，远超 _FINE_TILE(64)。
     # 若只在本瓦片矩形内枚举，则「锚点在别的瓦片、但主体伸进本瓦片」的
     # 结构完全不会画出来 -> 村庄被截断。故枚举范围外扩 _STRUCT_PAD。
@@ -1161,6 +1458,8 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
     _CURRENT_NAME2BID = (pack or {}).get("name2bid") or {}
     for st in structs:
         key = st.get("struct")
+        if key in _UNDERGROUND_STRUCTURES:
+            continue   # 防御：地下结构绝不参与地表 stamping
         ax = int(st.get("x", 0)) - x0
         az = int(st.get("z", 0)) - z0
         land = key not in _WATER_STRUCTURES
@@ -1172,6 +1471,39 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
         # 其余陆地结构：有真实模板的按模板还原，失败的才回退矩形近似
         sx = int(st.get("x", 0))
         sz = int(st.get("z", 0))
+        if key == "ruined_portal":
+            # 官方全链：变体选择 + 处理器链 + 菱形土堆/滴柱/藤叶
+            #（structure_render.ruined_portal_blocks，地面以下方块已滤除）。
+            # 模拟抛错才回退 footprint 近似；成功但空（如完全掩埋的
+            # underground 变体）不画矩形。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.ruined_portal_blocks(
+                    seed, sx, sz, pack, threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack)
+                continue
+        if key == "mansion":
+            # 官方全链：MansionGrid 拼装 + 模板体素（真实屋顶俯视），
+            # y = 5×5 盒 4 角 WORLD_SURFACE_WG 最低值（随 rotation 偏移，
+            # y<60 官方拒绝生成 => 空不画，也不回退 footprint）。
+            # beard=False：地形高于结构顶的列保持地形（官方俯视语义），
+            # 避免 beard=True 在山坡把 heights 压出凹坑。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.mansion_blocks(seed, sx, sz, pack,
+                                             threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=False)
+                continue
         if key in _TEMPLATE_STRUCTURES:
             try:
                 from Utils.MapPreviewer import structure_render as _srender
@@ -1188,8 +1520,13 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
                                          x0, z0, h, w, pack):
                 continue
         if key in _FOOTPRINTS:
-            wl, ll, fill, border = _FOOTPRINTS[key]
-            _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border, h, w, land)
+            if footprints_out is not None:
+                # 延后到 4d 统一配色之后盖章（_flush_footprints）
+                footprints_out.append((key, ax, az, land))
+            else:
+                wl, ll, fill, border = _FOOTPRINTS[key]
+                _stamp_rect(rgb, heights, ax, az, wl, ll, fill, border,
+                            h, w, land)
 
 
 

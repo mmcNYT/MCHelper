@@ -28,6 +28,9 @@ FLAGS = [
     "/nologo", "/std:c++20", "/utf-8", "/O2", "/EHsc", "/MD", "/LD",
     f"/I{PB_INCLUDE}", f"/I{PY_INCLUDE}", f"/I{NATIVE_DIR}",
 ]
+if os.environ.get("DF_PROFILE_OPS"):
+    # 计数器构建（默认关闭，正式产物不带）
+    FLAGS.append("/DDF_PROFILE_OPS")
 
 LINK = ["/link", f"/LIBPATH:{PY_LIBS}", "python313.lib"]
 

@@ -142,6 +142,24 @@ _SPECIES = {
     "default":   (2, (40, 74, 28)),
 }
 
+# 显式画像 override（数据驱动判不准/需目视校准的群系）。
+# 竹林：官方 bamboo_vegetation 每 chunk 30.1 次尝试其实是 random_selector
+#（70% mega_jungle_tree / 15% jungle_bush / 5% fancy_oak / 10% grass_jungle
+# 草丛），树是 checked 特征，在密竹林里因竹子占位与空间不足大量放置
+# 失败，游戏内目视树很稀疏（参考图换算 ~0.6-1.2 棵/chunk）-> 有效树数
+# 取 ~1.2 棵/chunk。
+# 竹子本体与灰化土盘 = placed "minecraft:bamboo"（noise_based_count
+# 160/80/0.3，count = ceil((Simplex2D(cx*0.2, cz*0.2)+0.3)*160)，Perlin
+# 噪声驱动、空间强聚集），由 bamboo_placement.py 逐行复刻官方放置链，
+# 不再用 crop/podzol_p 代理密度（旧字段已删，见该模块 docstring）。
+_BIOME_VEG_OVERRIDE = {
+    "bamboo_jungle": {
+        "tree": 1.2 / 256.0,
+        "species": "jungle",
+        "crop_kind": "bamboo",
+    },
+}
+
 # biome 短名 -> 主导树种（placed 名未能判定时的兜底）
 _BIOME_SPECIES = {
     "forest": "oak", "birch_forest": "birch", "old_growth_birch_forest": "birch",
@@ -282,12 +300,88 @@ def biome_vegetation(biome_key: str) -> dict:
         "species": species,
         "crop_kind": crop_kind,
     }
+    # 显式 override：数据驱动判不准/需目视校准的群系（如竹林 checked
+    # 树失败率、noise_based_count 竹密度），未覆盖字段保留数据驱动值
+    ov = _BIOME_VEG_OVERRIDE.get(short)
+    if ov:
+        prof = {**prof, **ov}
     _PROFILE[short] = prof
     return prof
 
 
 def species_canopy(species: str):
     return _SPECIES.get(species, _SPECIES["default"])
+
+
+# ===========================================================================
+# 冠内台阶剖面（树冠高度场逐格降差，0 = 冠顶层）
+# ===========================================================================
+# JM 的树冠立体感来自真实树叶的**分层摆放**：叶放置器逐层(yo)放叶，冠顶
+# 窄、下层宽，JM heightmap（precipitationHeight 含树叶）在冠内就有台阶，
+# populateSlopes 对台阶施加 bevel -> 北缘亮 / 南缘暗 / 冠内 2~3 级明暗。
+# 此前树冠是同高平坦层（冠内 slope 恒 1，全平），与 JM 相比缺少台阶状
+# 立体感。本函数按 26.2 反编译叶放置器几何返回「该列相对冠顶 H 的高度
+# 降差」，剖面依据（.temp/mc262_decompile foliageplacers/）：
+#   blob_foliage_placer（oak/birch r2 h3 off0）：yo=0/-1 r1、yo=-2/-3 r2
+#       -> 核 3×3 在 H，外环在 H-2（swamp 真值 blob r3 核 cheb≤2，但
+#          rad=2 冠按 blob r2 剖面近似）
+#   fancy_foliage_placer（r2 off4 h4）：顶帽 r2 + 三层 r3 圆角 -> 0/1/2
+#   jungle_foliage_placer（mega，r2 h2）：顶 r3 圆 + 下层 r4 环 -> 0/1
+#   acacia_foliage_placer（r2）：顶 3×3 + 下层 5×5 缺角 -> 0/1（平台冠）
+#   dark_oak_foliage_placer：y+1 r2 圆角(13格) + y0 r3 最宽 -> 0/1
+#   spruce_foliage_placer：交替环带锥 r0,1,0,1,2（角格跳过）
+#       -> 中心 0 / 十字环 1 / 斜角+外环 4（首个 r2 层在 yo=-4）
+#   pine_foliage_placer（r1 off1）：顶单格 + r1 十字层 -> 0/1/2
+#   cherry_foliage_placer（r4 h5）：r1 顶 / r2 中 / r3 底 圆顶 -> 0/1/2
+#   random_spread_foliage_placer（mangrove r3 fh2）：散布团 -> 核 0 / 环 1
+def crown_step(species: str, dx: int, dz: int) -> int:
+    sp = species
+    cheb = max(abs(dx), abs(dz))
+    if sp in ("oak", "birch", "swamp", "palm", "default"):
+        return 0 if cheb <= 1 else 2
+    if sp == "fancy_oak":
+        if cheb <= 1:
+            return 0
+        return 1 if dx * dx + dz * dz <= 9 else 2
+    if sp == "jungle":
+        return 0 if dx * dx + dz * dz <= 9 else 1
+    if sp in ("acacia", "dark_oak"):
+        return 0 if cheb <= 1 else 1
+    if sp == "spruce":
+        if dx == 0 and dz == 0:
+            return 0
+        if cheb == 1 and (dx == 0 or dz == 0):
+            return 1
+        return 4
+    if sp == "pine":
+        if dx == 0 and dz == 0:
+            return 0
+        if cheb == 1 and (dx == 0 or dz == 0):
+            return 1
+        return 2
+    if sp == "cherry":
+        return 0 if cheb <= 1 else (1 if cheb <= 2 else 2)
+    if sp == "mangrove":
+        return 0 if cheb <= 1 else 1
+    return 0 if cheb <= 1 else 2
+
+
+# 树种 -> 冠顶相对地表抬升（= 干高近似，取 26.2 trunk_placer 均值）。
+# 真实树冠顶（叶放置 yo=0 层）在干顶；冠顶必须足够高，台阶降差后外环
+# 仍高于地表，否则平地上外环会失去树冠资格（首测 H=+2 时 forest 缩水
+# 43%：外环 H-2=+0 不高于地表，成片退回 grass_block）。
+#   oak 干 4-6 / birch 5-7 / fancy_oak 3-14（含分枝）/ spruce 5-8+offset
+#   pine 6-10+1 / jungle(mega) 10-31 / acacia 5-9（含横枝）/ dark_oak 6-9
+#   swamp_oak 5-8 / mangrove 2-7（向上分枝）/ cherry 7-8
+_CROWN_TOP = {
+    "oak": 5, "birch": 5, "default": 5, "palm": 5,
+    "fancy_oak": 8, "spruce": 6, "pine": 8, "jungle": 12,
+    "acacia": 7, "dark_oak": 8, "swamp": 6, "mangrove": 6, "cherry": 8,
+}
+
+
+def crown_top(species: str) -> int:
+    return _CROWN_TOP.get(species, 5)
 
 
 def flower_color(idx: int):

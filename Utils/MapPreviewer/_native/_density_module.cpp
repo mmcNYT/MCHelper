@@ -31,6 +31,30 @@ using f64 = double;
 static constexpr u64 MASK64 = ~0ULL;
 static constexpr u32 MASK32 = 0xFFFFFFFFu;
 
+// ===== eval 分布计数器（DF_PROFILE_OPS=1 时编译进，默认零开销）=====
+#ifdef DF_PROFILE_OPS
+#include <atomic>
+#include <chrono>
+struct EvalCounters {
+    std::atomic<uint64_t> eval_calls{0}, root_evals{0}, noise{0}, perlin{0},
+        spline{0}, interp{0}, blended{0};
+};
+static EvalCounters g_ec;
+#define DF_TICK(f) g_ec.f.fetch_add(1, std::memory_order_relaxed)
+// surface_grid 阶段计时（纳秒，atomic 累计，join 后主线程打印）
+struct SurfTimers {
+    std::atomic<uint64_t> load{0}, cols{0}, depth{0}, solid{0},
+        rule{0}, ext{0}, aq{0};
+};
+static SurfTimers g_st;
+static inline uint64_t st_now() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+#else
+#define DF_TICK(f) ((void)0)
+#endif
+
 
 static inline double clamp_val(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -384,6 +408,7 @@ struct PerlinNoise {
 
     double get_value(double x, double y, double z, double yScale = 0.0,
                      double yFudge = 0.0) const {
+        DF_TICK(perlin);
         double value = 0.0, factor = lowest_freq_input, vf = lowest_freq_value;
         for (size_t i = 0; i < levels.size(); i++) {
             if (level_present[i]) {
@@ -425,6 +450,7 @@ struct NormalNoise {
     }
 
     double get_value(double x, double y, double z) const {
+        DF_TICK(noise);
         return (first.get_value(x, y, z) +
                 second.get_value(x * INPUT_FACTOR, y * INPUT_FACTOR, z * INPUT_FACTOR)) *
                value_factor;
@@ -637,6 +663,7 @@ struct DNode {
     int cw = 4, ch = 8;  // interpolated cell 尺寸；interval_select 时为阈值数
     int child_off = 0;   // 子节点索引表偏移（interval_select / 多阈值用）
     int child_cnt = 0;   // 子节点个数
+    bool y_indep = false;  // 静态标注：输出与 y 无关（列内无损缓存用）
 };
 
 // 样条：扁平点表 + 每样条区间
@@ -662,10 +689,141 @@ struct DensityTree {
     // interpolated：cell 角点缓存（按 (cellX, cellY, cellZ) 8 角求值）
     // 这里用逐点重算（正确优先）；cell 缓存留给列扫描路径优化
 
+    // ---- 静态 y 无关性标注（无损列内缓存的前提）----
+    // 返回值：1 = y 相关，2 = 与 y 无关。规则保守：拿不准一律 y 相关。
+    // 关键依据（与 eval 逐条对应）：
+    //   OP_NOISE        y 输入 = y*p1，p1==0 时 y 维恒 0 -> y 无关
+    //   OP_SHIFT_A/B    y 输入恒 0 -> y 无关
+    //   OP_SHIFTED_NOISE y*p1 + shift_y 子树，两者均 y 无关才无关
+    //   OP_Y_GRAD/OP_SHIFT/OP_OLD_BLENDED/OP_INTERPOLATED/OP_FIND_TOP
+    //                   直接依赖 y -> y 相关
+    //   其余合成/一元/缓存透传 op：全部子节点 y 无关才无关
+    void compute_y_independence() {
+        std::vector<int8_t> st(nodes.size(), 0);   // 0 未知 1 y相关 2 y无关
+        for (int i = 0; i < (int)nodes.size(); i++) (void)yi_mark(i, st);
+        for (int i = 0; i < (int)nodes.size(); i++)
+            nodes[i].y_indep = (st[i] == 2);
+    }
+
+    int8_t yi_mark(int idx, std::vector<int8_t>& st) const {
+        int8_t& s = st[idx];
+        if (s) return s;
+        const DNode& n = nodes[idx];
+        switch (n.op) {
+            case OP_CONST:
+            case OP_SHIFT_A:
+            case OP_SHIFT_B:
+                s = 2; break;
+            case OP_NOISE:
+                s = (n.p1 == 0.0) ? 2 : 1; break;
+            case OP_SHIFTED_NOISE:
+                s = (n.p1 == 0.0 && n.a0 >= 0 && n.a1 >= 0 && n.a2 >= 0 &&
+                     yi_mark(n.a0, st) == 2 && yi_mark(n.a1, st) == 2 &&
+                     yi_mark(n.a2, st) == 2) ? 2 : 1;
+                break;
+            case OP_Y_GRAD:
+            case OP_SHIFT:
+            case OP_OLD_BLENDED:
+            case OP_INTERPOLATED:
+            case OP_FIND_TOP:
+                s = 1; break;
+            case OP_SPLINE: {
+                s = 1;
+                if (n.spline < 0 || n.spline >= (int)spl.coord.size()) break;
+                int ccoord = spl.coord[n.spline];
+                if (ccoord < 0 || yi_mark(ccoord, st) != 2) break;
+                s = 2;
+                if (n.spline < (int)spl.splines.size()) {
+                    for (const SPt& pt : spl.splines[n.spline]) {
+                        if (pt.child >= 0 && yi_mark(pt.child, st) != 2) {
+                            s = 1; break;
+                        }
+                    }
+                }
+                break;
+            }
+            case OP_INTERVAL_SELECT: {
+                s = 1;
+                if (n.a0 < 0 || yi_mark(n.a0, st) != 2) break;
+                bool all = true;
+                for (int i = 0; i < n.child_cnt; i++) {
+                    int c = children[n.child_off + i];
+                    if (c < 0 || yi_mark(c, st) != 2) { all = false; break; }
+                }
+                if (all) s = 2;
+                break;
+            }
+            default: {
+                // 一元/二元合成、CLAMP、CACHE2D/CACHE_ONCE/PASSTHRU、
+                // RANGE_CHOICE
+                s = 1;
+                if (n.a0 < 0 || yi_mark(n.a0, st) != 2) break;
+                if (n.op == OP_ADD || n.op == OP_MUL || n.op == OP_MIN ||
+                    n.op == OP_MAX) {
+                    if (n.a1 >= 0 && yi_mark(n.a1, st) == 2) s = 2;
+                } else if (n.op == OP_RANGE_CHOICE) {
+                    // 条件无关但任一分支 y 相关 -> 输出仍依赖 y，
+                    // 必须三分支（a0 条件 + a1/a2）全部无关才可标注
+                    if (n.a1 >= 0 && n.a2 >= 0 &&
+                        yi_mark(n.a1, st) == 2 && yi_mark(n.a2, st) == 2)
+                        s = 2;
+                } else {
+                    s = 2;
+                }
+                break;
+            }
+        }
+        return s;
+    }
+
     double eval(int idx, double x, double y, double z) const {
+        DF_TICK(eval_calls);
+        if (idx == root) DF_TICK(root_evals);
         if (idx < 0 || idx >= static_cast<int>(nodes.size()))
             throw std::runtime_error("density node index out of range: " + std::to_string(idx));
         const DNode& n = nodes[idx];
+        if (n.y_indep) {
+            // 列内无损缓存：y_indep 节点输出只依赖 (x,z)。键含 x/z 的位模式，
+            // interpolated 角点上下文（坐标变为角点值）各自成键，互不污染。
+            // 缓存值 == 重算值（逐位一致），仅省去同列跨 y 的重复求值。
+            struct CKey {
+                int node; long long xb, zb;
+                bool operator==(const CKey& o) const {
+                    return node == o.node && xb == o.xb && zb == o.zb;
+                }
+            };
+            struct CKeyHash {
+                size_t operator()(const CKey& k) const {
+                    size_t h = std::hash<long long>()(k.xb);
+                    h ^= std::hash<long long>()(k.zb) + 0x9e3779b97f4a7c15ull
+                         + (h << 6) + (h >> 2);
+                    h ^= std::hash<int>()(k.node) + 0x9e3779b97f4a7c15ull
+                         + (h << 6) + (h >> 2);
+                    return h;
+                }
+            };
+            static thread_local std::unordered_map<CKey, double, CKeyHash> ycache;
+            static thread_local const DensityTree* yowner = nullptr;
+            if (yowner != this) { ycache.clear(); yowner = this; }
+            if (ycache.size() > 400000) ycache.clear();
+            CKey k{idx, d2bits(x), d2bits(z)};
+            auto it = ycache.find(k);
+            if (it != ycache.end()) return it->second;
+            double v = eval_inner(n, idx, x, y, z);
+            ycache.emplace(k, v);
+            return v;
+        }
+        return eval_inner(n, idx, x, y, z);
+    }
+
+    static long long d2bits(double d) {
+        long long b;
+        std::memcpy(&b, &d, sizeof(b));
+        return b;
+    }
+
+    double eval_inner(const DNode& n, int idx, double x, double y,
+                      double z) const {
         switch (n.op) {
             case OP_CONST: return n.p0;
             case OP_Y_GRAD: {
@@ -749,15 +907,19 @@ struct DensityTree {
                 return nn->get_value(x * 0.25, y * 0.25, z * 0.25) * 4.0;
             }
             case OP_OLD_BLENDED:
+                DF_TICK(blended);
                 if (!blended) throw std::runtime_error("blended noise missing");
                 return blended->compute(x, y, z);
-            case OP_SPLINE: return eval_spline(n.spline, x, y, z);
+            case OP_SPLINE:
+                DF_TICK(spline);
+                return eval_spline(n.spline, x, y, z);
             case OP_RANGE_CHOICE: {
                 double v = eval(n.a0, x, y, z);
                 return (v >= n.p0 && v < n.p1) ? eval(n.a1, x, y, z)
                                               : eval(n.a2, x, y, z);
             }
             case OP_INTERPOLATED: {
+                DF_TICK(interp);
                 double cw = n.cw, ch = n.ch;
                 int cellX = (int)std::floor(x / cw);
                 int cellY = (int)std::floor(y / ch);
@@ -1356,6 +1518,10 @@ static SamplerCtx* build_from_blob(i64 seed, const std::string& blob) {
         ctx->aq.aq_lo = aqrng.next_long();
         ctx->aq.aq_hi = aqrng.next_long();
     }
+
+    // 静态 y 无关性标注：必须在树/blended 全部就绪后执行一次。
+    // 漏调用则 y_indep 全 false —— 不影响正确性，但列内缓存完全失效。
+    tree.compute_y_independence();
     return ctx;
 }
 
@@ -1385,6 +1551,17 @@ static py::array_t<i16> fill_top_grid(SamplerCtx* ctx, int x0, int z0, int w, in
             int z = z0 + row;
             for (int col = 0; col < w; col++) {
                 int x = x0 + col;
+                // 26.2 skipSamplingAboveY 剪枝只存在于 Aquifer.computeSubstance：
+                // 官方在 density<=0 时才调 computeSubstance 查含水层流体归属，
+                // y>skip 直接返回 globalFluid（省 aquifer 网格采样）。
+                // density>0 恒为实心（石头），与 skip 完全无关——official 的
+                // skip 从不是「地形上界」。preliminary_surface_level 本身会
+                // 系统性低估真实地表（find_top_surface 的 density 指示函数
+                // 过零点可在 y~10~30，而真实地表 63+），把剪枝放在本循环层
+                // 会把高于 skip 的地形整片吞成 12k+10 恒定平台 + chunk 对齐
+                // 直线边界（seed=1 实证：矩形水域 + 82/58/34 平台）。
+                // 故此处必须逐 y 全量求值；skip 剪枝由 compute_substance
+                // 内部（L1120 对应官方 Aquifer L159）在 density<=0 分支生效。
                 int top = min_y - 1;
                 for (int y = max_y; y >= min_y; y--) {
                     double d = ctx->tree.eval(ctx->tree.root, x, y, z);
@@ -1824,8 +2001,10 @@ static int get_min_surface_level(SurfaceCtx& c) {
     int b0 = cell_x << 4, b1 = (cell_x + 1) << 4;
     int d0 = cell_z << 4, d1 = (cell_z + 1) << 4;
     auto prelim = [&](int px, int pz) {
-        int qx = (px >> 2) << 2, qz = (pz >> 2) << 2;
-        return ifloor(c.dt->eval(c.aq->df_prelim, qx, 0.0, qz));
+        // 与 Aquifer::prelim_surface 同树同量化同 ifloor，走 prelim_cache
+        // （4 角按 16x16 chunk 共享，worker 线程私有 aq 无竞争），
+        // 避免每列 4 次无缓存 df_prelim 树求值。
+        return c.aq->prelim_surface(px, pz);
     };
     int p00 = prelim(b0, d0), p10 = prelim(b1, d0);
     int p01 = prelim(b0, d1), p11 = prelim(b1, d1);
@@ -2108,6 +2287,9 @@ static ColumnResult surface_column(SurfaceCtx& c, const SurfaceDeps& dep,
     res.top_y = fillTop;
 
     // 1) eroded badlands 抬高列顶
+#ifdef DF_PROFILE_OPS
+    uint64_t _te0 = st_now();
+#endif
     if (isErodedBadlands) {
         auto filled = eroded_badlands_extension(c, dep, x, z, fillTop + 1);
         if (!filled.empty()) {
@@ -2116,6 +2298,9 @@ static ColumnResult surface_column(SurfaceCtx& c, const SurfaceDeps& dep,
             res.top_y = mx;
         }
     }
+#ifdef DF_PROFILE_OPS
+    g_st.ext.fetch_add(st_now() - _te0, std::memory_order_relaxed);
+#endif
 
     // 2) 单点规则
     c.block_x = x;
@@ -2127,23 +2312,58 @@ static ColumnResult surface_column(SurfaceCtx& c, const SurfaceDeps& dep,
     c.msl_valid = false;
     c.fill_top = fillTop;
     c.first_water = firstWaterY;
+#ifdef DF_PROFILE_OPS
+    uint64_t _td0 = st_now();
+#endif
     c.surface_depth = static_cast<int>(
         (c.surface_noise ? c.surface_noise->get_value(x, 0.0, z) : 0.0) * 2.75
         + 3.0 + surface_random_double(c.pos_lo, c.pos_hi, x, 0, z) * 0.25);
+#ifdef DF_PROFILE_OPS
+    g_st.depth.fetch_add(st_now() - _td0, std::memory_order_relaxed);
+    uint64_t _ts0 = st_now();
+#endif
     c.stone_above = 1;
-    // stone_below：自 top-1 向下到第一个非石
+    // stone_below：自 top-1 向下到第一个非石。
+    // 优化：树中读取 stone_below 的只有 STONE_DEPTH(ceiling) 条件，其阈值
+    //   1 + offset + (add_surface_depth ? surface_depth : 0) + sec
+    // 为列内常数；下探一旦超过全部阈值上限，所有相关条件已恒 False，
+    // 停在 cap+1 与探到底结果等价（真实石层常达数十层，截断省掉绝大多数
+    // solid_at 密度树求值）。cap 只允许偏大（截断语义保守），偏大会少省、
+    // 偏小会错，故 (int)p2 截断仅在 p2<0 时比 floor 大 1，安全。
     {
+        int cap = 0;
+        for (const SCond& sc : c.st->conds) {
+            if (sc.type != COND_STONE_DEPTH || !sc.flag) continue;
+            int sec = 0;
+            if (sc.i1) {   // secondary_depth_range，与 eval_cond_inner 同式
+                double v = get_surface_secondary(c);
+                sec = static_cast<int>(sc.p0 + (sc.p1 - sc.p0) * (v - (-1.0)) / 2.0);
+            }
+            int th = 1 + static_cast<int>(sc.p2) + (sc.i0 ? c.surface_depth : 0) + sec;
+            if (th > cap) cap = th;
+        }
         int ny = res.top_y - 1;
-        while (ny >= -64 && dep.solid_at(x, ny, z)) ny--;
-        c.stone_below = res.top_y - (ny + 1) + 1;
+        int below = 1;
+        while (below <= cap && ny >= -64 && dep.solid_at(x, ny, z)) { ny--; below++; }
+        c.stone_below = below;
     }
+#ifdef DF_PROFILE_OPS
+    g_st.solid.fetch_add(st_now() - _ts0, std::memory_order_relaxed);
+    uint64_t _tr0 = st_now();
+#endif
     bool underWater = (firstWaterY != INT32_MIN) && (firstWaterY > res.top_y);
     c.water_height = underWater ? dep.sea_level : INT64_MIN;
 
     int blk = eval_rule(c, c.st->root);
     res.block = blk >= 0 ? blk : dep.stone_id;
+#ifdef DF_PROFILE_OPS
+    g_st.rule.fetch_add(st_now() - _tr0, std::memory_order_relaxed);
+#endif
 
     // 3) frozen ocean
+#ifdef DF_PROFILE_OPS
+    uint64_t _tf0 = st_now();
+#endif
     if (isFrozenOcean) {
         bool melt = biome_temperature(biomeId, x, dep.sea_level, z,
                                       dep.sea_level) > 0.1;
@@ -2159,6 +2379,9 @@ static ColumnResult surface_column(SurfaceCtx& c, const SurfaceDeps& dep,
             }
         }
     }
+#ifdef DF_PROFILE_OPS
+    g_st.ext.fetch_add(st_now() - _tf0, std::memory_order_relaxed);
+#endif
     return res;
 }
 
@@ -2269,9 +2492,36 @@ static py::tuple surface_grid(
     py::array_t<i16> fillTops, py::array_t<i32> biomeGrid,
     int x0, int z0, int seaLevel, int threads) {
 
-    SurfaceTree st;
-    BlockTable bt;
-    load_surface_blob(st, bt, surfaceBlob, ctx->pos_lo, ctx->pos_hi);
+    // blob 解析缓存：同一 seed 的各瓦片传入同一 blob 字符串，反序列化 +
+    // NormalNoise 建表与 seed 无关（biome 温度表写入全局数组但值幂等，
+    // 跨线程并发 load 亦无害），按 blob 内容缓存解析结果（只读共享）。
+    struct SurfBlobParsed { SurfaceTree st; BlockTable bt; };
+    static std::mutex s_blob_mu;
+    static std::unordered_map<std::string,
+                              std::shared_ptr<const SurfBlobParsed>> s_blob_cache;
+    std::shared_ptr<const SurfBlobParsed> parsed;
+    {
+#ifdef DF_PROFILE_OPS
+        uint64_t _t0 = st_now();
+#endif
+        std::lock_guard<std::mutex> lk(s_blob_mu);
+        auto it = s_blob_cache.find(surfaceBlob);
+        if (it != s_blob_cache.end()) {
+            parsed = it->second;
+        } else {
+            auto fresh = std::make_shared<SurfBlobParsed>();
+            load_surface_blob(fresh->st, fresh->bt, surfaceBlob,
+                              ctx->pos_lo, ctx->pos_hi);
+            if (s_blob_cache.size() >= 8) s_blob_cache.clear();   // 简单淘汰
+            parsed = fresh;
+            s_blob_cache.emplace(surfaceBlob, std::move(fresh));
+        }
+#ifdef DF_PROFILE_OPS
+        g_st.load.fetch_add(st_now() - _t0, std::memory_order_relaxed);
+#endif
+    }
+    const SurfaceTree& st = parsed->st;
+    const BlockTable& bt = parsed->bt;
 
     auto fbuf = fillTops.unchecked<2>();
     auto bbuf = biomeGrid.unchecked<2>();
@@ -2352,6 +2602,9 @@ static py::tuple surface_grid(
             int r = nextRow.fetch_add(1);
             if (r >= h) break;
             int z = z0 + r;
+#ifdef DF_PROFILE_OPS
+            uint64_t _trow = st_now();
+#endif
             for (int col = 0; col < w; col++) {
                 int x = x0 + col;
                 int fillTop = static_cast<int>(fbuf(r, col));
@@ -2364,20 +2617,53 @@ static py::tuple surface_grid(
                 bool frozen = (bnit != st.biome_names.end() &&
                                (bnit->second == "minecraft:frozen_ocean" ||
                                 bnit->second == "minecraft:deep_frozen_ocean"));
-                // 水下列：官方 waterHeight = 最上水块 y+1 = sea_level；
-                // 陆地列无上方水体 -> INT32_MIN（water 条件视为无水）
-                int firstWater = (fillTop < seaLevel) ? seaLevel : INT32_MIN;
+                // 水下列：官方 waterHeight = 最上水块 y+1 = sea_level。
+                // 仅当顶块上方存在流体（fillTop <= seaLevel-2，即水面块
+                // y=seaLevel-1 高于顶块）才有水覆盖；fillTop==seaLevel-1
+                //（恰好顶到海平面）的列上方是空气，官方 SurfaceSystem
+                // buildSurface L126-157 逐 y 扫描遇空气即重置
+                // waterHeight=MIN -> 旱地规则（grassOrDirtIfUnderwater
+                // 的 aboveWater=water(0,0) 为 TRUE -> grass_block /
+                // SNOW_BLOCK，而非 dirt）。旧判 fillTop < seaLevel 把
+                // 62 也当水下 -> aboveWater FALSE -> 整圈水线错成 dirt
+                //（用户实证的黄褐接壤色块根因，OCEAN/MANSION 窗 h==62
+                // 列 dirt 占 76% vs 原版应为草/雪/沙）。
+                int firstWater = (fillTop < seaLevel - 1) ? seaLevel : INT32_MIN;
                 auto res = surface_column(c, tdep, x, z, fillTop, firstWater,
                                           bid, eroded, frozen);
                 tob(r, col) = static_cast<i16>(res.top_y);
                 bob(r, col) = res.block;
             }
+#ifdef DF_PROFILE_OPS
+            g_st.cols.fetch_add(st_now() - _trow, std::memory_order_relaxed);
+#endif
         }
     };
+#ifdef DF_PROFILE_OPS
+    uint64_t _tall = st_now();
+#endif
     std::vector<std::thread> pool;
     for (int i = 1; i < nthreads; i++) pool.emplace_back(worker);
     worker();
     for (auto& t : pool) t.join();
+#ifdef DF_PROFILE_OPS
+    {
+        uint64_t all = st_now() - _tall;
+        auto ms = [](uint64_t ns) { return ns / 1e6; };
+        fprintf(stderr,
+                "[stime] all=%.1fms load=%.1f aq=%.1f cols=%.1f "
+                "(depth=%.1f solid=%.1f rule=%.1f ext=%.1f other=%.1f)\n",
+                ms(all), ms(g_st.load.load()), ms(g_st.aq.load()),
+                ms(g_st.cols.load()), ms(g_st.depth.load()),
+                ms(g_st.solid.load()), ms(g_st.rule.load()),
+                ms(g_st.ext.load()),
+                ms(g_st.cols.load() - g_st.depth.load() - g_st.solid.load()
+                   - g_st.rule.load() - g_st.ext.load()));
+        g_st.load.store(0); g_st.aq.store(0); g_st.cols.store(0);
+        g_st.depth.store(0); g_st.solid.store(0); g_st.rule.store(0);
+        g_st.ext.store(0);
+    }
+#endif
     }   // 重新获取 GIL（gil_scoped_release 析构）
     return py::make_tuple(tops, blocks);
 }
@@ -2497,6 +2783,25 @@ PYBIND11_MODULE(_density_sampler, m) {
         return ctx->tree.eval(idx, x, y, z);
     }, py::arg("ctx"), py::arg("idx"), py::arg("x"), py::arg("y"), py::arg("z"));
 
+#ifdef DF_PROFILE_OPS
+    m.def("profile_stats", []() {
+        py::dict d;
+        d["eval_calls"] = g_ec.eval_calls.load();
+        d["root_evals"] = g_ec.root_evals.load();
+        d["noise"] = g_ec.noise.load();
+        d["perlin"] = g_ec.perlin.load();
+        d["spline"] = g_ec.spline.load();
+        d["interp"] = g_ec.interp.load();
+        d["blended"] = g_ec.blended.load();
+        return d;
+    });
+    m.def("profile_reset", []() {
+        g_ec.eval_calls.store(0); g_ec.root_evals.store(0);
+        g_ec.noise.store(0); g_ec.perlin.store(0);
+        g_ec.spline.store(0); g_ec.interp.store(0); g_ec.blended.store(0);
+    });
+#endif
+
     m.def("node_info", [](SamplerCtx* ctx, int idx) {
         const DNode& n = ctx->tree.nodes[idx];
         py::dict d;
@@ -2555,7 +2860,9 @@ PYBIND11_MODULE(_density_sampler, m) {
         c2.biome.at = [biomeId](int, int, int) { return biomeId; };
         std::vector<std::string> tr;
         c2.trace = &tr;
-        int firstWater = (fillTop < seaLevel) ? seaLevel : INT32_MIN;
+        // 同 surface_grid：fillTop==seaLevel-1（顶到海平面）列上方是
+        // 空气 -> waterHeight=MIN -> 旱地规则（与官方逐 y 语义一致）
+        int firstWater = (fillTop < seaLevel - 1) ? seaLevel : INT32_MIN;
         auto res = surface_column(c2, dep, x, z, fillTop, firstWater,
                                   biomeId, false, false);
         py::dict out;

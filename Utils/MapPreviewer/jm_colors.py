@@ -89,61 +89,126 @@ _GRASS_TINT = (0x91, 0xBD, 0x59)      # MC 平原草地基准（vanilla grass co
 _FOLIAGE_TINT = (0x77, 0xA8, 0x4A)    # vanilla foliage
 _WATER_TINT = (0x3F, 0x76, 0xE4)      # vanilla water
 
-# 群系 -> 草色 tint（MC BiomeDefaultFeatures 的 grass_color 常量）
+# 群系 -> 草色 tint（26.2 官方语义全量生成，勿手改单值）：
+#   effects.grass_color 显式值优先；否则 Biome.getGrassColor 的
+#   clamp(temp,0,1)/clamp(downfall,0,1) -> ColorMapColorUtil.get:
+#   rain=downfall*temp; x=(int)((1-temp)*255); y=(int)((1-rain)*255);
+#   grass.png[y,x] 单像素。
+#   dark_forest 另叠 modifier 混合 ((base&0xFEFEFE)+0x28340A)>>1（常数）；
+#   swamp/mangrove_swamp 草色是逐坐标噪声二值（BIOME_INFO_NOISE seed
+#   2345，<-0.1 取 (76,96,60) 否则 (106,112,57)，JM 再叠 5×5 平均），
+#   表值 (106,112,57) 仅 fallback，渲染侧 block_render 逐坐标复刻。
+#   生成脚本 .temp/gen_tint_tables.py。
 _BIOME_TINTS = {
-    "plains": (145, 189, 89), "sunflower_plains": (145, 189, 89),
-    "meadow": (145, 189, 89), "cherry_grove": (145, 189, 89),
-    "forest": (121, 192, 90), "flower_forest": (121, 192, 90),
-    "birch_forest": (136, 187, 103),
-    "old_growth_birch_forest": (129, 187, 96),
-    "dark_forest": (64, 168, 51),
-    "taiga": (104, 164, 100), "old_growth_pine_taiga": (101, 156, 95),
-    "old_growth_spruce_taiga": (104, 164, 100),
-    "snowy_taiga": (104, 164, 100), "snowy_plains": (125, 181, 125),
-    "snowy_slopes": (104, 164, 100), "grove": (104, 164, 100),
-    "jungle": (89, 201, 60), "sparse_jungle": (89, 201, 60),
-    "bamboo_jungle": (118, 142, 20),
-    "savanna": (149, 159, 63), "savanna_plateau": (149, 159, 63),
-    "windswept_savanna": (149, 159, 63),
-    "swamp": (106, 112, 57), "mangrove_swamp": (117, 148, 90),
-    "desert": (191, 183, 85), "badlands": (144, 129, 77),
-    "eroded_badlands": (144, 129, 77), "wooded_badlands": (144, 129, 77),
-    "windswept_hills": (131, 160, 97), "windswept_forest": (131, 160, 97),
-    "windswept_gravelly_hills": (131, 160, 97),
-    "stony_peaks": (131, 160, 97), "jagged_peaks": (131, 160, 97),
-    "frozen_peaks": (131, 160, 97), "lush_caves": (131, 160, 97),
+    "badlands": (144, 129, 77), "bamboo_jungle": (89, 201, 60), "basalt_deltas": (191, 183, 85),
+    "beach": (145, 189, 89), "birch_forest": (136, 187, 103), "cherry_grove": (182, 219, 97),
+    "cold_ocean": (142, 185, 113), "crimson_forest": (191, 183, 85), "dark_forest": (80, 122, 50),
+    "deep_cold_ocean": (142, 185, 113), "deep_dark": (145, 189, 89), "deep_frozen_ocean": (142, 185, 113),
+    "deep_lukewarm_ocean": (142, 185, 113), "deep_ocean": (142, 185, 113), "desert": (191, 183, 85),
+    "dripstone_caves": (145, 189, 89), "end_barrens": (142, 185, 113), "end_highlands": (142, 185, 113),
+    "end_midlands": (142, 185, 113), "eroded_badlands": (144, 129, 77), "flower_forest": (121, 192, 90),
+    "forest": (121, 192, 90), "frozen_ocean": (128, 180, 151), "frozen_peaks": (128, 180, 151),
+    "frozen_river": (128, 180, 151), "grove": (128, 180, 151), "ice_spikes": (128, 180, 151),
+    "jagged_peaks": (128, 180, 151), "jungle": (89, 201, 60), "lukewarm_ocean": (142, 185, 113),
+    "lush_caves": (142, 185, 113), "mangrove_swamp": (106, 112, 57), "meadow": (131, 187, 109),
+    "mushroom_fields": (85, 201, 63), "nether_wastes": (191, 183, 85), "ocean": (142, 185, 113),
+    "old_growth_birch_forest": (136, 187, 103), "old_growth_pine_taiga": (134, 184, 127), "old_growth_spruce_taiga": (134, 183, 131),
+    "pale_garden": (119, 130, 114), "plains": (145, 189, 89), "river": (142, 185, 113),
+    "savanna": (191, 183, 85), "savanna_plateau": (191, 183, 85), "small_end_islands": (142, 185, 113),
+    "snowy_beach": (131, 181, 147), "snowy_plains": (128, 180, 151), "snowy_slopes": (128, 180, 151),
+    "snowy_taiga": (128, 180, 151), "soul_sand_valley": (191, 183, 85), "sparse_jungle": (100, 199, 63),
+    "stony_peaks": (154, 190, 75), "stony_shore": (138, 182, 137), "sulfur_caves": (171, 166, 79),
+    "sunflower_plains": (145, 189, 89), "swamp": (106, 112, 57), "taiga": (134, 183, 131),
+    "the_end": (142, 185, 113), "the_void": (142, 185, 113), "warm_ocean": (142, 185, 113),
+    "warped_forest": (191, 183, 85), "windswept_forest": (138, 182, 137), "windswept_gravelly_hills": (138, 182, 137),
+    "windswept_hills": (138, 182, 137), "windswept_savanna": (191, 183, 85), "wooded_badlands": (144, 129, 77),
 }
-# 群系 -> 树叶 tint（MC foliage_color）
+# 群系 -> 树叶 tint（26.2 官方语义全量生成，勿手改单值）：
+#   effects.foliage_color 显式值优先；否则同上用 foliage.png[y,x]。
+#   生成脚本 .temp/gen_tint_tables.py。
 _BIOME_FOLIAGE_TINTS = {
-    "plains": (119, 171, 73), "forest": (119, 171, 73),
-    "birch_forest": (131, 175, 95), "old_growth_birch_forest": (131, 175, 95),
-    "dark_forest": (64, 168, 51), "flower_forest": (119, 171, 73),
-    "taiga": (119, 171, 73), "snowy_taiga": (49, 111, 46),
-    "old_growth_pine_taiga": (141, 179, 96),
-    "old_growth_spruce_taiga": (49, 111, 46),
-    "jungle": (119, 171, 73), "sparse_jungle": (119, 171, 73),
-    "bamboo_jungle": (119, 171, 73),
-    "swamp": (94, 113, 53), "mangrove_swamp": (117, 148, 90),
-    "savanna": (149, 159, 63), "desert": (149, 159, 63),
-    "cherry_grove": (190, 203, 156),
-    "meadow": (119, 171, 73), "grove": (49, 111, 46),
-    "snowy_plains": (119, 171, 73), "ice_spikes": (119, 171, 73),
+    "badlands": (158, 129, 77), "bamboo_jungle": (48, 187, 11), "basalt_deltas": (174, 164, 42),
+    "beach": (119, 171, 47), "birch_forest": (107, 169, 65), "cherry_grove": (182, 219, 97),
+    "cold_ocean": (113, 167, 77), "crimson_forest": (174, 164, 42), "dark_forest": (89, 174, 48),
+    "deep_cold_ocean": (113, 167, 77), "deep_dark": (119, 171, 47), "deep_frozen_ocean": (113, 167, 77),
+    "deep_lukewarm_ocean": (113, 167, 77), "deep_ocean": (113, 167, 77), "desert": (174, 164, 42),
+    "dripstone_caves": (119, 171, 47), "end_barrens": (113, 167, 77), "end_highlands": (113, 167, 77),
+    "end_midlands": (113, 167, 77), "eroded_badlands": (158, 129, 77), "flower_forest": (89, 174, 48),
+    "forest": (89, 174, 48), "frozen_ocean": (96, 161, 123), "frozen_peaks": (96, 161, 123),
+    "frozen_river": (96, 161, 123), "grove": (96, 161, 123), "ice_spikes": (96, 161, 123),
+    "jagged_peaks": (96, 161, 123), "jungle": (48, 187, 11), "lukewarm_ocean": (113, 167, 77),
+    "lush_caves": (113, 167, 77), "mangrove_swamp": (141, 177, 39), "meadow": (100, 169, 72),
+    "mushroom_fields": (43, 187, 15), "nether_wastes": (174, 164, 42), "ocean": (113, 167, 77),
+    "old_growth_birch_forest": (107, 169, 65), "old_growth_pine_taiga": (104, 165, 95), "old_growth_spruce_taiga": (104, 164, 100),
+    "pale_garden": (135, 141, 118), "plains": (119, 171, 47), "river": (113, 167, 77),
+    "savanna": (174, 164, 42), "savanna_plateau": (174, 164, 42), "small_end_islands": (113, 167, 77),
+    "snowy_beach": (100, 162, 120), "snowy_plains": (96, 161, 123), "snowy_slopes": (96, 161, 123),
+    "snowy_taiga": (96, 161, 123), "soul_sand_valley": (174, 164, 42), "sparse_jungle": (62, 184, 15),
+    "stony_peaks": (130, 172, 30), "stony_shore": (109, 163, 107), "sulfur_caves": (119, 171, 47),
+    "sunflower_plains": (119, 171, 47), "swamp": (106, 112, 57), "taiga": (104, 164, 100),
+    "the_end": (113, 167, 77), "the_void": (113, 167, 77), "warm_ocean": (113, 167, 77),
+    "warped_forest": (174, 164, 42), "windswept_forest": (109, 163, 107), "windswept_gravelly_hills": (109, 163, 107),
+    "windswept_hills": (109, 163, 107), "windswept_savanna": (174, 164, 42), "wooded_badlands": (158, 129, 77),
 }
-# 群系 -> 水色 tint（MC water_color；已由官方瓦片反推精确验证）
+# 群系 -> 水色 tint（26.2 官方语义全量生成，勿手改单值）：
+#   effects.water_color 即 JM 实际 tint 真值（反编译：BiomeMD 构造
+#   透传 biome.getWaterColor()，ColorManager 默认色板同源；最终色 =
+#   贴图 × water_color/255，无其他处理）。旧表部分键由官方瓦片反推，
+#   与源码有偏差（5 处不一致 + 5 群系缺键错走默认，已全量按源码重建）。
+#   deep_warm_ocean 群系 26.2 已移除，键保留兼容旧 id2key。
+#   生成脚本 .temp/gen_water_table.py（源：_native/worldgen/26.2/biome，
+#   共 66 群系 + 1 兼容键）。
 _BIOME_WATER_TINTS = {
-    "ocean": (63, 118, 228), "deep_ocean": (63, 118, 228),
-    "frozen_ocean": (57, 56, 201), "deep_frozen_ocean": (57, 56, 201),
-    "cold_ocean": (61, 87, 214), "deep_cold_ocean": (61, 87, 214),
-    "frozen_river": (57, 56, 201),
-    "lukewarm_ocean": (69, 173, 194),
-    "deep_lukewarm_ocean": (69, 173, 194),
-    "warm_ocean": (67, 213, 238), "deep_warm_ocean": (67, 213, 238),
-    "swamp": (96, 113, 70), "mangrove_swamp": (92, 129, 111),
-    "river": (63, 118, 228), "beach": (63, 118, 228),
-    "snowy_beach": (57, 56, 201),
+    "badlands": (63, 118, 228), "bamboo_jungle": (63, 118, 228), "basalt_deltas": (63, 118, 228),
+    "beach": (63, 118, 228), "birch_forest": (63, 118, 228), "cherry_grove": (93, 183, 239),
+    "cold_ocean": (61, 87, 214), "crimson_forest": (63, 118, 228), "dark_forest": (63, 118, 228),
+    "deep_cold_ocean": (61, 87, 214), "deep_dark": (63, 118, 228), "deep_frozen_ocean": (57, 56, 201),
+    "deep_lukewarm_ocean": (69, 173, 242), "deep_ocean": (63, 118, 228), "desert": (63, 118, 228),
+    "dripstone_caves": (63, 118, 228), "end_barrens": (63, 118, 228), "end_highlands": (63, 118, 228),
+    "end_midlands": (63, 118, 228), "eroded_badlands": (63, 118, 228), "flower_forest": (63, 118, 228),
+    "forest": (63, 118, 228), "frozen_ocean": (57, 56, 201), "frozen_peaks": (63, 118, 228),
+    "frozen_river": (57, 56, 201), "grove": (63, 118, 228), "ice_spikes": (63, 118, 228),
+    "jagged_peaks": (63, 118, 228), "jungle": (63, 118, 228), "lukewarm_ocean": (69, 173, 242),
+    "lush_caves": (63, 118, 228), "mangrove_swamp": (58, 122, 106), "meadow": (14, 78, 207),
+    "mushroom_fields": (63, 118, 228), "nether_wastes": (63, 118, 228), "ocean": (63, 118, 228),
+    "old_growth_birch_forest": (63, 118, 228), "old_growth_pine_taiga": (63, 118, 228), "old_growth_spruce_taiga": (63, 118, 228),
+    "pale_garden": (118, 136, 157), "plains": (63, 118, 228), "river": (63, 118, 228),
+    "savanna": (63, 118, 228), "savanna_plateau": (63, 118, 228), "small_end_islands": (63, 118, 228),
+    "snowy_beach": (61, 87, 214), "snowy_plains": (63, 118, 228), "snowy_slopes": (63, 118, 228),
+    "snowy_taiga": (61, 87, 214), "soul_sand_valley": (63, 118, 228), "sparse_jungle": (63, 118, 228),
+    "stony_peaks": (63, 118, 228), "stony_shore": (63, 118, 228), "sulfur_caves": (52, 191, 137),
+    "sunflower_plains": (63, 118, 228), "swamp": (97, 123, 100), "taiga": (63, 118, 228),
+    "the_end": (63, 118, 228), "the_void": (63, 118, 228), "warm_ocean": (67, 213, 238),
+    "warped_forest": (63, 118, 228), "windswept_forest": (63, 118, 228), "windswept_gravelly_hills": (63, 118, 228),
+    "windswept_hills": (63, 118, 228), "windswept_savanna": (63, 118, 228), "wooded_badlands": (63, 118, 228),
+    "deep_warm_ocean": (67, 213, 238),  # 26.2 已移除，保留兼容
 }
 _BIOME_FOLIAGE_DEFAULT = (119, 171, 73)
 _BIOME_WATER_DEFAULT = (63, 118, 228)
+
+# 树叶 tint 官方名单（26.2 反编译 client/color/block/BlockColors.java
+# createDefault L26-36）：
+#   biome foliage 色表: oak/jungle/acacia/dark_oak/mangrove（另有 vine）；
+#   固定色: spruce=0x619961、birch=0x80A755（不随群系）；
+#   无 tint（贴图原色）: cherry/azalea/flowering_azalea/pale_oak
+#   （pale_oak 是 UntintedParticleLeavesBlock，BlockColors 无注册）。
+# 不能按"贴图灰度"判定是否 tint：jungle_leaves 贴图自带绿基色
+# （均值极差 13.1>8），被误判彩色后整片输出贴图灰 (166,164,156)
+# ——竹林/稀疏丛林树叶全灰（2026-10-31 画廊实证，用户对照游戏截图报告）。
+_LEAVES_BIOME_TINT = frozenset((
+    "oak_leaves", "jungle_leaves", "acacia_leaves", "dark_oak_leaves",
+    "mangrove_leaves",
+))
+_LEAVES_FIXED_TINT = {
+    "spruce_leaves": (0x61, 0x99, 0x61),
+    "birch_leaves": (0x80, 0xA7, 0x55),
+}
+# 官方无 tint 注册、且贴图近灰度（pale_oak 极差 7.3 会踩灰度判定）的
+# 树叶：一律贴图原色，不得进入下方灰度分支被 tint
+_LEAVES_NO_TINT = frozenset((
+    "cherry_leaves", "azalea_leaves", "flowering_azalea_leaves",
+    "pale_oak_leaves",
+))
 
 
 _BIOME_TINT_DEFAULT = (0x91, 0xBD, 0x59)
@@ -162,16 +227,34 @@ def tinted_color(block_name: str, biome_short: str,
                  palette: dict) -> tuple:
     """返回方块在某群系下的最终颜色（灰度贴图 * tint）。
 
-    非灰度方块直接返回调色板色；草/叶/水按群系 tint 着色后，
-    树叶再压暗 0.8（JourneyMap 同法）。
+    树叶按官方 BlockColors 名单驱动：biome foliage 名单乘群系
+    foliage tint，固定名单乘常量色，名单外（樱花/杜鹃/苍白橡木）
+    贴图原色；其余方块灰度贴图按 grass/water/foliage 类 tint，
+    彩色贴图直接返回调色板色。树叶等 foliage 统一压暗 0.8。
     """
     base = palette.get(block_name)
     if base is None:
         return None
     n = block_name.split(":")[-1]
-    # 是否需要 tint 由**贴图实测**决定，而非硬编码名单：
-    # 灰度图（R≈G≈B）才需要群系 tint；本身彩色的（如樱花叶 (229,172,194)）
-    # 直接返回，否则会被再乘一次 tint 而变成灰绿。
+
+    def _emit(col, darken):
+        if darken and is_foliage(block_name):
+            col = tuple(c * FOLIAGE_BRIGHTNESS for c in col)
+        return tuple(int(min(255, max(0, round(c)))) for c in col)
+
+    # 树叶：官方名单驱动（见 _LEAVES_* 注释），不依赖贴图灰度判定
+    if n in _LEAVES_NO_TINT:
+        return base
+    if n in _LEAVES_FIXED_TINT:
+        tr, tg, tb = _LEAVES_FIXED_TINT[n]
+        g = float(base[1]) / 255.0
+        return _emit((tr * g, tg * g, tb * g), True)
+    if n in _LEAVES_BIOME_TINT:
+        tr, tg, tb = tint_for_biome("foliage", biome_short)
+        g = float(base[1]) / 255.0
+        return _emit((tr * g, tg * g, tb * g), True)
+    # 其余方块：是否 tint 由贴图实测决定——灰度图（R≈G≈B）才需要
+    # 群系 tint；本身彩色的（如樱花叶 (229,173,194)）直接返回。
     _mx, _mn = max(base), min(base)
     is_gray = (_mx - _mn) <= 8
     if not is_gray:
@@ -183,13 +266,8 @@ def tinted_color(block_name: str, biome_short: str,
     else:
         kind = "grass"
     tr, tg, tb = tint_for_biome(kind, biome_short)
-    # base 是灰度均值 b；tint 色 = tint * (b/255)
-    # MC 原版：final = tint * texture_gray / 255
     g = float(base[1]) / 255.0
-    col = (tr * g, tg * g, tb * g)
-    if is_foliage(block_name):
-        col = tuple(c * FOLIAGE_BRIGHTNESS for c in col)
-    return tuple(int(min(255, max(0, round(c)))) for c in col)
+    return _emit((tr * g, tg * g, tb * g), True)
 
 # ===========================================================================
 # JourneyMap BaseRenderer.setStratumColors 的参数与合成（实测默认值）
