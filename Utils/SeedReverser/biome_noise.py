@@ -869,6 +869,9 @@ BIOME_ID = {
     "deep_warm_ocean": 47, "deep_lukewarm_ocean": 48,
     "deep_cold_ocean": 49, "deep_frozen_ocean": 50,
     "sunflower_plains": 129, "ice_spikes": 140,
+    # btree262 实证可输出但原表缺名（id2key 反转后该群系查不到名 → 树链/地表规则失效）；
+    # 名称用 26.2 官方实名（与 veg_feature_index.json / surface rules 一致）
+    "old_growth_spruce_taiga": 160,
     "eroded_badlands": 165, "shattered_savanna": 163,
     "gravelly_mountains": 131, "windswept_gravelly_hills": 131,
     "bamboo_jungle": 168, "dripstone_caves": 174, "lush_caves": 175,

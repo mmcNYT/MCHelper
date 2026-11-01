@@ -1231,9 +1231,11 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
                       out_blocks=None, out_heights=None):
     """按官方放置链做确定性植被叠加（就地改 rgb float32 / blocks / heights）。
 
-    树：官方 per-chunk 放置算法摆位，树冠按 26.2 叶放置器几何写逐格
-    台阶高度场（vegetation.crown_step）+ blocks 通道叶子 id；竹子：官方
-    BambooFeature 放置链（podzol 盘 + 竹点）。返回 (disk_cells, dot_cells)。
+    树：官方 per-chunk 摆位（tree_placement_official）+ 官方逐格树形
+    （tree_shape_official，26.2 反编译直译：树干/树冠/装饰器/根系/巨型
+    蘑菇/倒木全链），写入 blocks/heights 参与「每列最高方块」竞争；
+    竹子：官方 BambooFeature 放置链（podzol 盘 + 竹点）。返回
+    (disk_cells, dot_cells)。
     """
     h, w = rgb.shape[:2]
     names = pack["block_names"]
@@ -1280,55 +1282,58 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
             radius[r, c] = rad; canopy_col[r, c] = col
             crop_kind[r, c] = pr["crop_kind"]
 
-    # 真实树摆放：按 MC per-chunk feature 放置算法（population seed +
-    # in_square 偏移），替代原来的逐像素概率散布。
-    from Utils.MapPreviewer import tree_placement as _tp
-    trees = _tp.place_trees_in_rect(seed, x0, z0, w, h, heights,
-                                    biome_grid, pack["id2key"])
+    # 真实树摆放：官方 per-chunk feature 摆位（population seed 派生 +
+    # in_square 等 placement 链）+ 官方逐格树形生成（TreeFeature 全链）。
+    # hm_ocean = OCEAN_FLOOR_WG = 顶固体 y+1；hm_surface = WORLD_SURFACE_WG
+    # = 顶非空气 y+1（水列 = 海平面 _SEA，水深差值 = 水面 62-海底）。
+    from Utils.MapPreviewer import tree_placement_official as _tpo
+    from Utils.MapPreviewer import tree_shape_official as _tso
+    hm_ocean = heights.astype(np.int32) + 1
+    hm_surface = np.where(heights < _SEA, _SEA, heights + 1).astype(np.int32)
+    trees = _tpo.place_trees_in_rect(
+        seed, x0, z0, w, h, hm_ocean, hm_surface, biome_grid,
+        pack["id2key"], ground_ok=None, top_block_grid=blocks,
+        block_names=names)
     canopy = np.zeros((h, w), bool)
+    if trees:
+        heights_i = hm_ocean - 1            # 顶方块 y（int32 视图）
 
-    for (tx, tz, sp, rad, _col, top_y) in trees:
-        # JourneyMap 的树冠是**每方块单色**（叶片贴图均值 × 群系 tint，由
-        # 4d 统一配色按 blocks 通道给出，此处不写 rgb——写了也会被覆盖）。
-        # 立体感全部来自真实树冠的**分层高度场**：真实树叶由叶放置器逐层
-        # 摆放（冠顶窄、下层宽），JM heightmap（precipitationHeight 含树叶）
-        # 在冠内就有台阶 -> populateSlopes 对台阶施加 bevel（北缘亮、南缘
-        # 暗、南侧地面投影、冠内 2~3 级明暗，见参考截图）。此前树冠是同高
-        # 平坦层，冠内 slope 恒 1（全平），与 JM 相比缺少台阶状立体感。
-        # 逐格降差剖面见 _veg.crown_step（26.2 反编译叶放置器几何）。
-        # 冠顶基准 = 地表 + 干高近似（vegetation.crown_top，26.2
-        # trunk_placer 均值）；必须高于台阶最大降差，否则外环压到地表
-        # 高度以下会失去树冠资格（真实树叶也只长在空气格）。
-        H = int(top_y) + _veg.crown_top(sp)
-        lim = rad * rad + rad
-        for dy in range(-rad, rad + 1):
-            yy = tz + dy
-            if yy < 0 or yy >= h:
+        def h_at(x, z):
+            lx, lz = x - x0, z - z0
+            if 0 <= lx < w and 0 <= lz < h:
+                return int(heights_i[lz, lx])
+            return 63                        # 区域外中性值（同探针）
+
+        def s_at(x, z):
+            lx, lz = x - x0, z - z0
+            if 0 <= lx < w and 0 <= lz < h:
+                return names[int(blocks[lz, lx])]
+            return "grass_block"
+
+        def w_at(x, z):
+            lx, lz = x - x0, z - z0
+            if 0 <= lx < w and 0 <= lz < h:
+                hg = int(heights_i[lz, lx])
+                return (_SEA - 1) if hg < _SEA else hg
+            return 62
+
+        level = _tso.SimLevel(h_at, s_at, w_at)
+        for (wx, wz, y, _feat, _cf_name, tree_cf, rng) in trees:
+            # 树实例 y = OCEAN_FLOOR 值 = 顶固体 y+1（首个空气格），
+            # 与 Java getHeight(OCEAN_FLOOR_WG) 一致
+            _tso.place_configured_feature(level, rng, (wx, y, wz), tree_cf)
+        n2b = pack.get("name2bid") or {}
+        for (bx, by, bz), name in level.blocks.items():
+            gx = bx - x0
+            gz = bz - z0
+            if not (0 <= gx < w and 0 <= gz < h):
                 continue
-            for dx in range(-rad, rad + 1):
-                xx = tx + dx
-                if xx < 0 or xx >= w:
-                    continue
-                r2 = dx * dx + dy * dy
-                if r2 > lim:
-                    continue
-                if not growable[yy, xx]:
-                    continue
-                canopy[yy, xx] = True
-                # 该列冠层高度 = 冠顶 H - 剖面降差（真实树冠分层几何）
-                ch_h = H - _veg.crown_step(sp, dx, dy)
-                # 真俯视：树叶参与「每列最高方块」竞争（树冠高于地面）
-                if out_blocks is not None:
-                    lid = _LEAF_BID.get("minecraft:%s_leaves" % sp)
-                    if lid is None:
-                        lid = _LEAF_BID.get("minecraft:oak_leaves")
-                    if lid is not None and ch_h > out_heights[yy, xx]:
-                        out_heights[yy, xx] = ch_h
-                        out_blocks[yy, xx] = lid
-                # 树叶无 NoShadow 旗标（VanillaBlockHandler：leaves 只加
-                # OpenToSky+Foliage+NoTopo），照常抬高 getBlockHeight
-                if ch_h > heights[yy, xx]:
-                    heights[yy, xx] = ch_h
+            bid2 = n2b.get("minecraft:" + name)
+            if bid2 is not None and by > out_heights[gz, gx]:
+                out_heights[gz, gx] = by
+                out_blocks[gz, gx] = bid2
+                if name.endswith("_leaves"):
+                    canopy[gz, gx] = True
 
     # ---- 官方竹子放置链（26.2 BambooFeature；bamboo_placement.py 逐行
     # 复刻 noise_based_count/in_square/heightmap/biome + 逐尝试 RNG）----
