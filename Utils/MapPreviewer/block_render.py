@@ -1112,26 +1112,33 @@ _SNOW_COVERABLE = {
     "minecraft:cobblestone", "minecraft:short_grass", "minecraft:fern",
 }
 
-# 陆地结构模板用到的材质（140 项，由 structure_render 汇总实测得到；
+# 陆地/水下结构用到的材质（144 项，由 structure_render 汇总实测得到；
 # 后 5 项为废弃传送门官方全链新引入：fiq 降解输出 mossy_stairs/slab、
-# stone_slab、obsidian 0.15 哭泣、postProcess 藤）。必须预先纳入
-# id 空间，否则结构方块无法参与「每列最高」竞争。
+# stone_slab、obsidian 0.15 哭泣、postProcess 藤；海底神殿程序化
+# 结构引入 prismarine 全系 + sea_lantern——不在自然 surface 生成，
+# 不补录则 _stamp_real_blocks 拿不到 bid，beard=False 只抬 heights
+# 不写 blocks 通道，4d 按海床块渲染且 top_block 丢失（monu_verify
+# 实证：top_block 全 "."、heights 抬升到 _SEA 而非块顶）。必须预先
+# 纳入 id 空间，否则结构方块无法参与「每列最高」竞争。
 _STRUCTURE_MATERIALS = [
     "minecraft:barrel", "minecraft:basalt", "minecraft:blackstone",
     "minecraft:blackstone_stairs", "minecraft:blue_terracotta",
     "minecraft:brick_stairs", "minecraft:bricks",
     "minecraft:carved_pumpkin", "minecraft:chest", "minecraft:candle",
     "minecraft:chiseled_deepslate", "minecraft:chiseled_polished_blackstone",
+    "minecraft:chiseled_sandstone",
     "minecraft:chiseled_stone_bricks", "minecraft:chiseled_tuff",
     "minecraft:chiseled_tuff_bricks", "minecraft:cobbled_deepslate",
-    "minecraft:cobweb", "minecraft:crying_obsidian",
+    "minecraft:cobblestone_stairs", "minecraft:cobweb", "minecraft:crying_obsidian",
     "minecraft:cracked_deepslate_bricks",
     "minecraft:cracked_deepslate_tiles",
     "minecraft:cracked_polished_blackstone_bricks",
     "minecraft:cracked_stone_bricks", "minecraft:crafting_table",
+    "minecraft:cut_sandstone",
     "minecraft:cyan_terracotta", "minecraft:dark_oak_fence",
     "minecraft:dark_oak_log", "minecraft:dark_oak_planks",
     "minecraft:dark_oak_slab", "minecraft:dark_oak_stairs",
+    "minecraft:dark_prismarine",
     "minecraft:deepslate", "minecraft:deepslate_brick_slab",
     "minecraft:deepslate_brick_stairs", "minecraft:deepslate_brick_wall",
     "minecraft:deepslate_bricks", "minecraft:deepslate_tile_stairs",
@@ -1144,23 +1151,28 @@ _STRUCTURE_MATERIALS = [
     "minecraft:light_blue_carpet", "minecraft:light_blue_wool",
     "minecraft:light_gray_carpet", "minecraft:light_gray_glazed_terracotta",
     "minecraft:light_gray_terracotta", "minecraft:magma_block",
-    "minecraft:mossy_stone_brick_slab", "minecraft:mossy_stone_brick_stairs",
+    "minecraft:mossy_cobblestone", "minecraft:mossy_stone_brick_slab",
+    "minecraft:mossy_stone_brick_stairs",
     "minecraft:mossy_stone_bricks", "minecraft:mud_brick_slab",
     "minecraft:mud_brick_stairs", "minecraft:mud_bricks",
     "minecraft:netherrack", "minecraft:oak_button", "minecraft:oak_trapdoor",
-    "minecraft:obsidian", "minecraft:packed_mud", "minecraft:polished_andesite",
+    "minecraft:obsidian", "minecraft:orange_terracotta",
+    "minecraft:packed_mud", "minecraft:polished_andesite",
     "minecraft:polished_blackstone_brick_stairs",
     "minecraft:polished_blackstone_bricks", "minecraft:polished_deepslate",
     "minecraft:polished_deepslate_stairs", "minecraft:polished_deepslate_wall",
     "minecraft:polished_tuff", "minecraft:pumpkin", "minecraft:red_bed",
+    "minecraft:prismarine", "minecraft:prismarine_bricks",
     "minecraft:red_carpet", "minecraft:red_terracotta",
     "minecraft:redstone_block", "minecraft:redstone_lamp",
     "minecraft:redstone_torch", "minecraft:reinforced_deepslate",
-    "minecraft:sculk_sensor", "minecraft:soul_lantern", "minecraft:soul_sand",
+    "minecraft:sand", "minecraft:sandstone", "minecraft:sandstone_slab",
+    "minecraft:sandstone_stairs",
+    "minecraft:sculk_sensor", "minecraft:sea_lantern", "minecraft:soul_lantern", "minecraft:soul_sand",
     "minecraft:spruce_fence", "minecraft:spruce_planks", "minecraft:spruce_slab",
     "minecraft:spruce_stairs", "minecraft:stone_brick_slab",
     "minecraft:stone_brick_stairs", "minecraft:stone_bricks",
-    "minecraft:stone_slab", "minecraft:vine",
+    "minecraft:stone_slab", "minecraft:tnt", "minecraft:vine",
     "minecraft:tuff_bricks", "minecraft:wall_torch",
     "minecraft:waxed_copper_block", "minecraft:waxed_cut_copper",
     "minecraft:waxed_oxidized_cut_copper",
@@ -1502,6 +1514,112 @@ def _apply_structures(rgb, heights, blocks, x0, z0, h, w, seed, version,
             if wb is not None:
                 if wb:
                     _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=False)
+                continue
+        if key == "jungle_temple":
+            # 官方全链：ScatteredFeaturePiece postProcess 逐行转写
+            #（structure_render.jungle_temple_blocks，复用
+            # pyramid_pieces._sim_jungle）+ 变体流朝向 +
+            # updateAverageGroundHeight 官方 y（全足迹 MBNL 平均）。
+            # 模拟抛错才回退 footprint 近似。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.jungle_temple_blocks(seed, sx, sz, pack,
+                                                   threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=False)
+                continue
+        if key == "desert_pyramid":
+            # 官方全链：ScatteredFeaturePiece postProcess 逐行转写
+            #（structure_render.desert_pyramid_blocks，复用
+            # pyramid_pieces._sim_desert）+ 变体流朝向 +
+            # updateHeightPositionToLowestGroundHeight 官方 y
+            #（全足迹 MBNL 最低值 − nextInt(3)，1.21.11/26.2 同）。
+            # 模拟抛错才回退 footprint 近似。
+            # 胜出列已由 desert_pyramid_blocks 做官方逐列裁决
+            #（S_top>=fill_top 或 air_top>=fill_top），beard=True
+            # 无条件落盘：等高替换（r=1 基座/顶尖蓝陶瓦）与
+            # AIR 挖掘列 heights 压低到结构实心顶均在列内完成。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.desert_pyramid_blocks(seed, sx, sz, pack,
+                                                    threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=True)
+                continue
+        if key == "swamp_hut":
+            # 官方全链：SwampHutPiece L56-95 逐行转写
+            #（structure_render.swamp_hut_blocks，复用
+            # pyramid_pieces._sim_hut，无 RNG 流）+ 同丛林朝向口径 +
+            # updateAverageGroundHeight(level, chunkBB, 0) 官方 y
+            #（同丛林公式）。逐列官方竞争后 beard=True 落盘
+            #（等高替换语义，同沙漠）。模拟抛错才回退 footprint。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.swamp_hut_blocks(seed, sx, sz, pack,
+                                               threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=True)
+                continue
+        if key == "ocean_ruin":
+            # 官方全链：OceanRuinStructure/OceanRuinPieces 26.2 逐行复刻
+            #（structure_render.ocean_ruin_blocks）：rotation → isLarge
+            # → 模板选择（cold 三模板同位叠加）→ cluster 子废墟群 →
+            # 逐 piece OCEAN_FLOOR_WG y（fill_top+1）+ 官方下沉判定 →
+            # BlockRotProcessor 逐方块蚀除 → chest/drowned 数据标记。
+            # beard=False：模板无块列地形保留（山脊/沙脊穿出官方语义），
+            # 水列 depths 由水色公式自然处理（深水纯水色、浅水混入）。
+            # 模拟抛错才回退 footprint 近似。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                wb = _srender.ocean_ruin_blocks(seed, sx, sz, pack,
+                                                threads=_NATIVE_THREADS)
+            except Exception:
+                wb = None
+            if wb is not None:
+                if wb:
+                    _stamp_real_blocks(rgb, heights, blocks, wb,
+                                       x0, z0, h, w, pack, beard=False)
+                continue
+        if key == "monument":
+            # 官方全链：OceanMonumentStructure + MonumentBuilding 26.2 逐行
+            # 复刻（structure_render.ocean_monument_blocks）：nextInt(4) 朝向
+            # → 房间图（46 房 + Util.shuffle + 关门循环 findSource 保连通）
+            # → fitter 顺序分配 → wings/penthouse → postProcess 全序
+            # （主水盒/两翼/拱门/入口墙/顶件/三墙/7×7 柱网 fill_down/外圈
+            # 阶梯水盒/子 piece）。水盒清海床：caps={col: 盒底-1} 先把
+            # heights 压低（min 语义，盒底以下地形未动故精确），清空列由
+            # 4d 第二次配色按 n=62-38>=8 纯深水色渲染；结构列由真实块
+            # 竞争（beard=False：地形高于结构顶的列保持地形，官方俯视语义）。
+            # 模拟抛错才回退 footprint 近似。
+            try:
+                from Utils.MapPreviewer import structure_render as _srender
+                _mw = _srender.ocean_monument_blocks(
+                    seed, sx, sz, pack, threads=_NATIVE_THREADS)
+            except Exception:
+                _mw = None
+            if _mw is not None:
+                _mblks, _mcaps = _mw
+                for (_cwx, _cwz), _cap in _mcaps.items():
+                    _cpx = _cwx - x0
+                    _cpz = _cwz - z0
+                    if 0 <= _cpx < w and 0 <= _cpz < h:
+                        if heights[_cpz, _cpx] > _cap:
+                            heights[_cpz, _cpx] = _cap
+                if _mblks:
+                    _stamp_real_blocks(rgb, heights, blocks, _mblks,
                                        x0, z0, h, w, pack, beard=False)
                 continue
         if key in _TEMPLATE_STRUCTURES:
