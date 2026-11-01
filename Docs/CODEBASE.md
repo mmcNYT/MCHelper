@@ -3434,6 +3434,100 @@ mapBathymetry=false 官方俯视语义（水深≥8 不可见、≤7 海床 15% 
 ruin_verify.py）diff 14/180/180 与扩表前完全一致。对比图 .temp/rp_verify/zoom5_{hut,ruin,monu}.png
 （左旧右新 NEAREST×8，zoom5_compare.py），用户确认后代码+docs 一并 git 提交。
 
+**真实树木放置两阶段收官（2026-11-01，tree_placement_official.py/tree_shape_official.py/block_render.py/_native/worldgen/26.2/veg_feature_index.json）**：
+用户确认 5 类结构对比图后指示「真正的树木放置」，两阶段连做不分批验收（摆位精确化+树形逐格复刻）。
+权威=26.2 未混淆反编译（.temp/mc262_decompile/）。①阶段 1 摆位（tree_placement_official.py，
+ChunkGenerator.applyBiomeDecoration L318-401 逐行直译），修正旧 tree_placement.py 三处偏差：
+(a) RNG 派生——旧 decorrelated（XOR 黄金比例）是 1.8~1.17 语义，26.2 为
+setFeatureSeed=decorationSeed+globalIndex+10000×step 纯加法（WorldgenRandom.java L53-56），
+每 feature 前重置流；(b) in_square——旧 int(nextFloat*16)，官方 nextInt(16)×2 先 x 后 z
+（InSquarePlacement L17-21）；nextInt 走 BitRandomSource 默认（2 幂 bound*next(31)>>31、
+非幂 Java 拒绝循环），WorldgenRandom 只覆写 next(bits)=nextLong()>>>(64-bits) 不覆写
+nextInt（「Lemire」仅在 XoroshiroRandomSource 自身路径，装饰 RNG 不经过）；(c) 数量/树种——
+旧群系树概率×256 均匀散布+手工混生表，官方 per-feature CountPlacement IntProvider→
+origin×count→修饰器链（InSquare/RarityFilter nextFloat<1/chance float32、
+SurfaceWaterDepthFilter WORLD_SURFACE−OCEAN_FLOOR≤max、HeightmapPlacement
+getHeight(OCEAN_FLOOR_WG) firstAvailable、BiomeFilter 3×3 chunk 群系引用检查零 RNG）全同流。
+globalIndex 表：.temp/extract_veg_index.py v3 手工直译 OverworldBiomeBuilder 调用树
+（6 数组常量+11 pick 函数+6 slice 方法+13 切片序+addSurfaceBiome 双点折叠+distinct 对账）
++FeatureSorter 拓扑模拟（TreeMap/TreeSet 升序+后序 DFS+reverse；step=群系 JSON features
+外层下标、globalIndex=possibleBiomes 遍历序首现编号后 step 内子序位），固化
+veg_feature_index.json。树种解析 RandomSelectorFeature L16-30：顺序扫 weighted features、
+nextFloat()<chance 即选并照跑子项链、全落空走 defaultFeature（零额外消耗）；子项链普查 25
+placed（selector_census：链形仅 []/[would_survive]/[environment_scan,would_survive]），唯一
+非树=bamboo_vegetation 的 grass_jungle（count32+trapezoid random_offset，零树实例但 RNG
+消耗必须模拟否则后续位置树种错位）；forest 实名 trees_birch_and_oak_leaf_litter
+（leaf_litter 为 26.2 新方块；trees_forest/trees_birch_oak 已无群系引用=废弃遗留）。
+验证（tree_probe2）：4 区域 2048² 总实例 10348 与探针 1 基线恒等、带/不带顶块 A/B diff=0、
+25（特性×树种）组合实测占比 vs 官方 JSON 概率全 |z|<2.1、grove 列顶块=snow_block
+（官方 grove surface rule 生效、树实例立于雪块）。②阶段 2 树形（tree_shape_official.py
+2196 行）：TreeFeature.doPlace 主链（clippedTreeHeight=getMaxFreeTreeHeight 削剪后传
+placeTrunk/createFoliage 非原 treeHeight；placeLogIfFree 的 isFree=空气∪
+REPLACEABLE_BY_TREES 可穿邻树叶/藤/leaf_litter/水；below_trunk=NOT(
+cannot_replace_below_tree_trunk)→dirt 且入 trunks 集合影响 bee_nest/PlaceOnGround minY；
+foliage isSet=per-tree 集合、level 查询跨树共享）+树干 8 种（Straight/Fancy cluster 恒
+2×nextFloat/Forking 二次方向 nextInt(4) 恒消耗/Giant 2x2+4×placeBelow/MegaJungle 螺旋枝
+branchHeight−=2+nextInt(4)/DarkOak 2x2 倾斜+12×nextInt(3) 恒消耗/UpwardsBranching 红树/
+Cherry 本轮补实现——branch_count weighted_list[1,2,3 各权 1]、branch_start_offset_from_top
+为裸 {min,max} UniformInt 压缩 codec（无 type 字段）、secondBranchStartOffsetFromTop=
+UniformInt.of(min,max−1)（CherryTrunkPlacer.java L62，BRANCH_START_CODEC 校验 max−min≥1）、
+Direction.Plane.HORIZONTAL faces=[NORTH,EAST,SOUTH,WEST]（Direction.java L577）、
+generateBranch 每步 nextFloat 爬升、chance=_f32(|ddy|/distance)、vdir 循环外定死 L171）
++树冠 11 种（Blob/Spruce/Pine/MegaPine/Bush/Fancy/MegaJungle/Acacia/DarkOak/Cherry/
+RandomSpread，RNG 消耗点逐个核对；placeLeavesRow 挂叶可变 pos 累积移动
+alongEdge→getClockWise）+decorators 10 种（Beehive/TrunkVine/LeaveVine/Cocoa/
+AttachedToLogs/PlaceOnGround/AlterGround/AttachedToLeaves/PaleMoss/CreakingHeart，
+Context=Set 复制+y 升序稳定排序；Util.getRandom=nextInt(len)、shuffle=Fisher-Yates
+size−1 次、WeightedList=nextInt(totalWeight) 按插入序累计）+根系 MangroveRootPlacer
+（根介质判定/递归模拟；mangrove_propagule 走 RandomizedIntStateProvider age=uniform
+0..4 恒 1 消耗、属性不建模只记账）+倒木 FallenTreeFeature（setBlock 无条件不走
+validTreePos）+巨型蘑菇 AbstractHugeMushroom+Brown/Red（foliage_radius=
+optionalFieldOf 默认 2，huge_red JSON 无此字段）。探针三轮迭代修复：_load_cf_json 与
+装饰器 directions 条件剥 minecraft: 前缀（JSON 内 "down" 无前缀，无条件 [10:] 切空串
+→_STEP[''] KeyError）；26.2 cf 实名对表 TreeFeatures.java（mega_jungle_tree、
+super_birch_bees_0002/super_birch_bees、oak/fancy_oak_bees_0002_leaf_litter、
+fallen_super_birch_tree；旧裸名已不存在）；FoliagePlacerType 注册名陷阱——
+MEGA_JUNGLE_FOLIAGE_PLACER 注册名即 "jungle_foliage_placer"（解析双名兼容）；
+FancyTrunkPlacer 返回 FoliageCoords(pos,0,false) 包装（L188-195）；_place_leaves_row
+误用 self._try_place_leaf；WrapRng 补 next_boolean=next(1)!=0（取流最高 1 位，红树根
+L1771/DarkOak 树冠 L1233 调用；不得 next_int(2) 模拟——消耗流位不同）。已知近似：
+Java HashSet 迭代序不复刻（trunks/foliage 插入序近似，仅影响 decorators 同 y 撒点先后，
+消耗次数不变）；updateLeaves distance 不建模（色板无关）；PaleMoss 嵌套 feature 不放
+方块（pale garden 不在渲染范围，消耗按 0）。验证（tree_shape_probe）：A 39 cf 解析
+fail=0；B 19 树形双种子（42/777）重跑 blocks 全等+ASCII 树冠/材质直方图合理（cherry
+254/283 叶、mega_spruce podzol 204/176、jungle vine/cocoa、红树 777
+roots41+propagule9+vine217；tall_mangrove 42 拒=根系介质 grass 不合格合理）；C 真实摆位
+256²@2048,2048 实例级 1687=ok1629+rej58（fallen_spruce×17/pine×9/spruce×31/oak×1
+合法拒绝）+exception0、blocks_total=95453；D 重跑全等。③渲染集成
+（block_render._apply_vegetation）：旧树路径（tree_placement.py+_veg.crown_step/
+crown_top 伪树冠几何+tree_p 概率场，现仅定义未调用）替换为官方全链；hm_ocean=
+heights+1（OCEAN_FLOOR_WG=顶固体 y+1）、水列 hm_surface=_SEA=63（WORLD_SURFACE_WG=
+水面 62+1，水深差=水面−海底）；place_trees_in_rect(top_block_grid=blocks) 产出
+(x,z,y=OCEAN_FLOOR 值=首个空气 y,feat,cf_name,cf,rng)，SimLevel 闭包 h_at/s_at/w_at
+（区域外中性回退 63/grass_block/62）逐树 place_configured_feature（官方装饰序、区域
+共享 rng 续用）；写回 out_blocks/out_heights 经 name2bid 仅 by>out_heights 时写入
+（每列最高方块竞争）、树叶格置 canopy 标志（L1348 传竹子链）；growable/
+_NO_VEG_BIOMES/竹子链/草花作物伪植被不动。冒烟 tree_render_smoke 128²@2112,2112：
+5.5s spruce_leaves×2049 进 blocks 通道；HEAD worktree 对照（git worktree add
+.temp\head_check HEAD@2a1c57e+拷 _native/*.pyd）：dirt 8508→8362=河岸+针叶林地表
+地形本身与树无关、树冠像素 370（旧伪树冠）→2049（真树冠）。方法论教训：
+importlib.reload 不级联子模块——单进程 reload「旧版对照」得 diff=0 假象，必须两独立
+进程渲染（.temp/render_rect_png.py）+纯拼接 diff（.temp/zoom5_tree_splice.py）。雪原区
+zoom5 三窗 diff_px 2752/5389/4796；配色数值实证 tree_color_check：树冠 98.9% 单色
+(194,200,194)=freeze_top_layer 覆雪语义（0.72 雪+0.28 底色，反推底色≈(52,61,52)
+针叶绿）官方行为——雪原区对比图不具代表性。非雪林区复验收官：biome_scan.py 群系普查
+选 (1504,704) 512²（taiga 499+forest 179+swamp 169+river 80+old_growth_spruce_taiga
+58，零雪）；普查暴露 id2key 缺 id160——biome_noise.BIOME_ID 补
+old_growth_spruce_taiga:160（否则该群系树链/地表规则整列失效，btree262 实证可输出）；
+render_block_region 前两参是中心点非左上角（首轮渲染整体错位 (256,256)，森林/沼泽窗
+标签错位，按中心 (1760,960) 重渲）。对比图 4 张（.temp/rp_verify/zoom5_tree2_*.png，
+左旧右新 NEAREST×6，zoom5_tree_splice2.py 自动选窗+zoom5_tree_pick2.py 按群系补窗）：
+橡桦林 diff 5959（65% 像素变化）、针叶林 5957/5871、沼泽 3495（38%）；配色数值实证
+color_check5：oak@forest (40,79,22)×15613、grass@forest (70,111,52)×13459、spruce
+(38,60,38) 43092→76902（+78%，旧版错色伪树冠消失）；图像理解自查三窗结论一致（旧=
+细碎零散伪树冠，新=大片连片真实树冠+树干顶端细节；沼泽树密度数倍+锯齿冠缘）。对比图
+交用户确认，用户指示先提交 git。
+
 # 7. 种子逆推核心库（Utils/SeedReverser · 算法）
 
 > 覆盖范围：`Utils/SeedReverser` 包内 6 个算法/数据模块，以及 `_native/` 下 2 个 pybind11 构建脚本。
