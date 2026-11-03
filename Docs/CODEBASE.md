@@ -3526,7 +3526,42 @@ render_block_region 前两参是中心点非左上角（首轮渲染整体错位
 color_check5：oak@forest (40,79,22)×15613、grass@forest (70,111,52)×13459、spruce
 (38,60,38) 43092→76902（+78%，旧版错色伪树冠消失）；图像理解自查三窗结论一致（旧=
 细碎零散伪树冠，新=大片连片真实树冠+树干顶端细节；沼泽树密度数倍+锯齿冠缘）。对比图
-交用户确认，用户指示先提交 git。
+交用户确认，用户指示先提交 git。④逐区块树位置精确化（植被预铺+gi 交织，用户游戏
+实测预测 7 实测 1 触发）：根因=26.2 step9 特征按 FeatureSorter 拓扑 gi 升序装饰，
+cherry_grove 的 patch_tall_grass_2(gi26)/patch_grass_plain(gi54)/flower_cherry(gi55)
+先于 trees_cherry(gi56) 铺 short_grass/pink_petals——植被∈OCEAN_FLOOR/WORLD_SURFACE
+谓词（非空气）抬高两图但不抬 MOTION_BLOCKING（无碰撞）⟹ 树 origin y=实时 OCEAN_FLOOR
+跳到植被上、would_survive(below∉supports_vegetation) 失败；官方存档(Test 种子1,
+region=dimensions/minecraft/overworld/region/r.2.0.mca,DataVersion 4903=26.2)(67,26)
+attempt1-8 中 7 个失败位柱顶=pink_petals 实锤。三层验证：A 地形逐柱 256/256 diff=0
+（SimpleBitStorage 位流 valuesPerLong=64//bits 每 long 独立打包；region 内 chunk 索引
+=chunk 坐标&31 非 (方块原点&31)）；B 三植被特征 RNG 流与官方 Java 逐位 0 diff
+（.temp/mc262_probe/ProbeVeg.java：官方 NoiseThresholdCountPlacement/
+InSquarePlacement.spread/CountPlacement/RandomOffsetPlacement+TrapezoidInt 类+计数代理
+RandomSource，heightmap 以零 RNG map 层 top+1 等价；注意 PlacementModifier 类加载需
+反射置 Bootstrap.isBootstrapped；chunk origin(1072,416)≠窗口原点(1056,400) 曾混淆）；
+C 实装后 (67,26)=1 棵@(1081,427) 精确命中、(68,29) 18 log 列聚类≈4-6 吻合官方。
+源码新知：WeightedListInt.sample=getRandomOrThrow().sample(random)（条目 IntProvider
+经 IntProviders.CODEC，data:N→ConstantInt 零消耗→count 采样=1 次 nextInt(totalWeight)）；
+placeWithBiomeCheck 名不符实（与 place 唯一区别=PlacementContext.topFeature 调试统计，
+群系检查在链内 BiomeFilter）；SimpleBlockFeature（26.2 L17-47）：state 采样（weighted_
+state_provider 消耗 nextInt(totalWeight)、simple 零）→canSurvive→DoublePlantBlock 需
+上格 air 放双格；TrapezoidInt.sample L41-42 三角特例=nextInt(hi+1)−nextInt(hi+1)（与
+_sample_int 一致）；RandomOffsetPlacement L47-49 x→y→z 三次 sample；NoiseThreshold
+CountPlacement.count=Biome.BIOME_INFO_NOISE.getValue(x/200,z/200,false)（PerlinSimplex
+Noise(LegacyRandomSource(2345),[0])，density_sampler 已有）；heightmap 语义：OCEAN_FLOOR/
+WORLD_SURFACE=非空气（植被算）、MOTION_BLOCKING=blocksMotion（植被不算）、WORLD_SURFACE_
+WG=装饰期静态快照不随特征更新。实装（tree_placement_dynamic.py）：_get_veg_tables（step9
+非树+simple_block 配置白名单）/_parse_veg_chain（支持 noise_threshold_count/rarity_
+filter/in_square/heightmap/biome/count 常数/random_offset/air 谓词，其余置 None 跳过）/
+_biome_features9（biome json features[9] 反推柱群系集，缓存）/run_veg（chain flatMap
+逐层，noise 零 RNG 先算 c0，rarity 每 origin 一次 nextFloat，place 与 offset 消耗同流
+交织）/_place_simple_block（state 采样→canSurvive(below∈_SUPPORTS_VEGETATION)→tall_
+grass 上格 air→写入）；TrackingSim 增 _dyn_motion（树写三图同抬、植被 set_block_quiet
+只抬 ocean/surface）+decorate_trees_in_rect jobs=(gi,kind) 排序交织。验证：(67,26)
+1 棵精确命中；5×5 窗口花瓣 121 vs 官方 128（3×3 时 104——窗口边缘效应：邻 chunk 树冠
+级联影响判定，512² 渲染窗口影响趋零）；512² 密度 3.5→2.43 棵/千柱（-31%）、decorate
++3.3s。残余小差：short_grass 44 vs 32（远距级联，未深挖）。
 
 # 7. 种子逆推核心库（Utils/SeedReverser · 算法）
 
