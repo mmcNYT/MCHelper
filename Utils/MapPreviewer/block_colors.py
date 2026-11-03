@@ -404,11 +404,13 @@ def _cell_base(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
 
 def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
                   water_u: np.ndarray | None, bad_u: np.ndarray | None,
-                  seed: int, obx: int, obz: int) -> np.ndarray:
+                  seed: int, obx: int, obz: int,
+                  canopy_c=None, canopy_bid_c=None) -> np.ndarray:
     """渲染噪声格行块 -> (nh*4, nw*4, 3) uint8。
 
     参数矩阵均为本块的 cell 级切片；water_u/bad_u 为整图归一化场的
-    本块行切片（可为 None）。
+    本块行切片（可为 None）。canopy_c/canopy_bid_c 为官方树冠层的
+    本块行切片（方块分辨率 bool/int32，可选）：传入时替换概率树冠。
     """
     nh, nw = biomes.shape
     bid = np.clip(biomes, 0, 255)
@@ -464,14 +466,35 @@ def _render_chunk(biomes: np.ndarray, temp: np.ndarray, humid: np.ndarray,
 
     # 树冠斑点（密度阈值 + 低频成簇）+ 伪高度立体感：
     # 真实游戏树冠高出地表 5~7 格，地图渲染中树冠顶面亮度随簇
-    # 高度变化、北缘受光/南缘背光，形成疙状起伏而非平涂色点
-    crown4 = grass4 & (n2 < _up4(_CANOPY_DENS[bid])) & (patch > 0.30)
+    # 高度变化、北缘受光/南缘背光，形成疙状起伏而非平涂色点。
+    # canopy_c 传入时用官方摆位链掩码（26.2 官方惰性流装饰），
+    # 冠色按冠列群系（canopy_bid_c）取，保证跨群系冠色正确。
+    if canopy_c is not None:
+        crown4 = canopy_c
+        # 官方冠层模式：樱花地面回归真实草色（gt tint）。旧版整片亮粉
+        # _CHERRY_BASE 是无真树时代的近似——官方冠层下地面/冠全粉双重
+        # 失真（真实游戏樱花林地面 = 黄绿草 #b6db61 + 粉花瓣，树冠才
+        # 是成片粉色）。cell 快速档无冠层不受影响。
+        ch4 = _up4(bid == 185)
+        if ch4.any():
+            base4[ch4] = (_up4(gt) * _GRASS_MULT)[ch4]
+    else:
+        crown4 = grass4 & (n2 < _up4(_CANOPY_DENS[bid])) & (patch > 0.30)
     if crown4.any():
-        crown_rgb = _up4(gt * (_CANOPY_MULT * _GRASS_MULT)[bid])
-        abs4 = _up4(_CANOPY_ABS_M[bid])
-        if abs4.any():
-            crown_rgb = np.where(abs4[..., None],
-                                 _up4(_CANOPY_ABS[bid]), crown_rgb)
+        cbid = bid if canopy_bid_c is None else canopy_bid_c
+        if canopy_bid_c is None:
+            crown_rgb = _up4(gt * (_CANOPY_MULT * _GRASS_MULT)[bid])
+            abs4 = _up4(_CANOPY_ABS_M[bid])
+            if abs4.any():
+                crown_rgb = np.where(abs4[..., None],
+                                     _up4(_CANOPY_ABS[bid]), crown_rgb)
+        else:
+            # 官方冠层：全方块级，冠色逐方块按冠列群系取（跨群系冠色正确）
+            crown_rgb = _up4(gt) * (_CANOPY_MULT * _GRASS_MULT)[cbid]
+            abs4 = _CANOPY_ABS_M[cbid]
+            if abs4.any():
+                crown_rgb = np.where(abs4[..., None],
+                                     _CANOPY_ABS[cbid], crown_rgb)
         crown_h = np.clip((patch - 0.30) / 0.50, 0.0, 1.0)  # 簇高 0..1
         crown_rgb = crown_rgb * ((0.88 + 0.20 * crown_h)
                                  * (0.92 + 0.14 * n1))[..., None]
@@ -637,7 +660,8 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
                      seed: int = 0, origin_bx: int = 0,
                      origin_bz: int = 0,
                      on_progress=None,
-                     hillshade: bool = False) -> np.ndarray:
+                     hillshade: bool = False,
+                     canopy_layer=None) -> np.ndarray:
     """方块级渲染主入口（LOD 精细档，1 像素 = 1 方块）。
 
     Args:
@@ -648,6 +672,9 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
         on_progress: on_progress(done_rows, total_rows)（噪声格行）。
         hillshade: 是否叠加地形阴影（需 depth 非 None；西北光源，
             乘法混合压暗背光坡，水面跳过）。
+        canopy_layer: 可选 (canopy, canopy_bid)——官方树冠层（方块分辨率
+            (nh*CELL, nw*CELL)），由 block_render.official_canopy_mask 产出；
+            传入时替换概率树冠斑点（26.2 官方摆位链），None 回退概率树。
 
     Returns:
         (nh*4, nw*4, 3) uint8 RGB 矩阵，1 像素 = 1 方块。
@@ -670,11 +697,17 @@ def render_block_rgb(biomes: np.ndarray, temp: np.ndarray | None,
     chunk = max(1, int(2_000_000 // max(1, W)))
     for rs in range(0, nh, chunk):
         re = min(nh, rs + chunk)
+        if canopy_layer is None:
+            c_mask = c_bid = None
+        else:
+            c_mask = canopy_layer[0][rs * CELL:re * CELL]
+            c_bid = canopy_layer[1][rs * CELL:re * CELL]
         blk = _render_chunk(
             biomes[rs:re], tq[rs:re], hq[rs:re],
             None if water_u is None else water_u[rs:re],
             None if bad_u is None else bad_u[rs:re],
-            seed, origin_bx, origin_bz + rs * CELL)
+            seed, origin_bx, origin_bz + rs * CELL,
+            canopy_c=c_mask, canopy_bid_c=c_bid)
         if shade is not None:
             # 乘法混合压暗背光坡（shade 场水面处=1，已跳过）
             blk = blk.astype(np.float32)

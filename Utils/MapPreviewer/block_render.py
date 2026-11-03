@@ -1282,58 +1282,53 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
             radius[r, c] = rad; canopy_col[r, c] = col
             crop_kind[r, c] = pr["crop_kind"]
 
-    # 真实树摆放：官方 per-chunk feature 摆位（population seed 派生 +
-    # in_square 等 placement 链）+ 官方逐格树形生成（TreeFeature 全链）。
-    # hm_ocean = OCEAN_FLOOR_WG = 顶固体 y+1；hm_surface = WORLD_SURFACE_WG
-    # = 顶非空气 y+1（水列 = 海平面 _SEA，水深差值 = 水面 62-海底）。
-    from Utils.MapPreviewer import tree_placement_official as _tpo
-    from Utils.MapPreviewer import tree_shape_official as _tso
+    # 真实树摆放：官方惰性流装饰（tree_placement_dynamic）——26.2
+    # ChunkGenerator.applyBiomeDecoration 语义：逐位置串行 + 树形内联
+    # （摆位↔树形 RNG 同流交织）+ 树冠实时抬高 OCEAN_FLOOR 高度图（树叶
+    # blocksMotion=true）→ 落在冠投影列的后续尝试被 would_survive 砍掉、
+    # 山坡树被 getMaxFreeTreeHeight 砍掉（渲染树数与游戏一致：纯樱花区块
+    # ~3.5 棵，静态批处理版为 9.8）。hm_ocean/hm_surface 为动态高度图的
+    # 静态回退基线；静态版 place_trees_in_rect 保留作对拍基准。
+    from Utils.MapPreviewer import tree_placement_dynamic as _tpd
     hm_ocean = heights.astype(np.int32) + 1
     hm_surface = np.where(heights < _SEA, _SEA, heights + 1).astype(np.int32)
-    trees = _tpo.place_trees_in_rect(
-        seed, x0, z0, w, h, hm_ocean, hm_surface, biome_grid,
-        pack["id2key"], ground_ok=None, top_block_grid=blocks,
-        block_names=names)
+    heights_i = hm_ocean - 1            # 顶方块 y（int32 视图）
+
+    def h_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            return int(heights_i[lz, lx])
+        return 63                        # 区域外中性值（同探针）
+
+    def s_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            return names[int(blocks[lz, lx])]
+        return "grass_block"
+
+    def w_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            hg = int(heights_i[lz, lx])
+            return (_SEA - 1) if hg < _SEA else hg
+        return 62
+
     canopy = np.zeros((h, w), bool)
-    if trees:
-        heights_i = hm_ocean - 1            # 顶方块 y（int32 视图）
-
-        def h_at(x, z):
-            lx, lz = x - x0, z - z0
-            if 0 <= lx < w and 0 <= lz < h:
-                return int(heights_i[lz, lx])
-            return 63                        # 区域外中性值（同探针）
-
-        def s_at(x, z):
-            lx, lz = x - x0, z - z0
-            if 0 <= lx < w and 0 <= lz < h:
-                return names[int(blocks[lz, lx])]
-            return "grass_block"
-
-        def w_at(x, z):
-            lx, lz = x - x0, z - z0
-            if 0 <= lx < w and 0 <= lz < h:
-                hg = int(heights_i[lz, lx])
-                return (_SEA - 1) if hg < _SEA else hg
-            return 62
-
-        level = _tso.SimLevel(h_at, s_at, w_at)
-        for (wx, wz, y, _feat, _cf_name, tree_cf, rng) in trees:
-            # 树实例 y = OCEAN_FLOOR 值 = 顶固体 y+1（首个空气格），
-            # 与 Java getHeight(OCEAN_FLOOR_WG) 一致
-            _tso.place_configured_feature(level, rng, (wx, y, wz), tree_cf)
-        n2b = pack.get("name2bid") or {}
-        for (bx, by, bz), name in level.blocks.items():
-            gx = bx - x0
-            gz = bz - z0
-            if not (0 <= gx < w and 0 <= gz < h):
-                continue
-            bid2 = n2b.get("minecraft:" + name)
-            if bid2 is not None and by > out_heights[gz, gx]:
-                out_heights[gz, gx] = by
-                out_blocks[gz, gx] = bid2
-                if name.endswith("_leaves"):
-                    canopy[gz, gx] = True
+    level = _tpd.decorate_trees_in_rect(
+        seed, x0, z0, w, h, h_at, s_at, w_at, hm_ocean, hm_surface,
+        biome_grid, pack["id2key"])
+    n2b = pack.get("name2bid") or {}
+    for (bx, by, bz), name in level.blocks.items():
+        gx = bx - x0
+        gz = bz - z0
+        if not (0 <= gx < w and 0 <= gz < h):
+            continue
+        bid2 = n2b.get("minecraft:" + name)
+        if bid2 is not None and by > out_heights[gz, gx]:
+            out_heights[gz, gx] = by
+            out_blocks[gz, gx] = bid2
+            if name.endswith("_leaves"):
+                canopy[gz, gx] = True
 
     # ---- 官方竹子放置链（26.2 BambooFeature；bamboo_placement.py 逐行
     # 复刻 noise_based_count/in_square/heightmap/biome + 逐尝试 RNG）----
@@ -1351,6 +1346,87 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
         for yy, xx in disk_cells:
             out_blocks[yy, xx] = pid
     return disk_cells, dot_cells
+
+
+def official_canopy_mask(seed: int, x0: int, z0: int, w: int, h: int):
+    """主预览（block_colors block 档）用的官方树冠掩码。
+
+    跑官方惰性流树装饰（tree_placement_dynamic.decorate_trees_in_rect，
+    与精细瓦片视图同一条链），返回:
+      (canopy, canopy_bid):
+        canopy: (h, w) bool——树冠列（存在树叶方块的列）；
+        canopy_bid: (h, w) int32——冠列应显示的群系 id。樱花冠强制
+          cherry_grove（跨群系伸入邻群系的冠仍显粉色），其余取列群系。
+    调用方需保证 26.2 + native 可用（is_available），异常时降级概率树。
+    """
+    from Utils.MapPreviewer import tree_placement_dynamic as _tpd
+    pack = _get_pack(seed)
+    ctx = pack["ctx"]
+    id2key = pack["id2key"]
+    seed64 = seed & 0xFFFFFFFFFFFFFFFF
+    brt = pack.get("brt")
+    brt_name = pack.get("brt_name", "")
+    heights = _native.fill_top_grid(ctx, x0, z0, w, h, -64, 320,
+                                    _NATIVE_THREADS)
+    qh, qw = (h + 3) // 4, (w + 3) // 4
+    qbid = np.zeros((qh, qw), dtype=np.int32)
+    for qr in range(qh):
+        z = z0 + qr * 4
+        for qc in range(qw):
+            x = x0 + qc * 4
+            top = int(heights[min(qr * 4, h - 1), min(qc * 4, w - 1)])
+            ny = max(-64, min(319, top)) >> 2
+            if brt is not None:
+                qbid[qr, qc] = brt.sample_point(
+                    seed64, brt_name, x >> 2, ny, z >> 2)["biome_id"]
+            else:
+                qbid[qr, qc] = pack["bs"].biome_at(x >> 2, ny, z >> 2)
+    biome_grid = np.repeat(np.repeat(qbid, 4, 0), 4, 1)[:h, :w]
+    tops, blocks = _native.surface_grid(ctx, pack["sblob"], heights,
+                                        biome_grid, x0, z0, 63,
+                                        _NATIVE_THREADS)
+    tops = tops.astype(np.int32)
+    hm_ocean = tops + 1
+    hm_surface = np.where(tops < 63, 63, tops + 1).astype(np.int32)
+    heights_i = hm_ocean - 1            # 顶方块 y
+
+    def h_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            return int(heights_i[lz, lx])
+        return 63
+
+    def s_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            return pack["block_names"][int(blocks[lz, lx])]
+        return "grass_block"
+
+    def w_at(x, z):
+        lx, lz = x - x0, z - z0
+        if 0 <= lx < w and 0 <= lz < h:
+            hg = int(heights_i[lz, lx])
+            return (_SEA - 1) if hg < _SEA else hg
+        return 62
+
+    level = _tpd.decorate_trees_in_rect(
+        seed, x0, z0, w, h, h_at, s_at, w_at, hm_ocean, hm_surface,
+        biome_grid, id2key)
+    bid_cherry = [b for b, k in id2key.items()
+                  if k == "minecraft:cherry_grove"][0]
+    canopy = np.zeros((h, w), dtype=bool)
+    canopy_bid = biome_grid.astype(np.int32).copy()
+    for (bx, by, bz), nm in level.blocks.items():
+        if not nm.endswith("_leaves"):
+            continue
+        gx = bx - x0
+        gz = bz - z0
+        if not (0 <= gx < w and 0 <= gz < h):
+            continue
+        canopy[gz, gx] = True
+        if nm == "cherry_leaves":
+            canopy_bid[gz, gx] = bid_cherry
+    return canopy, canopy_bid
 
 
 def _apply_bamboo_dots(rgb, cells):

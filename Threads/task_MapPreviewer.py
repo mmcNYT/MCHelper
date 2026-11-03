@@ -167,10 +167,25 @@ class MapPreviewerThread(QThread):
                 map_res["biomes"], map_res.get("temp"), map_res.get("humid"),
                 map_res.get("depth"), hillshade=self._hillshade)
         else:
+            # 官方树冠层：26.2 + native 可用时跑官方惰性流摆位链取冠
+            # 掩码（与精细瓦片视图同一条链，树数/冠形与游戏一致）；
+            # 不可用则 None 回退概率树冠（render_block_rgb 内部处理）。
+            canopy_layer = None
+            if self._version == "26.2":
+                try:
+                    from Utils.MapPreviewer import block_render as _brf
+                    if _brf.is_available():
+                        _nh, _nw = map_res["biomes"].shape
+                        canopy_layer = _brf.official_canopy_mask(
+                            self._seed, int(map_res["origin_bx"]),
+                            int(map_res["origin_bz"]), _nw * 4, _nh * 4)
+                except Exception:
+                    canopy_layer = None
             block_rgb = render_block_rgb(
                 map_res["biomes"], map_res.get("temp"), map_res.get("humid"),
                 map_res.get("depth"),
                 on_progress=on_render, hillshade=self._hillshade,
+                canopy_layer=canopy_layer,
                 **render_kwargs)
         t_render = time.perf_counter() - t_render0
         map_res["rgb"] = block_rgb
