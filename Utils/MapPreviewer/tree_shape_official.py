@@ -126,7 +126,7 @@ _MUSHROOM_CAN_PLACE_ON = _SUBSTRATE_OVERWORLD | frozenset(("mycelium", "podzol")
 _REPLACABLE_BY_MUSHROOMS = _REPLACABLE_BY_TREES | frozenset((
     "brown_mushroom", "red_mushroom", "brown_mushroom_block", "red_mushroom_block",
 ))
-# isSolidRender 近似集合（PlaceOnGround 的地面判定；dict 中可出现的方块。
+# isSolidRender 近似集合（PlaceOnGround 的地面判定；树写入方块（裸名）。
 # 注意 mangrove_roots/leaves/leaf_litter/cocoa/vine 均非 solid render）
 _SOLID_RENDER = frozenset((
     "oak_log", "spruce_log", "birch_log", "jungle_log", "acacia_log",
@@ -134,6 +134,11 @@ _SOLID_RENDER = frozenset((
     "bee_nest", "podzol", "dirt", "coarse_dirt", "rooted_dirt",
     "mushroom_stem", "brown_mushroom_block", "red_mushroom_block",
     "creaking_heart", "muddy_mangrove_roots",
+))
+# 地形名（surface_grid 输出，带 minecraft: 前缀）中非 isSolidRender 的
+# 薄层/流体（canOcclude=false）：其余地形块（草方块/土/石/沙/毯）满格
+_TERRAIN_NON_SOLID = frozenset((
+    "snow", "water", "moss_carpet", "pale_moss_carpet", "lava",
 ))
 _MC = "minecraft:"
 
@@ -230,7 +235,11 @@ class SimLevel:
         return n == "__air__" or n == "vine"
 
     def valid_tree_pos(self, pos) -> bool:
-        """TreeFeature.validTreePos = isAir || REPLACEABLE_BY_TREES。"""
+        """TreeFeature.validTreePos（26.2 L52-53）= isAir || REPLACEABLE_BY_TREES。
+
+        注意 26.2 的 #replaceable_by_trees 首项即 #leaves（树叶可被树
+        覆写），故等价于旧版 isAirOrLeaves 语义加新植物；_LEAVES_SET
+        冗余保留以兼容。"""
         n = self.block_name(pos)
         if n == "__air__":
             return True
@@ -248,7 +257,15 @@ class SimLevel:
         return self.block_name(pos) == "vine"
 
     def is_solid_render(self, pos) -> bool:
+        """BlockState.isSolidRender（canOcclude 满格）。
+
+        名字空间：地形名带 minecraft: 前缀（surface_grid 输出），
+        默认 solid，除 _TERRAIN_NON_SOLID 薄层/流体；树写方块为裸名
+        （查 _SOLID_RENDER：log/bee_nest/dirt/podzol/蘑菇块等；树叶/
+        植被/leaf_litter 不在集合 -> 非 solid）。"""
         n = self.block_name(pos)
+        if n.startswith(_MC):
+            return n[len(_MC):] not in _TERRAIN_NON_SOLID
         return n in _SOLID_RENDER
 
     def is_face_sturdy_up(self, pos) -> bool:

@@ -161,6 +161,9 @@ def _sample_int(rng: WrapRng, spec) -> int:
         ps = (span - pl) // 2
         pe = span - ps
         return lo + rng.next_int(pe + 1) + rng.next_int(ps + 1)
+    if t == "clamped":                         # ClampedInt.sample：
+        v = _sample_int(rng, spec["source"])   # Mth.clamp(source.sample)
+        return max(spec["min_inclusive"], min(spec["max_inclusive"], v))
     raise NotImplementedError(f"IntProvider type: {spec['type']}")
 
 

@@ -862,18 +862,25 @@ BIOME_ID = {
     "jungle": 21, "sparse_jungle": 23, "deep_ocean": 24,
     "stony_shore": 25, "snowy_beach": 26, "birch_forest": 27,
     "birch_forest_hills": 28, "dark_forest": 29,
-    "snowy_taiga": 30, "giant_tree_taiga": 32, "giant_tree_taiga_hills": 33,
+    "snowy_taiga": 30, "old_growth_pine_taiga": 32,
+    "giant_tree_taiga_hills": 33,
     "windswept_forest": 34, "savanna": 35, "savanna_plateau": 36,
     "badlands": 37, "wooded_badlands": 38,
     "warm_ocean": 44, "lukewarm_ocean": 45, "cold_ocean": 46,
     "deep_warm_ocean": 47, "deep_lukewarm_ocean": 48,
     "deep_cold_ocean": 49, "deep_frozen_ocean": 50,
     "sunflower_plains": 129, "ice_spikes": 140,
-    # btree262 实证可输出但原表缺名（id2key 反转后该群系查不到名 → 树链/地表规则失效）；
-    # 名称用 26.2 官方实名（与 veg_feature_index.json / surface rules 一致）
+    # 1.18+ 可出现但原表缺名/旧名（id2key 反转后查不到名 → 树链/地表规则
+    # 失效）。id 全部与 _native/cubiomes/biomes.h 枚举一致，名称用 26.2
+    # 官方实名（与 veg_feature_index.json / surface rules 一致）。
+    # 实证：seed=1 官方存档 1417 个单群系区块 bid->名全部吻合
+    # （flower_forest=132 为 2026-11-04 实测；155/163/131/32 三方源一致）。
     "old_growth_spruce_taiga": 160,
-    "eroded_badlands": 165, "shattered_savanna": 163,
-    "gravelly_mountains": 131, "windswept_gravelly_hills": 131,
+    "flower_forest": 132,
+    "old_growth_birch_forest": 155,   # biomes.h: = tall_birch_forest
+    "eroded_badlands": 165,
+    "windswept_savanna": 163,         # 旧名 shattered_savanna
+    "windswept_gravelly_hills": 131,  # 旧名 gravelly_mountains
     "bamboo_jungle": 168, "dripstone_caves": 174, "lush_caves": 175,
     "meadow": 177, "grove": 178, "snowy_slopes": 179,
     "jagged_peaks": 180, "frozen_peaks": 181, "stony_peaks": 182,
@@ -892,7 +899,8 @@ BIOME_NAME_ZH = {
     "beach": "海滩", "snowy_beach": "积雪海滩", "stony_shore": "石岸",
     "jungle": "丛林", "sparse_jungle": "稀疏丛林", "deep_ocean": "深海",
     "birch_forest": "桦木森林", "dark_forest": "黑森林",
-    "snowy_taiga": "积雪针叶林", "giant_tree_taiga": "原始松木针叶林",
+    "flower_forest": "繁花森林", "old_growth_birch_forest": "原始白桦森林",
+    "snowy_taiga": "积雪针叶林", "old_growth_pine_taiga": "原始松木针叶林",
     "giant_tree_taiga_hills": "原始松木针叶林丘陵",
     "windswept_forest": "风袭森林", "savanna": "热带草原",
     "savanna_plateau": "热带高原", "badlands": "恶地",
@@ -901,7 +909,7 @@ BIOME_NAME_ZH = {
     "deep_warm_ocean": "温水深海", "deep_lukewarm_ocean": "温和深海",
     "deep_cold_ocean": "冷水深海", "deep_frozen_ocean": "冰冻深海",
     "sunflower_plains": "向日葵平原", "ice_spikes": "冰刺之地",
-    "eroded_badlands": "风蚀丘陵（恶地）", "shattered_savanna": "风袭热带草原（破碎）",
+    "eroded_badlands": "风蚀丘陵（恶地）", "windswept_savanna": "风袭热带草原",
     "windswept_gravelly_hills": "风袭砂砾丘陵",
     "bamboo_jungle": "竹林", "dripstone_caves": "溶洞",
     "lush_caves": "繁茂洞穴", "meadow": "草甸", "grove": "雪林",
@@ -919,13 +927,13 @@ _F3_ALIASES = {
     "wooded_mountains": "windswept_forest",
     "gravelly_mountains": "windswept_gravelly_hills",
     "mountain_edge": "windswept_hills",
-    "shattered_savanna": "shattered_savanna",
+    "shattered_savanna": "windswept_savanna",
     "jungle_edge": "sparse_jungle",
     "stone_shore": "stony_shore",
-    "giant_tree_taiga": "giant_tree_taiga",
+    "giant_tree_taiga": "old_growth_pine_taiga",
     "mushroom_field_shore": "mushroom_field_shore",
     "mesa": "badlands", "wooded_mesaplateau": "wooded_badlands",
-    "tall_birch_forest": "birch_forest",
+    "tall_birch_forest": "old_growth_birch_forest",
 }
 
 # 中文别名（部分常见叫法）
