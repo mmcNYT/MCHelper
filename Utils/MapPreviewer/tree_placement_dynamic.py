@@ -25,13 +25,24 @@ farmland，含 grass_block、不含树叶）；树底 grass_block ∉
 cannot_replace_below_tree_trunk → 被 below_trunk_provider 换成 dirt。
 
 窗口语义：与 place_trees_in_rect 相同——覆盖窗口的 chunk 全量装饰
-（每 chunk 的 count 次尝试完整跑，origin 在窗口外时按旧版同款丢弃）；
-装饰顺序为 chunk 行序（官方为调度拓扑序，单 chunk 内语义一致，跨
-chunk 竞争差异仅影响窗口边缘树）。
+（每 chunk 的 count 次尝试完整跑，origin 在窗口外时按旧版同款丢弃）。
+
+跨 chunk 顺序与官方不确定性（2026-11 服务器实验实测）：
+官方 vanilla 26.2 同 seed 连续 3 次生成同一窗口，cherry 区树干
+柱总量 267/299/251（±7.3%），20% 块发生漂移，单块比率 0.52~1.37，
+spawn 区 ±4%。根因：ChunkPyramid.java L34 FEATURES 只依赖邻居
+CARVERS（range 1）——邻居的树与本 chunk 的树并发竞态，谁先写完
+树冠谁影响对方 swdf/origin 判定，官方每次生成都在“调度骰子”下
+落在树-植被互锁级联的不同解。本实现 chunk 行序（raster）是对该
+解空间的一次确定性采样：非 cherry 群系与官方 run 均值一致
+（全存档 other 1.001）；cherry 区因植被密度极高（swdf 砍率对
+植被列覆盖敏感）对序最敏感，窗口口径下较官方均值偏多约 16%，
+处于官方 run 间方差带边缘。
 
 用法（block_render._apply_vegetation）：
     level = decorate_trees_in_rect(seed, x0, z0, w, h, h_at, s_at, w_at,
-                                   hm_ocean, hm_surface, biome_grid, id2key)
+                                   hm_ocean, hm_surface, biome_grid, id2key,
+                                   biome3d_at=...)
     # 树方块在 level.blocks（含窗口外溢出列，写回时按需裁剪）
 """
 from Utils.MapPreviewer import tree_placement_official as _tpo

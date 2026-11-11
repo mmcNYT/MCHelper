@@ -1314,9 +1314,21 @@ def _apply_vegetation(rgb, heights, blocks, biome_grid, pack, seed, x0, z0,
         return 62
 
     canopy = np.zeros((h, w), bool)
+
+    def biome3d_at(x, y, z):
+        """BiomeFilter（BiomeFilter.java L24）：origin 完整坐标 3D 群系。"""
+        yc = max(-64, min(319, y))
+        brt = pack.get("brt")
+        if brt is not None:
+            return pack["id2key"].get(int(brt.sample_point(
+                seed & 0xFFFFFFFFFFFFFFFF, pack.get("brt_name", ""),
+                x >> 2, yc >> 2, z >> 2)["biome_id"]))
+        return pack["id2key"].get(int(
+            pack["bs"].biome_at(x >> 2, yc >> 2, z >> 2)))
+
     level = _tpd.decorate_trees_in_rect(
         seed, x0, z0, w, h, h_at, s_at, w_at, hm_ocean, hm_surface,
-        biome_grid, pack["id2key"])
+        biome_grid, pack["id2key"], biome3d_at=biome3d_at)
     n2b = pack.get("name2bid") or {}
     for (bx, by, bz), name in level.blocks.items():
         gx = bx - x0
@@ -1409,9 +1421,20 @@ def official_canopy_mask(seed: int, x0: int, z0: int, w: int, h: int):
             return (_SEA - 1) if hg < _SEA else hg
         return 62
 
+    def biome3d_at(x, y, z):
+        """BiomeFilter（BiomeFilter.java L24）：origin 完整坐标 3D 群系。"""
+        yc = max(-64, min(319, y))
+        brt = pack.get("brt")
+        if brt is not None:
+            return id2key.get(int(brt.sample_point(
+                seed & 0xFFFFFFFFFFFFFFFF, pack.get("brt_name", ""),
+                x >> 2, yc >> 2, z >> 2)["biome_id"]))
+        return id2key.get(int(
+            pack["bs"].biome_at(x >> 2, yc >> 2, z >> 2)))
+
     level = _tpd.decorate_trees_in_rect(
         seed, x0, z0, w, h, h_at, s_at, w_at, hm_ocean, hm_surface,
-        biome_grid, id2key)
+        biome_grid, id2key, biome3d_at=biome3d_at)
     bid_cherry = [b for b, k in id2key.items()
                   if k == "minecraft:cherry_grove"][0]
     canopy = np.zeros((h, w), dtype=bool)
