@@ -185,6 +185,39 @@ _BIOME_WATER_TINTS = {
 }
 _BIOME_FOLIAGE_DEFAULT = (119, 171, 73)
 _BIOME_WATER_DEFAULT = (63, 118, 228)
+# 群系 -> dry_foliage tint（leaf_litter，26.2 官方语义全量生成）：
+#   Biome.getDryFoliageColor（Biome.java L228-235）：
+#   effects.dry_foliage_color 显式值优先（dark_forest/mangrove_swamp/
+#   swamp=#7b5334、pale_garden=#a0a69c）；否则 DryFoliageColor.get
+#   按 (temp, downfall) 采 dry_foliage.png[y,x] 单像素（同 grass/
+#   foliage 的 ColorMapColorUtil.get 语义）。
+#   官方注册：BlockColors.createDefault L37 LEAF_LITTER → dryFoliage()。
+#   生成脚本 .temp/gen_dry_foliage_table.py。
+_BIOME_DRY_FOLIAGE_TINTS = {
+    "badlands": (163, 128, 70), "bamboo_jungle": (163, 99, 70), "basalt_deltas": (163, 128, 70),
+    "beach": (163, 117, 70), "birch_forest": (163, 114, 70), "cherry_grove": (161, 113, 72),
+    "cold_ocean": (161, 116, 72), "crimson_forest": (163, 128, 70), "dark_forest": (123, 83, 52),
+    "deep_cold_ocean": (161, 116, 72), "deep_dark": (163, 117, 70), "deep_frozen_ocean": (161, 116, 72),
+    "deep_lukewarm_ocean": (161, 116, 72), "deep_ocean": (161, 116, 72), "desert": (163, 128, 70),
+    "dripstone_caves": (163, 117, 70), "end_barrens": (161, 116, 72), "end_highlands": (161, 116, 72),
+    "end_midlands": (161, 116, 72), "eroded_badlands": (163, 128, 70), "flower_forest": (163, 109, 70),
+    "forest": (163, 109, 70), "frozen_ocean": (143, 122, 90), "frozen_peaks": (143, 122, 90),
+    "frozen_river": (143, 122, 90), "grove": (143, 122, 90), "ice_spikes": (143, 122, 90),
+    "jagged_peaks": (143, 122, 90), "jungle": (163, 99, 70), "lukewarm_ocean": (161, 116, 72),
+    "lush_caves": (161, 116, 72), "mangrove_swamp": (123, 83, 52), "meadow": (161, 113, 72),
+    "mushroom_fields": (163, 98, 70), "nether_wastes": (163, 128, 70), "ocean": (161, 116, 72),
+    "old_growth_birch_forest": (163, 114, 70), "old_growth_pine_taiga": (156, 117, 77), "old_growth_spruce_taiga": (154, 118, 79),
+    "pale_garden": (160, 166, 156), "plains": (163, 117, 70), "river": (161, 116, 72),
+    "savanna": (163, 128, 70), "savanna_plateau": (163, 128, 70), "small_end_islands": (161, 116, 72),
+    "snowy_beach": (145, 121, 88), "snowy_plains": (143, 122, 90), "snowy_slopes": (143, 122, 90),
+    "snowy_taiga": (143, 122, 90), "soul_sand_valley": (163, 128, 70), "sparse_jungle": (163, 102, 70),
+    "stony_peaks": (163, 121, 70), "stony_shore": (150, 119, 83), "sulfur_caves": (163, 117, 70),
+    "sunflower_plains": (163, 117, 70), "swamp": (123, 83, 52), "taiga": (154, 118, 79),
+    "the_end": (161, 116, 72), "the_void": (161, 116, 72), "warm_ocean": (161, 116, 72),
+    "warped_forest": (163, 128, 70), "windswept_forest": (150, 119, 83), "windswept_gravelly_hills": (150, 119, 83),
+    "windswept_hills": (150, 119, 83), "windswept_savanna": (163, 128, 70), "wooded_badlands": (163, 128, 70),
+}
+_BIOME_DRY_FOLIAGE_DEFAULT = (163, 128, 70)
 
 # 树叶 tint 官方名单（26.2 反编译 client/color/block/BlockColors.java
 # createDefault L26-36）：
@@ -220,6 +253,9 @@ def tint_for_biome(kind: str, biome_short: str) -> tuple:
         return _BIOME_WATER_TINTS.get(biome_short, _BIOME_WATER_DEFAULT)
     if kind == "foliage":
         return _BIOME_FOLIAGE_TINTS.get(biome_short, _BIOME_FOLIAGE_DEFAULT)
+    if kind == "dry_foliage":
+        return _BIOME_DRY_FOLIAGE_TINTS.get(biome_short,
+                                             _BIOME_DRY_FOLIAGE_DEFAULT)
     return _BIOME_TINTS.get(biome_short, _BIOME_TINT_DEFAULT)
 
 

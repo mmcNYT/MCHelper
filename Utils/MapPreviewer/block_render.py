@@ -885,6 +885,60 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                         if _sub.any():
                             rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
 
+    # 植被植物 tint（26.2 官方 BlockColors.createDefault 实证）：
+    #   LEAF_LITTER -> dryFoliage()（Biome.getDryFoliageColor L228-235：
+    #   effects 显式值优先，否则 dry_foliage.png 按 (temp,downfall) 采样；
+    #   dark_forest/mangrove_swamp/swamp=#7b5334、pale_garden=#a0a69c）；
+    #   SHORT_GRASS/FERN/BUSH -> grass()、TALL_GRASS/LARGE_FERN ->
+    #   doubleTallGrass()（同列 biome 草色）。这些贴图是灰度等待染色
+    #   （leaf_litter (170,170,170)），未 tint 渲染成白点（用户截图实证）。
+    #   草色植物复用 _grass_tint_by_biome（与 grass_block 同列同色，
+    #   含 swamp 噪声二值逐坐标复刻）；leaf_litter 走 dry_foliage 表
+    #   （jm_colors，无逐坐标 modifier，表驱动即可）。
+    lmask = (nm == "minecraft:leaf_litter")
+    if lmask.any():
+        from Utils.MapPreviewer import jm_colors as _jm3
+        # 官方语义 final = dry_foliage 色 × leaf_litter 贴图灰度/255
+        # （同 tinted_color 的 tint×gray 链；leaf_litter 灰度实测 170）。
+        _ll_base = colors.get("minecraft:leaf_litter")
+        _llg = (float(_ll_base[1]) / 255.0) if _ll_base else (170.0 / 255.0)
+        _rows_l = np.nonzero(lmask.any(axis=1))[0]
+        _df_cache: dict[str, tuple] = {}
+        # 行遍历必须覆盖全部 4 对齐行块（_rows_l[::4] 是"有叶行列表每隔
+        # 4 个取 1"，叶行尾部不对齐 4 时末行漏染——全景实测残留 40 像素
+        # (169,169,169) 白点的根因）。
+        _rstarts = np.unique(_rows_l // 4) * 4
+        for _r in _rstarts:
+            if not lmask[_r:_r + 4].any():
+                continue
+            for _c in range(0, w, 4):
+                _bk = pack["id2key"].get(
+                    int(biome_grid[_r, _c]), "minecraft:plains"
+                ).split(":")[-1]
+                _cc = _df_cache.get(_bk)
+                if _cc is None:
+                    _raw = _jm3.tint_for_biome("dry_foliage", _bk)
+                    _cc = tuple(int(min(255, max(0, round(v * _llg))))
+                                for v in _raw)
+                    _df_cache[_bk] = _cc
+                _sub = lmask[_r:_r + 4, _c:_c + 4]
+                if _sub.any():
+                    rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
+    # 草色植物（官方 grass()/doubleTallGrass() 注册）：每种种自贴图灰度
+    # （short_grass 145/fern 124/bush 120/tall_grass 149/large_fern 125，
+    # 实测极差 0-2 纯灰度），复用 _grass_tint_by_biome（与 grass_block
+    # 同列同 tint，swamp 系保留逐坐标噪声场语义）。
+    for _g in ("minecraft:short_grass", "minecraft:fern",
+               "minecraft:bush", "minecraft:tall_grass",
+               "minecraft:large_fern"):
+        _gm = (nm == _g)
+        if not _gm.any():
+            continue
+        _gb = colors.get(_g)
+        _gg = float(_gb[1]) if _gb else 147.0
+        _gpt = _grass_tint_by_biome(biome_grid, pack, gray=_gg, x0=x0, z0=z0)
+        rgb[_gm] = _gpt[_gm]
+
 
     # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
     # 逐点 tint 会让同一高度层出现上百种绿，画面破碎（实测同层 143 色）。
