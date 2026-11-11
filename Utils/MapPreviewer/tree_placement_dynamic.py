@@ -182,6 +182,54 @@ _DOUBLE_PLANTS = frozenset((
     "tall_grass", "large_fern", "lilac", "rose_bush", "peony",
     "sunflower"))
 
+# 植被流中有碰撞的方块（PumpkinBlock 满格碰撞）：写入除 WORLD_SURFACE
+# 外还抬 OCEAN_FLOOR/MOTION_BLOCKING（Heightmap.java L150-151）
+_VEG_MOTION_BLOCKS = frozenset(("pumpkin",))
+
+
+def _veg_pred_collect(pred, plan):
+    """block_predicate_filter 谓词收集（全部零 RNG；False = 不支持）。
+
+    支持：matching_block_tag air（run_veg 隐式 air 检查）、
+    matching_blocks offset [0,-1,0]（收进 plan["below_blocks"]）、
+    all_of 组合、not(matching_blocks-below)（收进
+    plan["below_blocks_not"]）。其余（would_survive/matching_fluids/
+    非 below 偏移/any_of 等）不支持 → 调用方判 None（链保持 veg=None）。
+    """
+    t = pred["type"][len(_MC):]
+    if t == "matching_block_tag":
+        return str(pred.get("tag", "")).endswith(":air")
+    if t == "matching_blocks":
+        off = pred.get("offset", [0, 0, 0])
+        if off != [0, -1, 0]:
+            return False
+        blocks = pred["blocks"]
+        if isinstance(blocks, str):
+            blocks = [blocks]
+        bb = plan["below_blocks"]
+        if bb is None:
+            bb = plan["below_blocks"] = set()
+        bb.update(n[len(_MC):] if n.startswith(_MC) else n for n in blocks)
+        return True
+    if t == "all_of":
+        return all(_veg_pred_collect(q, plan) for q in pred["predicates"])
+    if t == "not":
+        inner = pred["predicate"]
+        if inner["type"][len(_MC):] != "matching_blocks":
+            return False
+        off = inner.get("offset", [0, 0, 0])
+        if off != [0, -1, 0]:
+            return False
+        blocks = inner["blocks"]
+        if isinstance(blocks, str):
+            blocks = [blocks]
+        bbn = plan["below_blocks_not"]
+        if bbn is None:
+            bbn = plan["below_blocks_not"] = set()
+        bbn.update(n[len(_MC):] if n.startswith(_MC) else n for n in blocks)
+        return True
+    return False
+
 
 def _parse_veg_chain(placement, require_offset=True):
     """植被 placed chain -> 执行计划 dict；含不支持的修饰器返回 None。
@@ -196,7 +244,8 @@ def _parse_veg_chain(placement, require_offset=True):
     """
     plan = {"noise": None, "rarity": None, "hm": None, "count": 1,
             "outer": 1, "outer_pre_biome": False, "off_xz": None,
-            "off_y": None, "selector": None}
+            "off_y": None, "selector": None, "below_blocks": None,
+            "below_blocks_not": None}
     counts = []
     for mod in placement:
         t = mod["type"][len(_MC):]
@@ -218,9 +267,7 @@ def _parse_veg_chain(placement, require_offset=True):
             plan["off_xz"] = mod["xz_spread"]
             plan["off_y"] = mod["y_spread"]
         elif t == "block_predicate_filter":
-            pred = mod["predicate"]
-            if not (pred["type"][len(_MC):] == "matching_block_tag"
-                    and str(pred.get("tag", "")).endswith(":air")):
+            if not _veg_pred_collect(mod["predicate"], plan):
                 return None
         else:
             return None
@@ -383,7 +430,24 @@ def _place_simple_block(level, rng, cf, x, y, z):
     below = level.block_name((x, y - 1, z))
     if below.startswith(_MC):
         below = below[len(_MC):]
-    if below not in _SUPPORTS_VEGETATION:
+    if name in ("brown_mushroom", "red_mushroom"):
+        # MushroomBlock.canSurvive（L83-87）：below ∈
+        # #overrides_mushroom_light_requirement（mycelium/podzol/
+        # crimson_nylium/warped_nylium，后两者为下界块不适用）恒真；
+        # 否则 getRawBrightness(pos, 0) < 13 且 mayPlaceOn（L78-80）=
+        # below.isSolidRender()。装饰期在 INITIALIZE_LIGHT 之前
+        # （ChunkPyramid FEATURES 先于 LIGHT），光照查询恒 0 → 只查
+        # isSolidRender（SimLevel.is_solid_render 名字空间感知）
+        if below not in ("mycelium", "podzol") \
+                and not level.is_solid_render((x, y - 1, z)):
+            return []
+    elif name == "leaf_litter":
+        # LeafLitterBlock.canSurvive（L54-57）：below.isFaceSturdy(UP)
+        # ≈ isSolidRender（满格方块两者一致；patch 链 below_blocks
+        # 已限定 grass_block，恒通过）
+        if not level.is_solid_render((x, y - 1, z)):
+            return []
+    elif below not in _SUPPORTS_VEGETATION:
         return []
     if name in _DOUBLE_PLANTS:
         # DoublePlantBlock：origin + above 同名（SimpleBlockFeature L27-32）
@@ -525,11 +589,15 @@ def decorate_trees_in_rect(seed: int, x0: int, z0: int, w: int, h: int,
                     n_inner = _tpo._sample_int(rng, sub_plan["count"])
                     off_xz = sub_plan["off_xz"]
                     off_y = sub_plan["off_y"]
+                    bb = sub_plan.get("below_blocks")
+                    bbn = sub_plan.get("below_blocks_not")
                 else:
                     sub_cf = cf
                     n_inner = _tpo._sample_int(rng, plan["count"])
                     off_xz = plan["off_xz"]
                     off_y = plan["off_y"]
+                    bb = plan["below_blocks"]
+                    bbn = plan["below_blocks_not"]
                 for _ in range(n_inner):
                     dx = _tpo._sample_int(rng, off_xz)
                     dy = _tpo._sample_int(rng, off_y)
@@ -537,14 +605,33 @@ def decorate_trees_in_rect(seed: int, x0: int, z0: int, w: int, h: int,
                     x, y, z = px + dx, yb + dy, pz + dz
                     if not level.is_air((x, y, z)):
                         continue
+                    # block_predicate_filter 谓词（all_of：air +
+                    # matching_blocks below 等）在 feature.place 之前
+                    # 判定（状态采样之前，无 RNG）
+                    if bb or bbn:
+                        bn = level.block_name((x, y - 1, z))
+                        if bn.startswith(_MC):
+                            bn = bn[len(_MC):]
+                        if bb and bn not in bb:
+                            continue
+                        if bbn and bn in bbn:
+                            continue
                     wr = _place_simple_block(level, rng, sub_cf, x, y, z)
                     # 植被只抬 WORLD_SURFACE（NOT_AIR 谓词）；OCEAN_FLOOR /
                     # MOTION_BLOCKING = blocksMotion，植被无碰撞不抬
-                    # （Heightmap.java L150-151）
+                    # （Heightmap.java L150-151）；例外 _VEG_MOTION_BLOCKS
+                    # （pumpkin 满格碰撞，三张全抬）
                     for (bx, by, bz), _nm in wr:
                         cur2 = dyn_get(level._dyn_surface, bx, bz, hm_surface)
                         if cur2 is not None and by + 1 > cur2:
                             level._dyn_surface[(bx, bz)] = by + 1
+                        if _nm in _VEG_MOTION_BLOCKS:
+                            cur = dyn_get(level._dyn_ocean, bx, bz, hm_ocean)
+                            if cur is not None and by + 1 > cur:
+                                level._dyn_ocean[(bx, bz)] = by + 1
+                            cur3 = dyn_get(level._dyn_motion, bx, bz, hm_ocean)
+                            if cur3 is not None and by + 1 > cur3:
+                                level._dyn_motion[(bx, bz)] = by + 1
 
     chunk_list = [(cx, cz)
                   for cz in range(cz0, cz1 + 1)

@@ -1811,16 +1811,26 @@ def _place_huge_mushroom(level, rng, origin, cap_block, stem_block,
     tree_height = rng.next_int(3) + 4
     if rng.next_int(12) == 0:
         tree_height *= 2
-    # isValidPosition：y 边界 + canPlaceOn(below) + 空间检查
+    # isValidPosition：y 边界 + canPlaceOn(below) + 空间检查；地形名带
+    # 前缀（surface_at 返回 minecraft:xxx），剥前缀后查裸名集合
     if not (level.min_y + 1 <= origin[1]
             and origin[1] + tree_height + 1 <= level.max_y):
         return False
-    if level.block_name(_rel(origin, "down")) not in _MUSHROOM_CAN_PLACE_ON:
+    below = level.block_name(_rel(origin, "down"))
+    if below.startswith(_MC):
+        below = below[len(_MC):]
+    if below not in _MUSHROOM_CAN_PLACE_ON:
         return False
     for dy in range(tree_height + 1):
         if red:
-            r = foliage_radius if tree_height - 3 <= dy <= tree_height else 0
+            # HugeRedMushroomFeature.getTreeRadiusForHeight 用 treeHeight
+            # 参数判宽柱，但 isValidPosition（AbstractHugeMushroomFeature
+            # L64）实参 (-1, -1, foliageRadius, dy)：yo < -1 恒假、
+            # yo == -1 恒假 → red 半径恒 0，只检查主干柱
+            r = 0
         else:
+            # HugeBrownMushroomFeature.getTreeRadiusForHeight：忽略 -1
+            # 实参，yo <= 3 ? 0 : leafRadius
             r = 0 if dy <= 3 else foliage_radius
         for dx in range(-r, r + 1):
             for dz in range(-r, r + 1):
@@ -1857,7 +1867,9 @@ def _place_huge_mushroom(level, rng, origin, cap_block, stem_block,
 
 def _place_mushroom_block(level, pos, block) -> None:
     n = level.block_name(pos)
-    if n == "__air__" or n in _REPLACABLE_BY_MUSHROOMS:
+    if n.startswith(_MC):
+        n = n[len(_MC):]       # 地形名剥前缀（如 minecraft:water → water，
+    if n == "__air__" or n in _REPLACABLE_BY_MUSHROOMS:  # 官方 tag 含水）
         level.set_block(pos, block)
 
 
