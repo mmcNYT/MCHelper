@@ -869,7 +869,10 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
             for _b in _leaf_names:
                 _leafcols[_b] = {}
             _rows = np.nonzero(_lm.any(axis=1))[0]
-            for _r in _rows[::4]:
+            # 行遍历覆盖全部 4 对齐行块（_rows[::4] 漏染尾行，同 leaf_litter
+            # 漏洞：全景 oak 实测残留 20 像素偏灰）。
+            _rstarts = np.unique(_rows // 4) * 4
+            for _r in _rstarts:
                 for _c in range(0, w, 4):
                     _bk = pack["id2key"].get(
                         int(biome_grid[_r, _c]), "minecraft:plains"
@@ -938,6 +941,36 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         _gg = float(_gb[1]) if _gb else 147.0
         _gpt = _grass_tint_by_biome(biome_grid, pack, gray=_gg, x0=x0, z0=z0)
         rgb[_gm] = _gpt[_gm]
+    # VINE（官方 foliage() 注册，BlockColors L34 = 与树叶同一
+    # BlockTintSources.foliage L101-113）：贴图纯灰度（116,116,116 实测
+    # spread=0），乘群系 foliage tint × 自灰度。糖芦苇（sugarCane()=草色）、
+    # lily_pad（常量两层，世界中 RGB(32,128,48)）、瓜茎（stem() 按 age）
+    # 官方也有注册，但均不在本存档 block_names/jm_palette（顶面不存在），
+    # 不触发渲染，注释备查。
+    vmask = (nm == "minecraft:vine")
+    if vmask.any():
+        from Utils.MapPreviewer import jm_colors as _jm4
+        _v_base = colors.get("minecraft:vine")
+        _vg = (float(_v_base[1]) / 255.0) if _v_base else (116.0 / 255.0)
+        _rows_v = np.nonzero(vmask.any(axis=1))[0]
+        _fv_cache: dict[str, tuple] = {}
+        _vstarts = np.unique(_rows_v // 4) * 4
+        for _r in _vstarts:
+            if not vmask[_r:_r + 4].any():
+                continue
+            for _c in range(0, w, 4):
+                _bk = pack["id2key"].get(
+                    int(biome_grid[_r, _c]), "minecraft:plains"
+                ).split(":")[-1]
+                _cc = _fv_cache.get(_bk)
+                if _cc is None:
+                    _raw = _jm4.tint_for_biome("foliage", _bk)
+                    _cc = tuple(int(min(255, max(0, round(v * _vg))))
+                                for v in _raw)
+                    _fv_cache[_bk] = _cc
+                _sub = vmask[_r:_r + 4, _c:_c + 4]
+                if _sub.any():
+                    rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
 
 
     # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
