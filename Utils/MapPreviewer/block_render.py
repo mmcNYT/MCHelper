@@ -204,6 +204,22 @@ def _get_pack(seed: int) -> dict:
         # 冰山 feature（IcebergFeature）出水主块：blue_ice 不在 surface
         # blob 的 id 空间（packed_ice 已有），需补录才能参与最高方块竞争
         "minecraft:blue_ice",
+        # 植被写入方块（decorate_trees_in_rect 的 veg 流/树 decorator）：
+        # 不在 surface blob id 空间，缺录则渲染落色 n2b 查不到直接跳过
+        # （黑森林巨蘑菇/小蘑菇/leaf_litter/草花全部不可见，实证）
+        "minecraft:red_mushroom_block", "minecraft:brown_mushroom_block",
+        "minecraft:mushroom_stem", "minecraft:brown_mushroom",
+        "minecraft:red_mushroom", "minecraft:leaf_litter",
+        "minecraft:short_grass", "minecraft:tall_grass", "minecraft:fern",
+        "minecraft:large_fern", "minecraft:bush", "minecraft:firefly_bush",
+        "minecraft:dead_bush", "minecraft:pink_petals",
+        "minecraft:wildflowers", "minecraft:dandelion", "minecraft:poppy",
+        "minecraft:blue_orchid", "minecraft:allium", "minecraft:azure_bluet",
+        "minecraft:oxeye_daisy", "minecraft:cornflower",
+        "minecraft:lily_of_the_valley", "minecraft:torchflower",
+        "minecraft:open_eyeblossom", "minecraft:closed_eyeblossom",
+        "minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush",
+        "minecraft:peony",
     ] + _STRUCTURE_MATERIALS
     _have = set(block_names)
     for _nm in _EXTRA:
