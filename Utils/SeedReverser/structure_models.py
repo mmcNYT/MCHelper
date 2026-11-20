@@ -3923,7 +3923,7 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
                 continue
             if kind == "fluid":
-                # 流体（water/lava）：顶面高度 + 4 角斜角 + 侧面
+                # 流体（water/lava）：顶面高度 + 4 角斜角 + 侧面（带面剔除）
                 # shape_rest = "<level>:<type>"（level=0 源、1-7 流动、8 下落）
                 parts = shape_rest.split(":")
                 level = int(parts[0]) if parts[0].isdigit() else 0
@@ -3933,17 +3933,16 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                     h_self = 1.0
                 else:
                     h_self = (8 - level) / 8.0
-                # 计算顶面 4 角高度（与相邻同种流体块取最大值，形成斜坡）
+                
+                # 计算顶面 4 角高度（MC 官方算法：每角取周围 4 个方向流体的最大高度）
                 # 角 (cx,cz) ∈ {0,1}×{0,1}
                 corner_h = {}
                 for ccx in (0, 1):
                     for ccz in (0, 1):
-                        hh = h_self
-                        # 该角连接的相邻流体块（对角 4 个 + 自己）
+                        # 该角连接的 4 个水平方向（对角块）
+                        max_h = 0.0
                         for ddx in (0, -1):
                             for ddz in (0, -1):
-                                if ddx == 0 and ddz == 0:
-                                    continue
                                 nb_pos = (x + ddx, y, z + ddz)
                                 nb_v = vox.get(nb_pos)
                                 if nb_v is not None:
@@ -3961,37 +3960,71 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                                                 nb_h = 1.0
                                             else:
                                                 nb_h = (8 - nb_level) / 8.0
-                                            hh = max(hh, nb_h)
-                        corner_h[(ccx, ccz)] = min(hh, 1.0)
-                # 顶面 quad（4 角高度构成斜角平面）
-                # 顶点顺序：CCW 从外看（+y 法线），相对坐标 (0-1)
-                top_verts = (
-                    (0.0, corner_h[(0, 0)], 0.0),
-                    (1.0, corner_h[(1, 0)], 0.0),
-                    (1.0, corner_h[(1, 1)], 1.0),
-                    (0.0, corner_h[(0, 1)], 1.0),
-                )
-                # 顶面法线向上（简化：用轴对齐 +y，实际应归一化斜角法线）
-                _emit_quad(arr, idx, x, y, z, top_verts, (0, 1, 0), None)
-                # 4 侧面（从 y=0 到顶边 2 角高度）
+                                            max_h = max(max_h, nb_h)
+                        # MC 算法：角高度 = max(自身高度, 周围流体最大高度)
+                        # 如果没有周围流体，用自身高度
+                        corner_h[(ccx, ccz)] = max(h_self, max_h) if max_h > 0 else h_self
+                
+                # 检查上方是否为同种流体（决定是否绘制顶面）
+                above_v = vox.get((x, y + 1, z))
+                above_is_same_fluid = False
+                if above_v is not None:
+                    above_info = v_ms.get(above_v)
+                    if above_info is None:
+                        above_info = v_ms[above_v] = _mat_shape(above_v)
+                    above_mat, above_shape = above_info
+                    if above_shape and above_shape.startswith("fluid:"):
+                        above_parts = above_shape.split(":")
+                        above_type = above_parts[2] if len(above_parts) > 2 else ""
+                        above_is_same_fluid = (above_type == ftype)
+                
+                # 顶面 quad（4 角高度构成斜角平面），仅当上方非同种流体时绘制
+                if not above_is_same_fluid:
+                    top_verts = (
+                        (0.0, corner_h[(0, 0)], 0.0),
+                        (1.0, corner_h[(1, 0)], 0.0),
+                        (1.0, corner_h[(1, 1)], 1.0),
+                        (0.0, corner_h[(0, 1)], 1.0),
+                    )
+                    _emit_quad(arr, idx, x, y, z, top_verts, (0, 1, 0), None)
+                
+                # 4 侧面（从 y=0 到顶边 2 角高度），带面剔除
                 for face_name, (normal, _) in _FACES.items():
-                    if face_name != "+y":
+                    if face_name != "+y" and face_name != "-y":
                         # 提取该面的 2 个顶角索引
                         face_verts = _FACES[face_name][1]
-                        # 侧面 quad：底面 2 点 + 顶面 2 点（按角高度）
-                        side_verts = []
-                        for fv in face_verts:
-                            vx, vy, vz = fv
-                            # 映射到该面的 2 个角（cx,cz）
-                            cx = int(vx) if vx in (0, 1) else (1 if vx > 0.5 else 0)
-                            cz = int(vz) if vz in (0, 1) else (1 if vz > 0.5 else 0)
-                            corner_y = corner_h.get((cx, cz), h_self)
-                            if vy < 0.5:  # 底面
-                                side_verts.append((vx, 0.0, vz))
-                            else:  # 顶面
-                                side_verts.append((vx, corner_y, vz))
-                        # 侧面法线（简化：用轴对齐）
-                        _emit_quad(arr, idx, x, y, z, side_verts, normal, None)
+                        nx, ny, nz = normal
+                        nb_pos = (x + nx, y, z + nz)
+                        nb_v = vox.get(nb_pos)
+                        
+                        # 检查是否为同种流体（剔除共享侧面）
+                        nb_is_same_fluid = False
+                        if nb_v is not None:
+                            nb_info = v_ms.get(nb_v)
+                            if nb_info is None:
+                                nb_info = v_ms[nb_v] = _mat_shape(nb_v)
+                            nb_mat, nb_shape = nb_info
+                            if nb_shape and nb_shape.startswith("fluid:"):
+                                nb_parts = nb_shape.split(":")
+                                nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
+                                nb_is_same_fluid = (nb_type == ftype)
+                        
+                        # 仅当相邻非同种流体时绘制侧面
+                        if not nb_is_same_fluid:
+                            # 侧面 quad：底面 2 点 + 顶面 2 点（按角高度）
+                            side_verts = []
+                            for fv in face_verts:
+                                vx, vy, vz = fv
+                                # 映射到该面的 2 个角（cx,cz）
+                                cx = int(vx) if vx in (0, 1) else (1 if vx > 0.5 else 0)
+                                cz = int(vz) if vz in (0, 1) else (1 if vz > 0.5 else 0)
+                                corner_y = corner_h.get((cx, cz), h_self)
+                                if vy < 0.5:  # 底面
+                                    side_verts.append((vx, 0.0, vz))
+                                else:  # 顶面
+                                    side_verts.append((vx, corner_y, vz))
+                            _emit_quad(arr, idx, x, y, z, side_verts, normal, None)
+                
                 # 底面（-y，如果下方非流体）
                 below_v = vox.get((x, y - 1, z))
                 below_is_fluid = False
