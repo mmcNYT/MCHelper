@@ -857,6 +857,22 @@ def chunk_to_voxels(built: dict) -> dict:
                         shape = f"fluid:{level}:{fluid_type}"
                         vox[(lx, y_local, lz)] = (mat, shape)
                         continue
+                    # 滴水石锥：官方模型是 cross 十字片（同花草几何），
+                    # 十变体仅贴图不同 —— 按状态生成精确材质键
+                    # "pointed dripstone <dir> <thickness>"（10 张变体
+                    # 纹理已全量入库），几何走 SHAPE_PLANT
+                    if name == "minecraft:pointed_dripstone":
+                        props_dict = props if isinstance(props, dict) else {}
+                        d = ("down" if props_dict.get("vertical_direction")
+                             == "down" else "up")
+                        th = props_dict.get("thickness", "tip")
+                        if th not in ("tip", "frustum", "middle", "base",
+                                      "tip_merge"):
+                            th = "tip"
+                        mat = f"pointed dripstone {d} {th}".replace(
+                            "_", " ")
+                        vox[(lx, y_local, lz)] = (mat, bs.SHAPE_PLANT)
+                        continue
                     typ = _palette_entry_half_from_props(props)
                     mode = "full" if typ in ("top", "double") else "half"
                     mat = _map_block(name, mode)

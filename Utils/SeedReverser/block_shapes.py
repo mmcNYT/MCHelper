@@ -615,6 +615,17 @@ def shape_from_props(name: str, props: dict) -> str | None:
     half = props.get("half", "")
     typ = props.get("type", "")
 
+    # 滴水石锥：官方模型 = cross 十字对角片（两片竖直薄片 45°
+    # 旋转 + 0.8/15.2 缩进，与花草同几何），仅按
+    # vertical_direction x thickness 变体贴图不同；形状码承载
+    # 变体供材质键选择，AABB 空（无碰撞无遮挡）
+    if name == "minecraft:pointed_dripstone":
+        d = "down" if props.get("vertical_direction") == "down" else "up"
+        th = props.get("thickness", "tip")
+        if th not in ("tip", "frustum", "middle", "base", "tip_merge"):
+            th = "tip"
+        return f"dripstone:{d}:{th}"
+
     # 作物（官方 crop.json 四片竖直面 x=4/12、z=4/12，下探 1px）
     # 与花草（cross 对角片）分流：crop 走 build_mesh 专用四片路径
     if name.endswith("_stem") or name in (
@@ -1187,6 +1198,9 @@ def shape_boxes(shape: str | None) -> tuple:
         return ()
     if kind == "crop":
         # 作物：四片竖直面（build_mesh 专用 quad 路径，同 plant）
+        return ()
+    if kind == "dripstone":
+        # 滴水石锥：cross 十字片（同 plant，无碰撞无遮挡）
         return ()
     if kind == "cross":
         # 落地告示牌：十字交叉板近似（AABB 无法表达斜板）

@@ -4084,6 +4084,16 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 for pq, pn in _CROP_QUADS:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV_UP)
                 continue
+            if kind == "dripstone":
+                # 滴水石锥（官方 pointed_dripstone.json）：cross 十字
+                # 对角片几何与植物同款（两片竖直薄片 45° 旋转 +
+                # 0.8/15.2 缩进，正反双面），up/down x tip/frustum/
+                # middle/base/tip_merge 十变体仅贴图不同（材质键由
+                # chunk_to_voxels 按状态生成，如 pointed dripstone
+                # up tip）；剔除盒空（无碰撞无遮挡）
+                for pq, pn in _PLANT_QUADS:
+                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV_UP)
+                continue
             if kind == "fluid":
                 # 流体（water/lava）精确渲染 —— 逐条对齐 MC 26.2 官方
                 # FluidRenderer（.temp/mc262_decompile 反编译源码）：
