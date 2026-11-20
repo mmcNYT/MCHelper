@@ -922,12 +922,170 @@ def _map_block(name: str, mode: str) -> str | None:
 
     mode="full"：台阶为上半/双层，按整块（去 halfheight: 前缀）；
     mode="half"：保持映射原样（bottom 台阶保留半高标记）。
+    _MAT_MAP 未收录的方块走 _auto_mat 自动回退链（键名生成 +
+    纹理文件存在性验证），26.2 全量纹理入库后绝大多数方块
+    （含矿石/珊瑚/铜系/新方块）自动覆盖，不再渲染灰色。
     """
-    mat = _MAT_MAP.get(name, UNKNOWN_MAT)
+    mat = _MAT_MAP.get(name, UNKNOWN_MAT) if name in _MAT_MAP \
+        else _auto_mat(name)
     if mode == "full" and isinstance(mat, str) and mat.startswith(
             "halfheight:"):
         return mat[len("halfheight:"):]
     return mat
+
+
+_TEX_KEYS: set | None = None
+
+
+def _texture_keys() -> set:
+    """库内全部纹理键（惰性扫描，供自动回退的存在性验证）。"""
+    global _TEX_KEYS
+    if _TEX_KEYS is None:
+        try:
+            _TEX_KEYS = {f[:-4] for f in os.listdir(TEX_DIR)
+                         if f.endswith(".png")}
+        except OSError:
+            _TEX_KEYS = set()
+    return _TEX_KEYS
+
+
+def _pick_tex(cands) -> str:
+    """候选键序列 -> 第一个存在纹理的键；全空 -> UNKNOWN_MAT。"""
+    keys = _texture_keys()
+    for c in cands:
+        if c in keys:
+            return c
+    return UNKNOWN_MAT
+
+
+# 官方无同名/变体纹理、且通用规则推不出的技术方块与组合体
+# （值为 str 或 tuple 候选链，按序取第一个存在纹理的键）
+_FALLBACK_KEYS = {
+    "minecraft:bamboo": "bamboo stalk",
+    "minecraft:bamboo_sapling": "bamboo stage0",
+    "minecraft:calibrated_sculk_sensor": "calibrated sculk sensor top",
+    "minecraft:candle_cake": "cake side",
+    "minecraft:chipped_anvil": "chipped anvil top",
+    "minecraft:cocoa": "cocoa stage2",
+    "minecraft:copper_chest": "copper block",
+    "minecraft:copper_golem_statue": "copper block",
+    "minecraft:copper_wall_torch": "copper torch",
+    "minecraft:crafter": "crafter north",
+    "minecraft:damaged_anvil": "damaged anvil top",
+    "minecraft:dried_ghast": "dried ghast hydration 0 north",
+    "minecraft:dried_kelp_block": "dried kelp side",
+    "minecraft:end_gateway": "end stone",
+    "minecraft:frosted_ice": "frosted ice 0",
+    "minecraft:heavy_weighted_pressure_plate": "iron block",
+    "minecraft:hopper": "hopper outside",
+    "minecraft:infested_cobblestone": "cobblestone",
+    "minecraft:infested_deepslate": "deepslate",
+    "minecraft:infested_stone": "stone",
+    "minecraft:lilac": "lilac bottom",
+    "minecraft:light_weighted_pressure_plate": "gold block",
+    "minecraft:peony": "peony bottom",
+    "minecraft:petrified_oak_slab": "oak planks",
+    "minecraft:piston_head": "piston top",
+    "minecraft:piston_head_short": "piston top",
+    "minecraft:pitcher_plant": ("pitcher crop top", "pitcher crop side"),
+    "minecraft:pointed_dripstone": ("pointed dripstone up base",
+                                    "dripstone block"),
+    "minecraft:quartz_slab": "quartz block side",
+    "minecraft:quartz_stairs": "quartz block side",
+    "minecraft:respawn_anchor": ("respawn anchor side0",
+                                 "respawn anchor top off"),
+    "minecraft:rose_bush": "rose bush bottom",
+    "minecraft:smooth_red_sandstone_slab": "red sandstone top",
+    "minecraft:smooth_red_sandstone_stairs": "red sandstone top",
+    "minecraft:sniffer_egg": "sniffer egg not cracked north",
+    "minecraft:sulfur_spike": ("sulfur spike up base", "sulfur"),
+    "minecraft:sunflower": "sunflower front",
+    "minecraft:torchflower_crop": "torchflower crop stage0",
+    "minecraft:structure_block": "structure block save",
+}
+
+
+def _auto_mat(bid: str) -> str:
+    """_MAT_MAP miss 的方块名 -> 自动纹理键（候选链 + 存在性验证）。
+
+    候选顺序：特例表 -> 官方名空格化 -> +" side" -> 形状后缀剥离
+    （楼梯/台阶/墙用基材，门用 bottom 半图，按钮/压力板用 planks
+    或基材，墙告示牌去 wall_，玻璃板用玻璃块，壁挂珊瑚扇去 wall，
+    木头用原木，旗帜用同色羊毛，床用 bed 合成键或 foot up）。
+    全部落空 -> UNKNOWN_MAT（视口灰色）。
+    """
+    special = _FALLBACK_KEYS.get(bid)
+    if special is not None:
+        if isinstance(special, tuple):
+            return _pick_tex(special)
+        return special
+    stem = bid[len("minecraft:"):] if bid.startswith("minecraft:") else bid
+    keys = _texture_keys()
+
+    def pick(*cands):
+        for c in cands:
+            if c in keys:
+                return c
+        return UNKNOWN_MAT
+
+    core = stem.replace("_", " ")
+    # 上蜡铜系：纹理与非蜡版完全相同，剥前缀递归复用全部规则
+    if stem.startswith("waxed_"):
+        return _auto_mat("minecraft:" + stem[len("waxed_"):])
+    # 前缀系（花盆装植物 / 虾虫石 / 26.2 铜箱子与铜像）
+    if stem.startswith("potted_"):
+        return pick("flower pot")
+    if stem.startswith("infested_"):
+        return pick(stem[len("infested_"):].replace("_", " "))
+    if stem.endswith("_copper_chest") or stem.endswith("_golem_statue"):
+        return pick("copper block")
+    if stem.endswith("_candle_cake"):
+        return pick("cake side")
+    if stem.endswith("_wall_sign"):
+        return pick(stem[:-len("_wall_sign")].replace("_", " ") + " sign")
+    if stem.endswith("_wall_hanging_sign"):
+        return pick(stem[:-len("_wall_hanging_sign")].replace("_", " ")
+                    + " hanging sign")
+    if stem.endswith("_stained_glass_pane"):
+        return pick(stem[:-len("_pane")].replace("_", " "))
+    if stem.endswith("_coral_wall_fan"):
+        return pick(stem[:-len("_wall_fan")].replace("_", " ") + " fan")
+    if stem.endswith("_wall_banner"):
+        return pick(stem[:-len("_wall_banner")].replace("_", " ") + " wool")
+    if stem.endswith("_banner"):
+        return pick(stem[:-len("_banner")].replace("_", " ") + " wool")
+    if stem.endswith("_bed"):
+        return pick(core, core + " foot up")
+    if stem.endswith("_fence_gate"):
+        bare = stem[:-len("_fence_gate")].replace("_", " ")
+        return pick(bare + " planks", bare, bare + "s")
+    if stem.endswith("_fence"):
+        bare = stem[:-len("_fence")].replace("_", " ")
+        return pick(bare + " planks", bare, bare + "s")
+    if stem.endswith("_pressure_plate"):
+        bare = stem[:-len("_pressure_plate")].replace("_", " ")
+        return pick(bare + " planks", bare)
+    if stem.endswith("_hyphae"):
+        return pick(stem[:-len("_hyphae")].replace("_", " ") + " stem")
+    if stem.endswith("_wall"):
+        bare = stem.rsplit("_", 1)[0].replace("_", " ")
+        return pick(bare, bare + "s", bare + " side")
+    if stem.endswith("_stairs"):
+        bare = stem.rsplit("_", 1)[0].replace("_", " ")
+        return pick(bare + " planks", bare, bare + "s", bare + " side")
+    if stem.endswith("_slab"):
+        bare = stem.rsplit("_", 1)[0].replace("_", " ")
+        return pick(bare + " planks", bare, bare + "s", bare + " side")
+    if stem.endswith("_door"):
+        return pick(core + " bottom")
+    if stem.endswith("_button"):
+        bare = stem.rsplit("_", 1)[0].replace("_", " ")
+        return pick(bare + " planks", bare)
+    if stem.endswith("_wood"):
+        return pick(core[:-len("wood")].strip() + " log")
+    if stem.endswith("_trapdoor"):
+        return pick(core)
+    return pick(core, core + " side")
 
 
 # ---------------------------------------------------------------------------
@@ -3241,6 +3399,10 @@ _CROP_QUADS = (
 )
 
 _FULL_UV = (0.0, 0.0, 1.0, 1.0)   # 整格 UV 窗（缩进对角片/作物片用）
+# 植物/作物专用：rot=1（u 镜像 + v 保持向上）——原 rot=0 的 v 翻转
+# 补偿让贴图顶部落在方块底部，花草上下颠倒；shader 采样域 v 轴
+# 向上，竖直面应底->v0、顶->v1（与火把显式窗同向）
+_FULL_UV_UP = (0.0, 0.0, 1.0, 1.0, False, 1)
 
 
 # ----------------------------------------------------------------
@@ -3914,13 +4076,13 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 # 不走 AABB 面循环；顶点 0.8/15.2 缩进对齐官方
                 # cross.json 旋转投影，UV 走整格窗
                 for pq, pn in _PLANT_QUADS:
-                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
+                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV_UP)
                 continue
             if kind == "crop":
                 # 作物（26.2 crop.json）：四片竖直面（x=4/12、
                 # z=4/12，下探 1px），8 quad，不走 AABB 面循环
                 for pq, pn in _CROP_QUADS:
-                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
+                    _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV_UP)
                 continue
             if kind == "fluid":
                 # 流体（water/lava）精确渲染 —— 逐条对齐 MC 26.2 官方
