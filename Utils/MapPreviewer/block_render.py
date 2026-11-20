@@ -560,77 +560,8 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
     # ---- 5) 影调 → 颗粒 → 山体阴影（分级）----
     # 顺序很重要：影调和颗粒必须在乘法式阴影之前完成，否则会把已量化的
     # shade 层级重新打散，失去"每层分明"的平台感。
-    rgb = rgb.astype(np.float32)
-    # ---- 4e) 竹子点缀（竹林专属）：竹子不在 block_names，只能在此
-    # （4d 统一配色之后）直接覆盖 rgb；之后仍会吃 hillshade 坡度阴影。
-    if bamboo_cells is not None:
-        _apply_bamboo_dots(rgb, bamboo_cells[1])
-    if hillshade:
-        # 影调：参考实测方块亮度范围 32~207、色阶 158 级，说明亮部要拉高、
-        # 色阶要丰富。仅做轻微 γ 与高光软膝（膝点上移到 0.86，不再压扁）。
-        # 水列不做 γ：4d 的水色是按 JM 源码精确合成的绝对色（官方深水
-        # 实测三群系闭合），JM 渲染链没有这一步整体提亮——吃 γ 会使深水
-        # (46,87,168) 偏亮到 (51,93,172)。排除集=真实水列(heights<=61)
-        # +海面单层冰列(heights==62 顶块 ice)，再剔除 footprint 盖章列
-        # （海底神殿/海底废墟等水下矩形色的亮度是含 γ 拟合的既有验证值，
-        # 保持原处理）。
-        _wgamma = (heights < _SEA - 1) | ((heights == _SEA - 1)
-                                          & (blocks == pack["name2bid"]
-                                             .get("minecraft:ice", -1)))
-        for _fk, _fax, _faz, _fland in fp_queue:
-            _fw, _fl = _FOOTPRINTS[_fk][:2]
-            _rx0 = max(0, _fax - _fw // 2)
-            _rz0 = max(0, _faz - _fl // 2)
-            _hr = heights[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw]
-            _sub = _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw].copy()
-            if _fland:
-                _sub &= _hr >= _SEA
-            else:
-                _sub &= _hr < _SEA
-            _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw] = _sub
-        t = np.clip(rgb, 0.0, 255.0) / 255.0
-        t = np.where(_wgamma[..., None], t, np.power(t, 0.94))
-        # 不做高光压缩：官方瓦片实测平地雪保持 (255,255,255)
-        # （132220 像素为纯白，占已探索像素的第三位），
-        # 原来的 knee 会把 249 压到 238，使雪面发灰。
-        rgb = t * 255.0
-    # 方块材质纹理：±11%（参考实测每方块内亮度极差约 23），
-    # 同块内一致 -> 保持方块分明，同时产生 MC 材质的色阶多样性。
-    # 地表完全不做色彩抖动：同一地形层必须同色，否则画面破碎。
-    # 亮度变异只来自坡度（JM bevelSlope，树冠台阶见 _veg.crown_step）与树种混生。
-    if hillshade:
-        # JourneyMap 斜坡阴影：按邻列高度差算坡度因子，再对 RGB 做
-        # bevel（R/G 额外 *0.85、B 只乘 slope）-> 斜坡变暗且偏蓝。
-        # 坡度纯由地形决定，同坡同色，不随机。
-        # 显示高度修复（接壤配色差异数值根因）：JM calculateSlope 的输入
-        # 是 getBlockHeight（SurfaceRenderer L142-196），mapBathymetry=
-        # false 时水列停在**水面顶方块 y=62**，与海床深度无关——水面内
-        # 部恒平（slope=1），岸线坡度只来自真实地形高差。此前直接传海床
-        # heights，把水下深度梯度当坡度，岸线一圈出现 JM 没有的强 bevel。
-        # heights 语义=顶方块 y（fill_top_grid 返回 top=y），故水列显示
-        # 高度=np.maximum(heights, 62)。
-        from Utils.MapPreviewer import jm_colors as _jm
-        disp = np.maximum(heights.astype(np.float32), float(_SEA - 1))
-        slope = _jm.slope_from_heights(disp, x0, z0)
-        # （旧「水列强制 slope=1」已删：水列 slope 由水面平齐语义自然给
-        # 出；岸线水列相对更高陆地 <1 -> bevelSlope 生效，与 JM
-        # paintStrata L265-273 对合成后水色应用 bevel 的顺序一致。）
-        # 竹点 NoShadow（VanillaBlockHandler：竹 NoShadow 旗标）-> JM
-        # showSlope=false（SurfaceRenderer L103：顶块带 NoShadow 的列不加
-        # bevel），竹色保持平涂
-        if bamboo_cells and bamboo_cells[1]:
-            _dy = np.fromiter((c[0] for c in bamboo_cells[1]), np.int64,
-                              len(bamboo_cells[1]))
-            _dx = np.fromiter((c[1] for c in bamboo_cells[1]), np.int64,
-                              len(bamboo_cells[1]))
-            slope[np.clip(_dy, 0, h - 1), np.clip(_dx, 0, w - 1)] = 1.0
-        rb = slope < 1.0
-        f = np.where(rb, _jm.BEVEL_DARKEN, 1.0).astype(np.float32)
-        rgb = rgb.astype(np.float32)
-        rgb[..., 0] *= f * slope
-        rgb[..., 1] *= f * slope
-        rgb[..., 2] *= slope
-    rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+    rgb = _apply_hillshade_and_slope(rgb, heights, blocks, pack, x0, z0,
+                                     hillshade, bamboo_cells, fp_queue)
 
     block_names = pack["block_names"]
     top_block = np.asarray(block_names, dtype=object)[
@@ -652,6 +583,143 @@ def _render_rect(seed: int, x0: int, z0: int, w: int, h: int,
             "top_block": top_block,
             "origin_bx": tx0, "origin_bz": tz0, "engine": "native",
             "elapsed": time.perf_counter() - t0, "cancelled": False}
+
+
+def _apply_hillshade_and_slope(rgb, heights, blocks, pack, x0, z0,
+                               hillshade, disp_heights=None,
+                               bamboo_cells=None, fp_queue=None, wet=None,
+                               void=None):
+    """影调 γ + JourneyMap 坡度 bevel（提取自 _render_rect 步骤 5）。
+
+    _render_rect 与 render_from_blocks 共用这段「配色之后」的影调/坡度处理。
+    顺序很重要：影调必须在乘法式坡度阴影之前完成，否则会把已量化的
+    shade 层级重新打散，失去"每层分明"的平台感。
+
+    disp_heights：坡度输入显示高度（可选，默认 heights）。透明层
+    （栅栏/玻璃）语义 heights=地面（水色链/wet 用），但其 1 格落差要
+    参与坡度才有立体感——透明格传透明顶 y，其余格同 heights。
+    """
+    h, w = heights.shape
+    rgb = rgb.astype(np.float32)
+    # ---- 4e) 竹子点缀（竹林专属）：竹子不在 block_names，只能在此
+    # （统一配色之后）直接覆盖 rgb；之后仍会吃 hillshade 坡度阴影。
+    if bamboo_cells is not None:
+        _apply_bamboo_dots(rgb, bamboo_cells[1])
+    if hillshade:
+        # 影调：参考实测方块亮度范围 32~207、色阶 158 级，说明亮部要拉高、
+        # 色阶要丰富。仅做轻微 γ 与高光软膝（膝点上移到 0.86，不再压扁）。
+        # 水列不做 γ：水色是按 JM 源码精确合成的绝对色（官方深水实测三
+        # 群系闭合），JM 渲染链没有这一步整体提亮——吃 γ 会使深水偏亮。
+        # 排除集=真实水列+海面单层冰列(heights==62 顶块 ice)，
+        # 再剔除 footprint 盖章列（海底神殿/海底废墟等水下矩形色保持原值）。
+        # 真水列优先用调用方给的 wet（顶块是流体的列）——heights<61 在
+        # 超平坦/空岛上会把整片旱地误当水列跳过 γ 提亮（实测超平坦草色
+        # 偏暗一个档）；wet=None 保持旧 heights 语义（MapPreviewer 路径）。
+        if wet is not None:
+            _wgamma = np.asarray(wet, bool) & (heights < _SEA - 1)
+        else:
+            _wgamma = heights < _SEA - 1
+        _wgamma = _wgamma | ((heights == _SEA - 1)
+                             & (blocks == pack["name2bid"]
+                                .get("minecraft:ice", -1)))
+        for _fk, _fax, _faz, _fland in (fp_queue or []):
+            _fw, _fl = _FOOTPRINTS[_fk][:2]
+            _rx0 = max(0, _fax - _fw // 2)
+            _rz0 = max(0, _faz - _fl // 2)
+            _hr = heights[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw]
+            _sub = _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw].copy()
+            if _fland:
+                _sub &= _hr >= _SEA
+            else:
+                _sub &= _hr < _SEA
+            _wgamma[_rz0:_rz0 + _fl, _rx0:_rx0 + _fw] = _sub
+        t = np.clip(rgb, 0.0, 255.0) / 255.0
+        t = np.where(_wgamma[..., None], t, np.power(t, 0.94))
+        rgb = t * 255.0
+    # 方块材质纹理亮度变异只来自坡度（JM bevelSlope）与树种混生；地表同层
+    # 必须同色，否则画面破碎。
+    if hillshade:
+        # JourneyMap 斜坡阴影：按邻列高度差算坡度因子，再对 RGB 做 bevel
+        # （R/G 额外 *0.85、B 只乘 slope）-> 斜坡变暗且偏蓝。坡度纯由地形
+        # 决定，同坡同色，不随机。水列显示高度=np.maximum(heights, 62)
+        # （水面顶方块 y，海面内部恒平 slope=1，岸线坡度只来自真实高差）。
+        # 透明层：显示高度含栅栏/玻璃顶（1 格落差 → 立体阴影）。
+        from Utils.MapPreviewer import jm_colors as _jm
+        _src = disp_heights if disp_heights is not None else heights
+        # 显示高度钳到海平面：只对「水列 + 虚空列」生效——水面恒平、岸线
+        # 坡度只来自真实高差；虚空列保持旧的 61 钳制（等价未生成的海平面
+        # 平地：_calc_slope 对负高分邻列会走反常分支产生极端坡度，在虚空
+        # 边缘出黑边）。旧实现整图钳制——超平坦/空岛地表 y≈-58 与其上的
+        # 建筑全被压平到 61，坡度恒中性 1.0，阴影开关在超平坦世界完全
+        # 失效（实测 practice 1189 个有坡度列钳制后剩 0）。旱地列保留真实高度。
+        if wet is not None:
+            _f = _src.astype(np.float32)
+            _clamp = np.asarray(wet, bool)
+            if void is not None:
+                _clamp = _clamp | np.asarray(void, bool)
+            disp = np.where(_clamp, np.maximum(_f, float(_SEA - 1)), _f)
+        else:
+            disp = np.maximum(_src.astype(np.float32), float(_SEA - 1))
+        slope = _jm.slope_from_heights(disp, x0, z0)
+        # 竹点 NoShadow（VanillaBlockHandler 竹 NoShadow 旗标）-> JM
+        # showSlope=false，竹色保持平涂。
+        if bamboo_cells and bamboo_cells[1]:
+            _dy = np.fromiter((c[0] for c in bamboo_cells[1]), np.int64,
+                              len(bamboo_cells[1]))
+            _dx = np.fromiter((c[1] for c in bamboo_cells[1]), np.int64,
+                              len(bamboo_cells[1]))
+            slope[np.clip(_dy, 0, h - 1), np.clip(_dx, 0, w - 1)] = 1.0
+        rb = slope < 1.0
+        f = np.where(rb, _jm.BEVEL_DARKEN, 1.0).astype(np.float32)
+        rgb = rgb.astype(np.float32)
+        rgb[..., 0] *= f * slope
+        rgb[..., 1] *= f * slope
+        rgb[..., 2] *= slope
+    return np.clip(rgb, 0, 255).astype(np.uint8)
+
+
+def render_from_blocks(blocks, heights, biome_grid, pack, x0=0, z0=0,
+                       hillshade=False, wet=None, overlay=None,
+                       disp_heights=None, void=None):
+    """给定每列顶层方块 id + 高度 + 群系 id，渲染 JourneyMap 配色 + 影调 +
+    坡度阴影。MapPreviewer（地形生成）与 SaveManager（读存档 region）共用的
+    逐方块渲染核心——两者唯一差别就是 blocks/heights/biome_grid 的来源。
+
+    不含程序化装饰（冰山/树/结构/footprint）：那些是 MapPreviewer 生成地形
+    时按种子摆放的，SaveManager 读真实存档时这些方块已在 region 里。
+
+    blocks: (h,w) int 顶层方块在 pack["block_names"] 的索引
+    heights: (h,w) 顶方块 y
+    biome_grid: (h,w) 群系 id
+    pack: 含 block_names / jm_palette / id2key（见 _get_pack；SaveManager
+        用 build_light_pack 构造）
+    overlay: (h,w) int 透明层（JM 0.4 家族：栅栏/玻璃等）的方块索引，
+        -1=无。扫描层已穿透：heights/地表取下方地面，这里按 JM
+        SurfaceRenderer.paintStrata 语义混色
+        blendWith(base, other, 0.4) = 0.4*透明块色 + 0.6*地面色。
+    disp_heights: (h,w) float 坡度显示高度（可选，默认 heights）。透明格
+        = 透明顶 y —— 栅栏比地面高 1 格的落差参与 bevel（邻格压暗/本格
+        微亮）→ 立体感；water 链/wet/γ 仍用语义 heights。
+    返回 (h,w,3) uint8 RGB。
+    """
+    rgb = _colorize_blocks(blocks, heights, None, None, biome_grid, pack,
+                           x0, z0, wet=wet)
+    if overlay is not None:
+        ov = overlay >= 0
+        if ov.any():
+            colors = pack.get("jm_palette") or _load_colors()
+            _lut = np.array([colors.get(nm, (255, 0, 255))
+                             for nm in pack["block_names"]],
+                            dtype=np.float32)
+            _ov_rgb = _lut[np.clip(overlay[ov], 0,
+                                   len(pack["block_names"]) - 1)]
+            _rgb = rgb.astype(np.float32)
+            _rgb[ov] = _rgb[ov] * 0.6 + _ov_rgb * 0.4
+            rgb = np.clip(np.round(_rgb), 0, 255).astype(np.uint8)
+    rgb = _apply_hillshade_and_slope(rgb, heights, blocks, pack, x0, z0,
+                                     hillshade, disp_heights=disp_heights,
+                                     wet=wet, void=void)
+    return rgb
 
 
 # 群系 -> 草色（量化取色，保证同群系同色；避免逐点温湿度渐变造成破碎）
@@ -679,17 +747,56 @@ _BIOME_GRASS = {
 _BIOME_GRASS_DEFAULT = (108, 142, 76)
 
 
+def _tint_field_avg(field_int: np.ndarray) -> np.ndarray:
+    """JM JmBlockAccess.getBlockTint（mapBlendGrass/Foliage 默认 true）复刻：
+    以每格为中心取 (2r+1)²=25 点（r=2，MC 视频设置 biomeBlendRadius
+    默认 2）各点群系 tint 色，逐通道**整除**平均；越界点不计入（
+    getBiomeOrNull 返 null 跳过的语义，与水色段实现同构）。
+
+    field_int: (h,w,3) int（含逐坐标噪声色也行——MC 的 blend 就是对
+    含噪声的 getGrassColor(x,z) 值做平均）。返回 (h,w,3) int32。
+    群系边界两侧的 tint 被线性过渡，不再硬切换。
+    """
+    h, w = field_int.shape[:2]
+    pad = np.full((h + 4, w + 4, 3), -1, np.int32)
+    pad[2:2 + h, 2:2 + w] = field_int.astype(np.int32)
+    s = np.zeros((h, w, 3), np.int32)
+    c = np.zeros((h, w), np.int32)
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            win = pad[2 + dy:2 + dy + h, 2 + dx:2 + dx + w]
+            ok = win[..., 0] >= 0
+            s += np.where(ok[..., None], win, 0)
+            c += ok
+    return s // np.maximum(c, 1)[..., None]
+
+
+def _lut_field(biome_grid: np.ndarray, id2key: dict, kind: str,
+               default_rgb: tuple) -> np.ndarray:
+    """逐格群系 tint 场（LUT 查表，kind: foliage/dry_foliage 等无坐标
+    依赖的表驱动类）。返回 (h,w,3) int32。"""
+    from Utils.MapPreviewer import jm_colors as _jmk
+    maxbid = max(id2key.keys()) + 1
+    lut = np.empty((maxbid, 3), np.int32)
+    lut[:] = default_rgb
+    for bid, key in id2key.items():
+        lut[bid] = _jmk.tint_for_biome(kind, key.split(":")[-1])
+    return lut[np.clip(biome_grid, 0, maxbid - 1)]
+
+
 def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
                          gray: float = None, x0: int = 0, z0: int = 0) -> np.ndarray:
-    """按群系给出草色（同群系同色，不随温湿度逐点渐变）。
+    """按群系给出草色（JM mapBlendGrass 语义：25 点整除平均后的渐变场）。
 
-    统一走 MC 官方公式：final = biome_grass_tint * texture_gray / 255。
+    官方公式：final = biome_grass_tint * texture_gray / 255。
     色表来自 jm_colors._BIOME_TINTS（26.2 官方语义全量生成）。
-    例外：swamp/mangrove_swamp 草色是官方 SWAMP modifier 的逐坐标
-    噪声二值（BiomeSpecialEffects.GrassColorModifier.SWAMP，BIOME_INFO_NOISE
-    seed 2345），JM 再叠 biomeBlendRadius² 网格平均（JmBlockAccess
-    method_23752，用户 biomeBlendRadius=2 -> 5×5），无法用表值，
-    由 _swamp_grass_field 逐方块复刻。
+    群系过渡：所有 resolver 色统一过 _tint_field_avg（JmBlockAccess
+    getBlockTint，r=2 -> 5×5 整除平均，mapBlendGrass 默认 true）——
+    边界两侧线性过渡，不再硬切。例外：swamp/mangrove_swamp 草色是
+    官方 SWAMP modifier 的逐坐标噪声二值（BiomeSpecialEffects.
+    GrassColorModifier.SWAMP，BIOME_INFO_NOISE seed 2345），由
+    _swamp_grass_field 逐方块复刻（内部已含 5×5 平均，外层再平均
+    一次为轻微双重低通，视觉差异可忽略）。
     """
     from Utils.MapPreviewer import jm_colors as _jm
     h, w = biome_grid.shape
@@ -721,7 +828,8 @@ def _grass_tint_by_biome(biome_grid: np.ndarray, pack: dict,
                 col = tuple(int(round(v * gray / 255.0)) for v in t)
                 cache[bid] = col
             out[r, c] = col
-    return out
+    # JM mapBlendGrass：25 点整除平均（含 swamp 噪声色）——群系过渡平滑
+    return _tint_field_avg(out).astype(np.float32)
 
 
 # 官方 SWAMP modifier 二值色（BiomeSpecialEffects.java L87-92：
@@ -848,9 +956,13 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     block_names = pack["block_names"]
     # 方块名 -> RGB 查找表（按 surface blob 顺序）
     _miss = [nm for nm in block_names if nm not in colors]
-    if _miss and not getattr(_colorize_blocks, "_warned", False):
-        _colorize_blocks._warned = True
-        print("[block_render] 缺配色的方块:", _miss[:8])
+    if _miss:
+        # 按方块名去重：每个新缺色名只报一次，避免刷屏也不漏报
+        _seen = getattr(_colorize_blocks, "_missed", set())
+        _new = [nm for nm in _miss if nm not in _seen]
+        if _new:
+            _colorize_blocks._missed = _seen | set(_new)
+            print("[block_render] 缺配色的方块:", _new[:8])
     lut = np.array([colors.get(nm, (255, 0, 255)) for nm in block_names],
                    dtype=np.float32)                    # (nb,3)
     idx = np.clip(blocks, 0, len(block_names) - 1)
@@ -860,33 +972,48 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     nm = name_arr[idx]
     # 树叶按群系 tint 着色：leaves 贴图是**灰度图**，直接取均值是灰色，
     # 必须乘群系 foliage tint 才是绿色（JourneyMap 同法）。
+    # JM mapBlendFoliage（默认 true）：tint 不再单点取值，而是
+    # FOLIAGE_COLOR_RESOLVER 的 25 点整除平均（_tint_field_avg）——
+    # 群系边界两侧线性过渡，不再硬切换。blur 在**纯 tint 域**（不含
+    # 贴图灰度/压暗），与 JM 语义一致（gray/压暗是每方块常量，顺序等价）。
+    from Utils.MapPreviewer import jm_colors as _jm2
     _leaf_names = [b for b in block_names if "leaves" in b.split(":")[-1]]
-    if _leaf_names:
-        from Utils.MapPreviewer import jm_colors as _jm2
-        _lm = np.isin(nm, _leaf_names)
-        if _lm.any():
-            _leafcols = {}
-            for _b in _leaf_names:
-                _leafcols[_b] = {}
-            _rows = np.nonzero(_lm.any(axis=1))[0]
-            # 行遍历覆盖全部 4 对齐行块（_rows[::4] 漏染尾行，同 leaf_litter
-            # 漏洞：全景 oak 实测残留 20 像素偏灰）。
-            _rstarts = np.unique(_rows // 4) * 4
-            for _r in _rstarts:
-                for _c in range(0, w, 4):
-                    _bk = pack["id2key"].get(
-                        int(biome_grid[_r, _c]), "minecraft:plains"
-                    ).split(":")[-1]
-                    for _b in _leaf_names:
-                        _cc = _leafcols[_b].get(_bk)
-                        if _cc is None:
-                            _cc = _jm2.tinted_color(_b, _bk, colors)
-                            _leafcols[_b][_bk] = _cc
-                        if _cc is None:
-                            continue
-                        _sub = _lm[_r:_r + 4, _c:_c + 4] & (nm[_r:_r + 4, _c:_c + 4] == _b)
-                        if _sub.any():
-                            rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
+    vmask = (nm == "minecraft:vine")
+    _lm = np.isin(nm, _leaf_names) if _leaf_names else np.zeros((h, w), bool)
+    _favg = None
+    if (_lm.any() or vmask.any()):
+        _favg = _tint_field_avg(_lut_field(biome_grid, pack["id2key"],
+                                           "foliage",
+                                           _jm2._BIOME_FOLIAGE_DEFAULT))
+    if _lm.any():
+        for _b in _leaf_names:
+            _mm = (nm == _b)
+            if not _mm.any():
+                continue
+            _base = colors.get(_b)
+            if _base is None:
+                continue
+            _n = _b.split(":")[-1]
+            _g = float(_base[1]) / 255.0
+            if _n in _jm2._LEAVES_NO_TINT:
+                _cc = np.array(_base, np.float32)          # 贴图原色
+            elif _n in _jm2._LEAVES_FIXED_TINT:
+                _tr, _tg, _tb = _jm2._LEAVES_FIXED_TINT[_n]
+                _cc = (np.array([_tr, _tg, _tb], np.float32) * _g
+                       * _jm2.FOLIAGE_BRIGHTNESS)
+            elif _n in _jm2._LEAVES_BIOME_TINT:
+                _cc = _favg.astype(np.float32) * _g * _jm2.FOLIAGE_BRIGHTNESS
+            else:
+                # 名单外：灰度图（R≈G≈B）才 tint，彩色贴图原色
+                _mx, _mn = max(_base), min(_base)
+                if (_mx - _mn) <= 8:
+                    _cc = _favg.astype(np.float32) * _g * _jm2.FOLIAGE_BRIGHTNESS
+                else:
+                    _cc = np.array(_base, np.float32)
+            _val = np.clip(np.round(_cc), 0, 255).astype(np.uint8)
+            if _val.ndim == 3:
+                _val = _val[_mm]
+            rgb[_mm] = _val
 
     # 植被植物 tint（26.2 官方 BlockColors.createDefault 实证）：
     #   LEAF_LITTER -> dryFoliage()（Biome.getDryFoliageColor L228-235：
@@ -900,33 +1027,16 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
     #   （jm_colors，无逐坐标 modifier，表驱动即可）。
     lmask = (nm == "minecraft:leaf_litter")
     if lmask.any():
-        from Utils.MapPreviewer import jm_colors as _jm3
         # 官方语义 final = dry_foliage 色 × leaf_litter 贴图灰度/255
         # （同 tinted_color 的 tint×gray 链；leaf_litter 灰度实测 170）。
+        # JM mapBlendFoliage：dry_foliage tint 25 点整除平均（过渡平滑）。
         _ll_base = colors.get("minecraft:leaf_litter")
         _llg = (float(_ll_base[1]) / 255.0) if _ll_base else (170.0 / 255.0)
-        _rows_l = np.nonzero(lmask.any(axis=1))[0]
-        _df_cache: dict[str, tuple] = {}
-        # 行遍历必须覆盖全部 4 对齐行块（_rows_l[::4] 是"有叶行列表每隔
-        # 4 个取 1"，叶行尾部不对齐 4 时末行漏染——全景实测残留 40 像素
-        # (169,169,169) 白点的根因）。
-        _rstarts = np.unique(_rows_l // 4) * 4
-        for _r in _rstarts:
-            if not lmask[_r:_r + 4].any():
-                continue
-            for _c in range(0, w, 4):
-                _bk = pack["id2key"].get(
-                    int(biome_grid[_r, _c]), "minecraft:plains"
-                ).split(":")[-1]
-                _cc = _df_cache.get(_bk)
-                if _cc is None:
-                    _raw = _jm3.tint_for_biome("dry_foliage", _bk)
-                    _cc = tuple(int(min(255, max(0, round(v * _llg))))
-                                for v in _raw)
-                    _df_cache[_bk] = _cc
-                _sub = lmask[_r:_r + 4, _c:_c + 4]
-                if _sub.any():
-                    rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
+        _davg = _tint_field_avg(_lut_field(biome_grid, pack["id2key"],
+                                           "dry_foliage",
+                                           _jm2._BIOME_DRY_FOLIAGE_DEFAULT))
+        rgb[lmask] = np.clip(np.round(_davg * _llg), 0,
+                             255).astype(np.uint8)[lmask]
     # 草色植物（官方 grass()/doubleTallGrass() 注册）：每种种自贴图灰度
     # （short_grass 145/fern 124/bush 120/tall_grass 149/large_fern 125，
     # 实测极差 0-2 纯灰度），复用 _grass_tint_by_biome（与 grass_block
@@ -943,40 +1053,26 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         rgb[_gm] = _gpt[_gm]
     # VINE（官方 foliage() 注册，BlockColors L34 = 与树叶同一
     # BlockTintSources.foliage L101-113）：贴图纯灰度（116,116,116 实测
-    # spread=0），乘群系 foliage tint × 自灰度。糖芦苇（sugarCane()=草色）、
+    # spread=0），乘群系 foliage tint × 自灰度。tint 用与树叶共享的
+    # 25 点平均场（JM mapBlendFoliage）。糖芦苇（sugarCane()=草色）、
     # lily_pad（常量两层，世界中 RGB(32,128,48)）、瓜茎（stem() 按 age）
     # 官方也有注册，但均不在本存档 block_names/jm_palette（顶面不存在），
     # 不触发渲染，注释备查。
-    vmask = (nm == "minecraft:vine")
     if vmask.any():
-        from Utils.MapPreviewer import jm_colors as _jm4
         _v_base = colors.get("minecraft:vine")
         _vg = (float(_v_base[1]) / 255.0) if _v_base else (116.0 / 255.0)
-        _rows_v = np.nonzero(vmask.any(axis=1))[0]
-        _fv_cache: dict[str, tuple] = {}
-        _vstarts = np.unique(_rows_v // 4) * 4
-        for _r in _vstarts:
-            if not vmask[_r:_r + 4].any():
-                continue
-            for _c in range(0, w, 4):
-                _bk = pack["id2key"].get(
-                    int(biome_grid[_r, _c]), "minecraft:plains"
-                ).split(":")[-1]
-                _cc = _fv_cache.get(_bk)
-                if _cc is None:
-                    _raw = _jm4.tint_for_biome("foliage", _bk)
-                    _cc = tuple(int(min(255, max(0, round(v * _vg))))
-                                for v in _raw)
-                    _fv_cache[_bk] = _cc
-                _sub = vmask[_r:_r + 4, _c:_c + 4]
-                if _sub.any():
-                    rgb[_r:_r + 4, _c:_c + 4][_sub] = _cc
+        if _favg is None:
+            _favg = _tint_field_avg(_lut_field(biome_grid, pack["id2key"],
+                                               "foliage",
+                                               _jm2._BIOME_FOLIAGE_DEFAULT))
+        rgb[vmask] = np.clip(np.round(_favg * _vg), 0,
+                             255).astype(np.uint8)[vmask]
 
 
-    # 草色 tint：按群系量化取色（同群系同色），不做逐点温湿度渐变。
-    # 逐点 tint 会让同一高度层出现上百种绿，画面破碎（实测同层 143 色）。
-    # swamp/mangrove_swamp 由 _grass_tint_by_biome 内部逐坐标复刻
-    # 官方 SWAMP modifier（噪声二值 + 5×5 平均），不再硬编码经验色。
+    # 草色 tint：JM mapBlendGrass（默认 true）——_grass_tint_by_biome
+    # 内部已完成 25 点整除平均（含 swamp 噪声色），群系边界线性过渡。
+    # 全平滑场不会画面破碎：box blur 是低通，同层内渐变受限于 25 点
+    # 邻域（此前"逐点温湿度渐变破碎"是无滤波的高频噪声，两回事）。
     gmask = np.isin(nm, list(_GRASS_BLOCKS))
     if gmask.any():
         _gt = _grass_tint_by_biome(biome_grid, pack, x0=x0, z0=z0)

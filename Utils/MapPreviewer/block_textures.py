@@ -52,6 +52,86 @@ _TEX_ALIAS = {
     "minecraft:mangrove_leaves": "mangrove_leaves",
     "minecraft:cherry_leaves": "cherry_leaves",
     "minecraft:azalea_leaves": "azalea_leaves",
+    # 26.2 jar 无独立贴图/改名：映射到视觉等价贴图，避免回退品红
+    "minecraft:bamboo": "bamboo_stalk",
+    "minecraft:moss_carpet": "moss_block",
+    "minecraft:bubble_column": "blue_ice",
+    "minecraft:pointed_dripstone": "pointed_dripstone_up_base",
+    "minecraft:smooth_sandstone": "sandstone_top",
+    "minecraft:smooth_sandstone_slab": "sandstone_top",
+    "minecraft:smooth_sandstone_stairs": "sandstone_top",
+    "minecraft:smooth_quartz_slab": "quartz_block_bottom",
+    "minecraft:smooth_quartz_stairs": "quartz_block_bottom",
+    "minecraft:campfire": "campfire_log_lit",
+    "minecraft:soul_campfire": "soul_campfire_log_lit",
+    "minecraft:frosted_ice": "ice",
+    "minecraft:grindstone": "grindstone_round",
+    "minecraft:dropper": "dropper_front",
+    "minecraft:command_block": "command_block_front",
+    "minecraft:chain_command_block": "command_block_conditional",
+    "minecraft:repeating_command_block": "command_block_back",
+    "minecraft:ender_chest": "obsidian",
+    "minecraft:trapped_chest": "oak_planks",
+    "minecraft:beehive": "beehive_front",
+    "minecraft:dried_kelp_block": "dried_kelp_top",
+    "minecraft:decorated_pot": "decorated_pot_side",
+    "minecraft:trial_spawner": "trial_spawner_side_inactive",
+    "minecraft:sniffer_egg": "sniffer_egg_not_cracked_top",
+    "minecraft:dried_ghast": "dried_ghast_hydration_0_top",
+    "minecraft:sulfur_spike": "sulfur_spike_up_base",
+    "minecraft:lava_cauldron": "cauldron_top",
+    "minecraft:powder_snow_cauldron": "cauldron_top",
+    "minecraft:smooth_quartz": "quartz_block_bottom",
+    "minecraft:smooth_red_sandstone": "red_sandstone_top",
+    "minecraft:smooth_red_sandstone_slab": "red_sandstone_top",
+    "minecraft:smooth_red_sandstone_stairs": "red_sandstone_top",
+    "minecraft:purpur_slab": "purpur_block",
+    "minecraft:purpur_stairs": "purpur_block",
+    "minecraft:petrified_oak_slab": "oak_planks",
+    "minecraft:infested_chiseled_stone_bricks": "chiseled_stone_bricks",
+    "minecraft:infested_cracked_stone_bricks": "cracked_stone_bricks",
+    "minecraft:infested_mossy_stone_bricks": "mossy_stone_bricks",
+    "minecraft:copper_chest": "copper_block",
+    "minecraft:exposed_copper_chest": "exposed_copper",
+    "minecraft:oxidized_copper_chest": "oxidized_copper",
+    "minecraft:weathered_copper_chest": "weathered_copper",
+    "minecraft:waxed_copper_chest": "copper_block",
+    "minecraft:waxed_exposed_copper_chest": "exposed_copper",
+    "minecraft:waxed_oxidized_copper_chest": "oxidized_copper",
+    "minecraft:waxed_weathered_copper_chest": "weathered_copper",
+    "minecraft:copper_golem_statue": "copper_block",
+    "minecraft:exposed_copper_golem_statue": "exposed_copper",
+    "minecraft:oxidized_copper_golem_statue": "oxidized_copper",
+    "minecraft:weathered_copper_golem_statue": "weathered_copper",
+    "minecraft:waxed_copper_golem_statue": "copper_block",
+    "minecraft:waxed_exposed_copper_golem_statue": "exposed_copper",
+    "minecraft:waxed_oxidized_copper_golem_statue": "oxidized_copper",
+    "minecraft:waxed_weathered_copper_golem_statue": "weathered_copper",
+    "minecraft:decorated_pot": "terracotta",
+    "minecraft:test_block": "test_block_accept",
+    "minecraft:candle_cake": "cake_top",
+    "minecraft:white_candle_cake": "cake_top",
+    "minecraft:orange_candle_cake": "cake_top",
+    "minecraft:magenta_candle_cake": "cake_top",
+    "minecraft:light_blue_candle_cake": "cake_top",
+    "minecraft:yellow_candle_cake": "cake_top",
+    "minecraft:lime_candle_cake": "cake_top",
+    "minecraft:pink_candle_cake": "cake_top",
+    "minecraft:gray_candle_cake": "cake_top",
+    "minecraft:light_gray_candle_cake": "cake_top",
+    "minecraft:cyan_candle_cake": "cake_top",
+    "minecraft:purple_candle_cake": "cake_top",
+    "minecraft:blue_candle_cake": "cake_top",
+    "minecraft:brown_candle_cake": "cake_top",
+    "minecraft:green_candle_cake": "cake_top",
+    "minecraft:red_candle_cake": "cake_top",
+    "minecraft:black_candle_cake": "cake_top",
+    "minecraft:suspicious_gravel": "suspicious_gravel_0",
+    "minecraft:suspicious_sand": "suspicious_sand_0",
+    "minecraft:infested_stone": "stone",
+    "minecraft:infested_deepslate": "deepslate",
+    "minecraft:infested_cobblestone": "cobblestone",
+    "minecraft:infested_stone_bricks": "stone_bricks",
     # 结构材质：MC 无同名贴图，映射到视觉等价基材
     "minecraft:brick_stairs": "bricks",
     "minecraft:stone_brick_stairs": "stone_bricks",
@@ -108,6 +188,7 @@ _TEX_ALIAS = {
     "minecraft:repeater": "repeater",
     "minecraft:brewing_stand": "brewing_stand",
     "minecraft:water_cauldron": "cauldron_side",
+    "minecraft:cauldron": "cauldron_side",
     "minecraft:sticky_piston": "piston_top",
     "minecraft:piston_head": "piston_top",
     "minecraft:oak_wall_sign": "oak_planks",
@@ -117,6 +198,7 @@ _TEX_ALIAS = {
     "minecraft:lever": "lever",
     "minecraft:structure_block": "structure_block",
     "minecraft:potted_cactus": "dirt",
+    "minecraft:potted_red_mushroom": "red_mushroom",
     # 楼梯/台阶/栅栏/作物：贴图名与方块名不同（带 _top / 复数等）
     "minecraft:oak_stairs": "oak_planks",
     "minecraft:spruce_stairs": "spruce_planks",
@@ -141,6 +223,26 @@ _TEX_ALIAS = {
     "minecraft:air": "air",
     "minecraft:flowering_azalea_leaves": "flowering_azalea_leaves",
 }
+
+# 循环补齐的家族映射（写循环避免手抄 40+ 条错色）：
+#   - 横幅：1.20+ 的 banner 无独立彩色贴图（entity/banner 只有通用底布 +
+#     shader 染色），布色 = 染料色 → 映射同染料色羊毛（structure_render
+#     末地城横幅同思路）。俯视图一格看，横幅顶面就是布色。
+#   - 珊瑚墙扇：无独立 wall_fan 贴图（模型复用 *_coral_fan.png），映射
+#     对应 fan 贴图；dead_* 变体同构。
+#   - 作物：贴图带 stage 后缀（potatoes_stage0..3），顶面取成熟期
+#     stage3（与 wheat → wheat_stage7 同法）。
+for _c in ("white", "orange", "magenta", "light_blue", "yellow", "lime",
+           "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown",
+           "green", "red", "black"):
+    _TEX_ALIAS["minecraft:%s_banner" % _c] = "%s_wool" % _c
+    _TEX_ALIAS["minecraft:%s_wall_banner" % _c] = "%s_wool" % _c
+for _c in ("tube", "brain", "bubble", "fire", "horn",
+           "dead_tube", "dead_brain", "dead_bubble", "dead_fire", "dead_horn"):
+    _TEX_ALIAS["minecraft:%s_coral_wall_fan" % _c] = "%s_coral_fan" % _c
+_TEX_ALIAS["minecraft:potatoes"] = "potatoes_stage3"
+_TEX_ALIAS["minecraft:carrots"] = "carrots_stage3"
+_TEX_ALIAS["minecraft:beetroots"] = "beetroots_stage3"
 
 # 需要按群系 tint 上色的灰度贴图（MC 的 grass/leaves 是灰图 + tint）
 _GRAYSCALE_TINT = {
@@ -198,6 +300,10 @@ def build_atlas(block_names: list[str], version: str = "26.2") -> dict:
     out = {}
     for nm in block_names:
         short = nm.split(":")[-1]
+        # waxed_ 前缀尽早剥离：铜门/铜台阶等回退链全程用无蜡名字，
+        # 否则 base 里带着 waxed_ 导致所有候选都加载失败
+        if short.startswith("waxed_"):
+            short = short[len("waxed_"):]
         tex = _TEX_ALIAS.get(nm, short)
         # 26.2 铜系贴图不再带 waxed_ 前缀
         if tex.startswith("waxed_"):
@@ -212,15 +318,19 @@ def build_atlas(block_names: list[str], version: str = "26.2") -> dict:
         if rgb is None:
             # 楼梯/台阶/墙/栅栏等**没有独立贴图**，回退到基材：
             # dark_oak_stairs -> dark_oak_planks -> dark_oak
-            for suf in ("_stairs", "_slab", "_wall", "_fence_gate",
-                        "_trapdoor", "_button", "_pressure_plate",
-                        "_door", "_sign", "_wall_sign", "_carpet",
-                        "_glazed_terracotta", "_bulb", "_grate",
-                        "_chain", "_lamp", "_torch", "_bed"):
+            # 后缀按长度降序匹配：否则 "_sign" 会抢在 "_wall_sign" 前面，
+            # 把 base 抢成 "acacia_wall" 导致全部墙牌解析失败
+            for suf in ("_wall_hanging_sign", "_pressure_plate",
+                        "_glazed_terracotta", "_wall_sign", "_fence_gate",
+                        "_stairs", "_trapdoor", "_button", "_carpet",
+                        "_slab", "_wall", "_door", "_sign", "_chain",
+                        "_lamp", "_torch", "_bulb", "_grate", "_bed",
+                        "_wood", "_fence", "_hyphae"):
                 if short.endswith(suf):
                     base = short[:-len(suf)]
                     for alt in (base + "_planks", base + "s", base + "_top",
-                                base + "_side", base,
+                                base + "_side", base + "_log", base + "_stem",
+                                base + "_wool", base,
                                 base.replace("cracked_", "") + "_bricks",
                                 base.replace("chiseled_", "") + "_bricks",
                                 base.replace("polished_", "") + "_bricks"):

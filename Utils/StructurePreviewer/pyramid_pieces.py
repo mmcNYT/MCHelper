@@ -172,9 +172,11 @@ def _segs(sim: "_Sim", mat: str, kind: str, n: bool = False,
 class _Sim:
     """单结构的 postProcess 模拟器（体素 + RNG 流同步推进）。"""
 
-    def __init__(self, salt_key: str, world_seed: int,
+    def __init__(self, salt_key: str | None, world_seed: int,
                  ax: int, az: int, facing: int,
                  width: int, depth: int) -> None:
+        """salt_key=None 时（官方 postProcess 无 RNG 消耗的结构，
+        如女巫小屋）不建 RNG 流，self.rng 恒为 None。"""
         self.voxels: dict = {}
         self.chests: list = []            # (世界 wx, 世界 wz, y_local, table, seed)
         self.ax = ax
@@ -187,6 +189,9 @@ class _Sim:
             self.max_x, self.max_z = width - 1, depth - 1
         else:                             # E/W：交换
             self.max_x, self.max_z = depth - 1, width - 1
+        if salt_key is None:
+            self.rng = None
+            return
         step, decorator = loot_rng.salt_configs_for_version("1.21")[salt_key]
         pop = loot_rng.get_population_seed(world_seed, ax, az)
         self.rng = loot_rng.XoroshiroJava(
@@ -702,6 +707,69 @@ def _sim_jungle(world_seed: int, ax: int, az: int, facing: int) -> _Sim:
     s.place(10, -2, 10, (REPEATER, "repeater:" + s.facing_of("n")))
     # L202-204：暗箱（1 nextLong）
     s.create_chest(9, -3, 10, "chests/jungle_temple")
+    return s
+
+
+# ---------------------------------------------------------------------------
+# swamp_hut（26.2 SwampHutPiece L56-95 逐行转写；a=7、c=9）
+# ---------------------------------------------------------------------------
+
+def _sim_hut(world_seed: int, ax: int, az: int, facing: int) -> _Sim:
+    """女巫小屋 postProcess 模拟（26.2 未混淆源码权威）。
+
+    L56 updateAverageGroundHeight(level, chunkBB, 0) 为纯几何（同
+    丛林神庙，无 RNG）；主体无箱子/无机关、方块全部静态摆放 ->
+    _Sim 不建 RNG 流（salt_key=None）。楼梯为固定 BlockState 局部
+    朝向（官方 north/east/west/southStairs）经 setOrientation
+    mirror+rotate 净变换（_STAIRS_MAP，同丛林/沙漠定案）；四角
+    OUTER_LEFT/RIGHT 形状码不影响俯视顶面色，按直线楼梯转写。
+    L91-95 fillColumnDown 从 y=-1 向下找地面：预览画 y=-1 单层
+    （世界 hp-1，恒被竞争淘汰，仅完整性）。
+    """
+    s = _Sim(None, world_seed, ax, az, facing, 7, 9)
+    PL, LOG, FENCE, AIR = "spruce planks", "oak log", "oak fence", None
+    ST = "spruce stairs"
+    # L57：地板 y=1（x1..5, z1..7）
+    s.fill_hollow(1, 1, 1, 5, 1, 7, PL, PL)
+    # L58：屋顶平台 y=4（x1..5, z2..7）
+    s.fill_hollow(1, 4, 2, 5, 4, 7, PL, PL)
+    # L59：门廊台阶（x2..4, y1, z=0）
+    s.fill_hollow(2, 1, 0, 4, 1, 0, PL, PL)
+    # L60-63：墙体四段（北墙 x2..3 / 西墙 x=1 / 东墙 x=5 / 南墙 z=7）
+    s.fill_hollow(2, 2, 2, 3, 3, 2, PL, PL)
+    s.fill_hollow(1, 2, 3, 1, 3, 6, PL, PL)
+    s.fill_hollow(5, 2, 3, 5, 3, 6, PL, PL)
+    s.fill_hollow(2, 2, 7, 4, 3, 7, PL, PL)
+    # L64-67：四根橡木柱（角上，y0..3）
+    s.fill_hollow(1, 0, 2, 1, 3, 2, LOG, LOG)
+    s.fill_hollow(5, 0, 2, 5, 3, 2, LOG, LOG)
+    s.fill_hollow(1, 0, 7, 1, 3, 7, LOG, LOG)
+    s.fill_hollow(5, 0, 7, 5, 3, 7, LOG, LOG)
+    # L68-77：栅栏/窗洞 AIR/盆栽/工作台/干锅（官方同序，后写覆盖）
+    s.place(2, 3, 2, FENCE)
+    s.place(3, 3, 7, FENCE)
+    s.place(1, 3, 4, AIR)
+    s.place(5, 3, 4, AIR)
+    s.place(5, 3, 5, AIR)
+    s.place(1, 3, 5, "potted red mushroom")
+    s.place(3, 2, 6, "crafting table")
+    s.place(4, 2, 6, "cauldron")
+    s.place(1, 2, 1, FENCE)
+    s.place(5, 2, 1, FENCE)
+    # L82-85：屋檐楼梯圈 y=4（局部朝向净变换；官方为面向屋内的
+    # 固定 BlockState）
+    for dx in range(0, 7):
+        s.stairs(dx, 4, 1, "n", ST)
+    for dz in range(2, 8):
+        s.stairs(0, 4, dz, "e", ST)
+        s.stairs(6, 4, dz, "w", ST)
+    for dx in range(0, 7):
+        s.stairs(dx, 4, 8, "s", ST)
+    # L86-89：四角 OUTER 形状覆盖——形状不影响俯视配色，
+    # 与 L82/85 同位同 quad，转写省略。
+    # L91-95：四柱下探（官方 fillColumnDown(x, -1, z)）
+    for dx, dz in ((1, 2), (5, 2), (1, 7), (5, 7)):
+        s.place(dx, -1, dz, LOG)
     return s
 
 
