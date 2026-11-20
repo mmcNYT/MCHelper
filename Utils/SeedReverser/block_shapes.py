@@ -1216,9 +1216,12 @@ def shape_boxes(shape: str | None) -> tuple:
         # 滴水石锥：cross 十字片（同 plant，无碰撞无遮挡）
         return ()
     if kind == "pickle":
-        # 海泡菜：3D 立体模型（build_mesh 专用 quad 路径：主体盒 +
-        # 顶盖 + 45° 细杆），无碰撞无遮挡
-        return ()
+        # 海泡菜：官方 SeaPickleBlock 只重写 getShape（碰撞箱 4x4 柱
+        # SHAPE_ONE=Block.column(4,0,6) 等），getOcclusionShape 未重写
+        # —— 用 BlockBehaviour 默认 Shapes.block()（**整格遮挡**）。虽
+        # 视觉只占中心 4x4，但逻辑整格遮挡：相邻面全剔（与 MC 一致，
+        # 避免周围透视看到下方方块）。剔除盒给整格。
+        return ((0.0, 0.0, 0.0, 1.0, 1.0, 1.0),)
     if kind == "cross":
         # 落地告示牌：十字交叉板近似（AABB 无法表达斜板）
         return ((7 * _E, 0.0, 0.0, 9 * _E, 0.8, 1.0),
