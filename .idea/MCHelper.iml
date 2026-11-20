@@ -38,6 +38,11 @@
       <excludeFolder url="file://$MODULE_DIR$/.temp/backup_uvcheck_20261015-220317" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/mc262_decompile" />
       <excludeFolder url="file://$MODULE_DIR$/.temp/biome_check" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/biome_check_old" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/jm_decomp" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/jm_decomp_in" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/noise_check" />
+      <excludeFolder url="file://$MODULE_DIR$/.temp/rp_verify" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (MCHelper)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

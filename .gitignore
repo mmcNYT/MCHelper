@@ -43,3 +43,6 @@ Utils/Public/map_render/_native/*.lib
 Utils/Public/map_render/_native/*.pdb
 Utils/Public/map_render/_native/*.pyd
 Utils/Public/map_render/_native/_build_*_log.txt
+
+# 旧渲染备份目录（2026-11-18 手工备份，不入库）
+/.backup_render_*/
