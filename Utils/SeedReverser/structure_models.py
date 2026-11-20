@@ -3924,6 +3924,7 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 continue
             if kind == "fluid":
                 # 流体（water/lava）：顶面高度 + 4 角斜角 + 侧面（带面剔除）
+                # 按 MC 官方 FluidRenderer.calculateAverageHeight 算法
                 # shape_rest = "<level>:<type>"（level=0 源、1-7 流动、8 下落）
                 parts = shape_rest.split(":")
                 level = int(parts[0]) if parts[0].isdigit() else 0
@@ -3934,40 +3935,97 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 else:
                     h_self = (8 - level) / 8.0
                 
-                # 计算顶面 4 角高度（MC 官方算法：每角取该角相邻流体的最大高度）
+                # 获取 4 个方向邻居的高度
+                h_north = h_self  # -z
+                h_south = h_self  # +z
+                h_west = h_self   # -x
+                h_east = h_self   # +x
+                
+                for dx, dz, attr in [(0, -1, "h_north"), (0, 1, "h_south"), 
+                                      (-1, 0, "h_west"), (1, 0, "h_east")]:
+                    nb_pos = (x + dx, y, z + dz)
+                    nb_v = vox.get(nb_pos)
+                    if nb_v is not None:
+                        nb_info = v_ms.get(nb_v)
+                        if nb_info is None:
+                            nb_info = v_ms[nb_v] = _mat_shape(nb_v)
+                        nb_mat, nb_shape = nb_info
+                        # 同种流体
+                        if nb_shape and nb_shape.startswith("fluid:"):
+                            nb_parts = nb_shape.split(":")
+                            nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
+                            if nb_type == ftype:
+                                nb_level = int(nb_parts[1]) if nb_parts[1].isdigit() else 0
+                                if nb_level == 0 or nb_level >= 8:
+                                    nb_h = 1.0
+                                else:
+                                    nb_h = (8 - nb_level) / 8.0
+                                if attr == "h_north":
+                                    h_north = nb_h
+                                elif attr == "h_south":
+                                    h_south = nb_h
+                                elif attr == "h_west":
+                                    h_west = nb_h
+                                elif attr == "h_east":
+                                    h_east = nb_h
+                
+                # 计算顶面 4 角高度（MC 算法：加权平均）
                 # 角 (cx,cz) ∈ {0,1}×{0,1}
+                # (0,0)=西北角(-x,-z), (0,1)=西南角(-x,+z)
+                # (1,0)=东北角(+x,-z), (1,1)=东南角(+x,+z)
                 corner_h = {}
-                for ccx in (0, 1):
-                    for ccz in (0, 1):
-                        # 该角相邻的流体块（包括自身 + 直接相邻的 2 个方向）
-                        max_h = h_self  # 至少是自身高度
-                        # 检查该角连接的 2 个直接邻居（非对角）
-                        # 角(0,0) 连接 -x 和 -z；角(1,0) 连接 +x 和 -z；以此类推
-                        for dx, dz in [(-ccx, -ccz), (-ccx, 1-ccz), (1-ccx, -ccz), (1-ccx, 1-ccz)]:
-                            # 只检查直接相邻（dx 或 dz 为 0，另一个为 ±1）
-                            if dx != 0 and dz != 0:
-                                continue
-                            if dx == 0 and dz == 0:
-                                continue
-                            nb_pos = (x + dx, y, z + dz)
-                            nb_v = vox.get(nb_pos)
-                            if nb_v is not None:
-                                nb_info = v_ms.get(nb_v)
-                                if nb_info is None:
-                                    nb_info = v_ms[nb_v] = _mat_shape(nb_v)
-                                nb_mat, nb_shape = nb_info
-                                # 同种流体（材质 + shape kind 都是 fluid + type 一致）
-                                if nb_shape and nb_shape.startswith("fluid:"):
-                                    nb_parts = nb_shape.split(":")
-                                    nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
-                                    if nb_type == ftype:
-                                        nb_level = int(nb_parts[1]) if nb_parts[1].isdigit() else 0
-                                        if nb_level == 0 or nb_level >= 8:
-                                            nb_h = 1.0
-                                        else:
-                                            nb_h = (8 - nb_level) / 8.0
-                                        max_h = max(max_h, nb_h)
-                        corner_h[(ccx, ccz)] = max_h
+                
+                def add_weighted_height(weighted, height):
+                    """MC 官方加权规则：高度≥0.8 权重=10，其他权重=1"""
+                    if height >= 0.8:
+                        weighted[0] += height * 10.0
+                        weighted[1] += 10.0
+                    elif height >= 0.0:
+                        weighted[0] += height
+                        weighted[1] += 1.0
+                
+                def calc_corner_height(h1, h2, corner_dx, corner_dz):
+                    """计算角高度（MC calculateAverageHeight 算法）"""
+                    # 如果任一边≥1.0，角高度=1.0
+                    if h1 >= 1.0 or h2 >= 1.0:
+                        return 1.0
+                    
+                    weighted = [0.0, 0.0]
+                    # 角对角位置的流体高度
+                    if h1 > 0.0 or h2 > 0.0:
+                        corner_pos = (x + corner_dx, y, z + corner_dz)
+                        corner_v = vox.get(corner_pos)
+                        if corner_v:
+                            corner_info = v_ms.get(corner_v)
+                            if corner_info is None:
+                                corner_info = v_ms[corner_v] = _mat_shape(corner_v)
+                            corner_mat, corner_shape = corner_info
+                            if corner_shape and corner_shape.startswith("fluid:"):
+                                corner_parts = corner_shape.split(":")
+                                corner_type = corner_parts[2] if len(corner_parts) > 2 else ""
+                                if corner_type == ftype:
+                                    corner_level = int(corner_parts[1]) if corner_parts[1].isdigit() else 0
+                                    if corner_level == 0 or corner_level >= 8:
+                                        corner_h_val = 1.0
+                                    else:
+                                        corner_h_val = (8 - corner_level) / 8.0
+                                    if corner_h_val >= 1.0:
+                                        return 1.0
+                                    add_weighted_height(weighted, corner_h_val)
+                    
+                    add_weighted_height(weighted, h_self)
+                    add_weighted_height(weighted, h1)
+                    add_weighted_height(weighted, h2)
+                    
+                    if weighted[1] > 0:
+                        return weighted[0] / weighted[1]
+                    return h_self
+                
+                # 4 个角：西北、东北、西南、东南
+                corner_h[(0, 0)] = calc_corner_height(h_west, h_north, -1, -1)   # 西北
+                corner_h[(1, 0)] = calc_corner_height(h_east, h_north, 1, -1)    # 东北
+                corner_h[(0, 1)] = calc_corner_height(h_west, h_south, -1, 1)    # 西南
+                corner_h[(1, 1)] = calc_corner_height(h_east, h_south, 1, 1)     # 东南
                 
                 # 检查上方是否为同种流体（决定是否绘制顶面）
                 above_v = vox.get((x, y + 1, z))
