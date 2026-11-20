@@ -198,12 +198,12 @@ _MAT_MAP = {
         "chiseled polished blackstone",
     "minecraft:polished_blackstone": "polished blackstone",
     "minecraft:chiseled_deepslate": "chiseled deepslate",
-    "minecraft:andesite": "polished andesite",
+    "minecraft:andesite": "andesite",
     "minecraft:polished_andesite": "polished andesite",
-    "minecraft:diorite": "polished diorite",
+    "minecraft:diorite": "diorite",
     "minecraft:polished_diorite": "polished diorite",
     "minecraft:granite": "granite",
-    "minecraft:polished_granite": "granite",
+    "minecraft:polished_granite": "polished granite",
     # -- 石材楼梯/台阶（半高）/墙 --
     "minecraft:stone_brick_stairs": "halfheight:stone brick stairs",
     "minecraft:polished_blackstone_brick_stairs":
