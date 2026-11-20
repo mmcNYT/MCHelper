@@ -3923,191 +3923,176 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV)
                 continue
             if kind == "fluid":
-                # 流体（water/lava）：顶面高度 + 4 角斜角 + 侧面（带面剔除）
-                # 按 MC 官方 FluidRenderer.calculateAverageHeight 算法
-                # shape_rest = "<level>:<type>"（level=0 源、1-7 流动、8 下落）
+                # 流体（water/lava）精确渲染 —— 逐条对齐 MC 26.2 官方
+                # FluidRenderer（.temp/mc262_decompile 反编译源码）：
+                # - ownHeight = amount/9：源/下落 = 8/9 ≈ 0.889（即
+                #   MAX_FLUID_HEIGHT），流动 level1-7 = (8-level)/9
+                # - getHeight：同种流体 = ownHeight（其上方也是同种
+                #   流体 → 1.0 水柱满格）；非流体邻居：非实心 → 0.0、
+                #   整格实心 → -1.0（-1.0 不进加权平均）——这保证相邻
+                #   两块对共享角的加权集合恒相同 → 流体无缝连续
+                # - 角高 = calculateAverageHeight：自身 + 两边邻 + 对角
+                #   流体的加权平均（高度≥0.8 权重 10，否则 1）
+                # - 顶面四角 -0.001、侧面水平内缩 0.001、底面 +0.001
+                #   （MC offs/bottomOffs，防共面闪烁）
+                # - 顶面绕序俯视 CCW（SW→SE→NE→NW，对齐 _FACES "+y"），
+                #   侧面/底面沿用 _FACES 既有绕序
+                # shape_rest = "<level>:<type>"（0 源、1-7 流动、8+ 下落）
                 parts = shape_rest.split(":")
                 level = int(parts[0]) if parts[0].isdigit() else 0
                 ftype = parts[1] if len(parts) > 1 else "water"
-                # 自身流体高度（Java 版公式：源/下落=1.0，流动=(8-level)/8）
-                if level == 0 or level >= 8:
-                    h_self = 1.0
+
+                def _f_info(vv):
+                    info = v_ms.get(vv)
+                    if info is None:
+                        info = v_ms[vv] = _mat_shape(vv)
+                    return info
+
+                def _same_fluid(vv):
+                    if vv is None:
+                        return False
+                    s = _f_info(vv)[1]
+                    return (bool(s) and s.startswith("fluid:")
+                            and s.split(":")[2] == ftype)
+
+                def _full_solid(vv):
+                    # ≈ MC getFaceOcclusionShape()==block：整格实心非
+                    # 透明（玻璃/树叶等 faceOcclusion=empty 不遮挡）
+                    if vv is None:
+                        return False
+                    m, s = _f_info(vv)
+                    return (s is None and m not in _TRANSPARENT_MATS
+                            and m not in _TRANSLUCENT_MATS)
+
+                def _own_height(s):
+                    lv = int(s.split(":")[1]) \
+                        if s.split(":")[1].isdigit() else 0
+                    amt = 8 if (lv == 0 or lv >= 8) else 8 - lv
+                    return amt / 9.0
+
+                def _get_height(p):
+                    # MC FluidRenderer.getHeight（414-421 行）
+                    vv = vox.get(p)
+                    if _same_fluid(vv):
+                        above = vox.get((p[0], p[1] + 1, p[2]))
+                        if _same_fluid(above):
+                            return 1.0
+                        return _own_height(_f_info(vv)[1])
+                    return -1.0 if _full_solid(vv) else 0.0
+
+                h_self = _get_height((x, y, z))
+                if h_self >= 1.0:
+                    # 水柱中层（上方也是同种流体）：四角满格、顶面不画
+                    # （源码 95-99 行；renderUp 亦为 false）
+                    h_nw = h_sw = h_se = h_ne = 1.0
+                    render_up = False
                 else:
-                    h_self = (8 - level) / 8.0
-                
-                # 获取 4 个方向邻居的高度
-                h_north = h_self  # -z
-                h_south = h_self  # +z
-                h_west = h_self   # -x
-                h_east = h_self   # +x
-                
-                for dx, dz, attr in [(0, -1, "h_north"), (0, 1, "h_south"), 
-                                      (-1, 0, "h_west"), (1, 0, "h_east")]:
-                    nb_pos = (x + dx, y, z + dz)
-                    nb_v = vox.get(nb_pos)
-                    if nb_v is not None:
-                        nb_info = v_ms.get(nb_v)
-                        if nb_info is None:
-                            nb_info = v_ms[nb_v] = _mat_shape(nb_v)
-                        nb_mat, nb_shape = nb_info
-                        # 同种流体
-                        if nb_shape and nb_shape.startswith("fluid:"):
-                            nb_parts = nb_shape.split(":")
-                            nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
-                            if nb_type == ftype:
-                                nb_level = int(nb_parts[1]) if nb_parts[1].isdigit() else 0
-                                if nb_level == 0 or nb_level >= 8:
-                                    nb_h = 1.0
-                                else:
-                                    nb_h = (8 - nb_level) / 8.0
-                                if attr == "h_north":
-                                    h_north = nb_h
-                                elif attr == "h_south":
-                                    h_south = nb_h
-                                elif attr == "h_west":
-                                    h_west = nb_h
-                                elif attr == "h_east":
-                                    h_east = nb_h
-                
-                # 计算顶面 4 角高度（MC 算法：加权平均）
-                # 角 (cx,cz) ∈ {0,1}×{0,1}
-                # (0,0)=西北角(-x,-z), (0,1)=西南角(-x,+z)
-                # (1,0)=东北角(+x,-z), (1,1)=东南角(+x,+z)
-                corner_h = {}
-                
-                def add_weighted_height(weighted, height):
-                    """MC 官方加权规则：高度≥0.8 权重=10，其他权重=1"""
-                    if height >= 0.8:
-                        weighted[0] += height * 10.0
-                        weighted[1] += 10.0
-                    elif height >= 0.0:
-                        weighted[0] += height
-                        weighted[1] += 1.0
-                
-                def calc_corner_height(h1, h2, corner_dx, corner_dz):
-                    """计算角高度（MC calculateAverageHeight 算法）"""
-                    # 如果任一边≥1.0，角高度=1.0
-                    if h1 >= 1.0 or h2 >= 1.0:
-                        return 1.0
-                    
-                    weighted = [0.0, 0.0]
-                    # 角对角位置的流体高度
-                    if h1 > 0.0 or h2 > 0.0:
-                        corner_pos = (x + corner_dx, y, z + corner_dz)
-                        corner_v = vox.get(corner_pos)
-                        if corner_v:
-                            corner_info = v_ms.get(corner_v)
-                            if corner_info is None:
-                                corner_info = v_ms[corner_v] = _mat_shape(corner_v)
-                            corner_mat, corner_shape = corner_info
-                            if corner_shape and corner_shape.startswith("fluid:"):
-                                corner_parts = corner_shape.split(":")
-                                corner_type = corner_parts[2] if len(corner_parts) > 2 else ""
-                                if corner_type == ftype:
-                                    corner_level = int(corner_parts[1]) if corner_parts[1].isdigit() else 0
-                                    if corner_level == 0 or corner_level >= 8:
-                                        corner_h_val = 1.0
-                                    else:
-                                        corner_h_val = (8 - corner_level) / 8.0
-                                    if corner_h_val >= 1.0:
-                                        return 1.0
-                                    add_weighted_height(weighted, corner_h_val)
-                    
-                    add_weighted_height(weighted, h_self)
-                    add_weighted_height(weighted, h1)
-                    add_weighted_height(weighted, h2)
-                    
-                    if weighted[1] > 0:
-                        return weighted[0] / weighted[1]
-                    return h_self
-                
-                # 4 个角：西北、东北、西南、东南
-                corner_h[(0, 0)] = calc_corner_height(h_west, h_north, -1, -1)   # 西北
-                corner_h[(1, 0)] = calc_corner_height(h_east, h_north, 1, -1)    # 东北
-                corner_h[(0, 1)] = calc_corner_height(h_west, h_south, -1, 1)    # 西南
-                corner_h[(1, 1)] = calc_corner_height(h_east, h_south, 1, 1)     # 东南
-                
-                # 检查上方是否为同种流体（决定是否绘制顶面）
-                above_v = vox.get((x, y + 1, z))
-                above_is_same_fluid = False
-                if above_v is not None:
-                    above_info = v_ms.get(above_v)
-                    if above_info is None:
-                        above_info = v_ms[above_v] = _mat_shape(above_v)
-                    above_mat, above_shape = above_info
-                    if above_shape and above_shape.startswith("fluid:"):
-                        above_parts = above_shape.split(":")
-                        above_type = above_parts[2] if len(above_parts) > 2 else ""
-                        above_is_same_fluid = (above_type == ftype)
-                
-                # 顶面 quad（4 角高度构成斜角平面），仅当上方非同种流体时绘制
-                if not above_is_same_fluid:
-                    top_verts = (
-                        (0.0, corner_h[(0, 0)], 0.0),
-                        (1.0, corner_h[(1, 0)], 0.0),
-                        (1.0, corner_h[(1, 1)], 1.0),
-                        (0.0, corner_h[(0, 1)], 1.0),
-                    )
-                    _emit_quad(arr, idx, x, y, z, top_verts, (0, 1, 0), None)
-                
-                # 4 侧面（从 y=0 到顶边 2 角高度），带面剔除
-                for face_name, (normal, _) in _FACES.items():
-                    if face_name != "+y" and face_name != "-y":
-                        # 提取该面的 2 个顶角索引
-                        face_verts = _FACES[face_name][1]
-                        nx, ny, nz = normal
-                        nb_pos = (x + nx, y, z + nz)
-                        nb_v = vox.get(nb_pos)
-                        
-                        # 检查是否为同种流体（剔除共享侧面）
-                        nb_is_same_fluid = False
-                        if nb_v is not None:
-                            nb_info = v_ms.get(nb_v)
-                            if nb_info is None:
-                                nb_info = v_ms[nb_v] = _mat_shape(nb_v)
-                            nb_mat, nb_shape = nb_info
-                            if nb_shape and nb_shape.startswith("fluid:"):
-                                nb_parts = nb_shape.split(":")
-                                nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
-                                nb_is_same_fluid = (nb_type == ftype)
-                        
-                        # 仅当相邻非同种流体时绘制侧面
-                        if not nb_is_same_fluid:
-                            # 侧面 quad：底面 2 点 + 顶面 2 点（按角高度）
-                            side_verts = []
-                            for fv in face_verts:
-                                vx, vy, vz = fv
-                                # 映射到该面的 2 个角（cx,cz）
-                                cx = int(vx) if vx in (0, 1) else (1 if vx > 0.5 else 0)
-                                cz = int(vz) if vz in (0, 1) else (1 if vz > 0.5 else 0)
-                                corner_y = corner_h.get((cx, cz), h_self)
-                                if vy < 0.5:  # 底面
-                                    side_verts.append((vx, 0.0, vz))
-                                else:  # 顶面
-                                    side_verts.append((vx, corner_y, vz))
-                            _emit_quad(arr, idx, x, y, z, side_verts, normal, None)
-                
-                # 底面（-y，如果下方非流体）
-                below_v = vox.get((x, y - 1, z))
-                below_is_fluid = False
-                if below_v is not None:
-                    below_info = v_ms.get(below_v)
-                    if below_info is None:
-                        below_info = v_ms[below_v] = _mat_shape(below_v)
-                    below_mat, below_shape = below_info
-                    if below_shape and below_shape.startswith("fluid:"):
-                        below_parts = below_shape.split(":")
-                        below_type = below_parts[2] if len(below_parts) > 2 else ""
-                        below_is_fluid = (below_type == ftype)
-                if not below_is_fluid:
-                    # 底面 quad（y=0，法线向下）
-                    bottom_verts = (
-                        (0.0, 0.0, 0.0),
-                        (1.0, 0.0, 0.0),
-                        (1.0, 0.0, 1.0),
-                        (0.0, 0.0, 1.0),
-                    )
-                    _emit_quad(arr, idx, x, y, z, bottom_verts, (0, -1, 0), None)
+                    h_n = _get_height((x, y, z - 1))
+                    h_s = _get_height((x, y, z + 1))
+                    h_e = _get_height((x + 1, y, z))
+                    h_w = _get_height((x - 1, y, z))
+
+                    def _add_w(w, h):
+                        # MC addWeightedHeight（399-407 行）：
+                        # ≥0.8 权重 10，否则 1；-1.0（实心）不参与
+                        if h >= 0.8:
+                            w[0] += h * 10.0
+                            w[1] += 10.0
+                        elif h >= 0.0:
+                            w[0] += h
+                            w[1] += 1.0
+
+                    def _avg(h2, h1, cp):
+                        # MC calculateAverageHeight（376-397 行）：
+                        # h1/h2 = 两个边邻，cp = 对角格
+                        if h1 >= 1.0 or h2 >= 1.0:
+                            return 1.0
+                        w = [0.0, 0.0]
+                        if h1 > 0.0 or h2 > 0.0:
+                            hc = _get_height(cp)
+                            if hc >= 1.0:
+                                return 1.0
+                            _add_w(w, hc)
+                        _add_w(w, h_self)
+                        _add_w(w, h1)
+                        _add_w(w, h2)
+                        return w[0] / w[1] if w[1] > 0.0 else h_self
+
+                    # NE=north.east、NW=north.west、SE=south.east、
+                    # SW=south.west（源码 105-116 行调用序）
+                    h_ne = _avg(h_n, h_e, (x + 1, y, z - 1))
+                    h_nw = _avg(h_n, h_w, (x - 1, y, z - 1))
+                    h_se = _avg(h_s, h_e, (x + 1, y, z + 1))
+                    h_sw = _avg(h_s, h_w, (x - 1, y, z + 1))
+                    render_up = True
+
+                # 顶面（源码 124-195 行）：上方非同种流体才画；四角
+                # -0.001 防共面
+                if render_up:
+                    h_nw -= 0.001
+                    h_sw -= 0.001
+                    h_se -= 0.001
+                    h_ne -= 0.001
+                    # 绕序 = _FACES "+y"（俯视 CCW）：SW→SE→NE→NW
+                    _emit_quad(arr, idx, x, y, z,
+                               ((0.0, h_sw, 1.0), (1.0, h_se, 1.0),
+                                (1.0, h_ne, 0.0), (0.0, h_nw, 0.0)),
+                               (0, 1, 0), None)
+
+                # 底面（源码 197-231 行）：下方非同种流体且未被整格
+                # 实心遮挡才画；y+0.001（bottomOffs）
+                down_v = vox.get((x, y - 1, z))
+                render_down = not _same_fluid(down_v) \
+                    and not _full_solid(down_v)
+                bottom_off = 0.001 if render_down else 0.0
+                if render_down:
+                    # 绕序 = _FACES "-y"：NW→NE→SE→SW
+                    _emit_quad(arr, idx, x, y, z,
+                               ((0.0, bottom_off, 0.0),
+                                (1.0, bottom_off, 0.0),
+                                (1.0, bottom_off, 1.0),
+                                (0.0, bottom_off, 1.0)),
+                               (0, -1, 0), None)
+
+                # 侧面（源码 235-334 行）：邻居非同种流体且非整格实心
+                # 才画（shouldRenderFace + isFaceOccludedByNeighbor）；
+                # 水平内缩 0.001，顶边 = 角渲染高（render_up 时已随顶
+                # 面 -0.001），底边 = bottom_off；绕序沿用 _FACES 各面
+                # 四角序
+                _IN = 0.001
+                _OUT = 1.0 - _IN
+                nb = vox.get((x, y, z - 1))
+                if not _same_fluid(nb) and not _full_solid(nb):
+                    # 北面 -z：NE底、NW底、NW顶、NE顶
+                    _emit_quad(arr, idx, x, y, z,
+                               ((1.0, bottom_off, _IN),
+                                (0.0, bottom_off, _IN),
+                                (0.0, h_nw, _IN), (1.0, h_ne, _IN)),
+                               (0, 0, -1), None)
+                nb = vox.get((x, y, z + 1))
+                if not _same_fluid(nb) and not _full_solid(nb):
+                    # 南面 +z：SW底、SE底、SE顶、SW顶
+                    _emit_quad(arr, idx, x, y, z,
+                               ((0.0, bottom_off, _OUT),
+                                (1.0, bottom_off, _OUT),
+                                (1.0, h_se, _OUT), (0.0, h_sw, _OUT)),
+                               (0, 0, 1), None)
+                nb = vox.get((x - 1, y, z))
+                if not _same_fluid(nb) and not _full_solid(nb):
+                    # 西面 -x：NW底、SW底、SW顶、NW顶
+                    _emit_quad(arr, idx, x, y, z,
+                               ((_IN, bottom_off, 0.0),
+                                (_IN, bottom_off, 1.0),
+                                (_IN, h_sw, 1.0), (_IN, h_nw, 0.0)),
+                               (-1, 0, 0), None)
+                nb = vox.get((x + 1, y, z))
+                if not _same_fluid(nb) and not _full_solid(nb):
+                    # 东面 +x：SE底、NE底、NE顶、SE顶
+                    _emit_quad(arr, idx, x, y, z,
+                               ((_OUT, bottom_off, 1.0),
+                                (_OUT, bottom_off, 0.0),
+                                (_OUT, h_ne, 0.0), (_OUT, h_se, 1.0)),
+                               (1, 0, 0), None)
                 continue
             if kind == "lectern":
                 # 讲台（官方 lectern.json 三元素全走旋转 quad：底
