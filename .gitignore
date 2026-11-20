@@ -35,3 +35,11 @@ Utils/MapPreviewer/_native/_build_*_log.txt
 
 # 方块材质图集缓存（由 jar 生成，可重建）
 Utils/MapPreviewer/_native/worldgen/26.2/block_atlas.npz*
+
+# MSVC 原生扩展构建中间产物（map_render 同 MapPreviewer 规则；.pyd 不入库）
+Utils/Public/map_render/_native/*.obj
+Utils/Public/map_render/_native/*.exp
+Utils/Public/map_render/_native/*.lib
+Utils/Public/map_render/_native/*.pdb
+Utils/Public/map_render/_native/*.pyd
+Utils/Public/map_render/_native/_build_*_log.txt
