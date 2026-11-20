@@ -1152,20 +1152,22 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
                     _frz[_r, _c] = True
 
     if wet is not None:
-        # 真实水列（heights 语义=顶方块 y，fill_top_grid/surface 均返回
-        # top=y，seed=1 跨海剖面实证水列=海床 25~45）：海面顶方块 y=62
-        # -> heights<=61 才有水覆盖；heights==62 是恰好海平面的实心滩涂
-        # （无水），旧 heights<_SEA 会把这 1px 误判成水。
-        water_mask = np.asarray(wet, bool) & (heights < _SEA - 1)
+        # 真实水列：wet = native 逐列判定「表面扫描顶块本身是流体」——
+        # 顶块是 water 必然是水，不叠加高度条件。旧版额外要求
+        # heights<_SEA-1（海洋水面高度假设），导致高原/丘陵上的河流
+        # 湖泊（水面远高于海平面，如 savanna 高原 Y=71 的河）整片
+        # 跳过水色分支，palette 平涂 water 灰白色（实测 188,188,188）。
+        # heights==62 海平面滩涂的顶块是实心方块，wet 本来就 False，
+        # 无需高度条件防误判。
+        water_mask = np.asarray(wet, bool)
         # 海面单层冰列：JM VanillaBlockHandler L67-68 把 ice/frosted_ice
         # 标 BlockFlag.Ignore -> SurfaceRenderer.getBlockHeight 穿透冰停
-        # 在水面 -> 水色链。仅限 minecraft:ice（1 层海冰/冻河冰）；
-        # packed_ice/blue_ice（冰山）不 Ignore，正常冰色。冰面列
-        # heights==62 无海厚信息 -> 归入纯水色近似（冰下水深普遍 >7）。
+        # 在水面 -> 水色链。仅限 minecraft:ice（1 层海冰/冻河冰/高原冰
+        # 湖面）；packed_ice/blue_ice（冰山）不 Ignore，正常冰色。
+        # （旧版限 heights==_SEA-1 令高原冰湖同样漏判，已去）
         _ice_bid = (pack or {}).get("name2bid", {}).get("minecraft:ice", -1)
         if _ice_bid >= 0:
-            water_mask = water_mask | ((blocks == _ice_bid)
-                                       & (heights == _SEA - 1))
+            water_mask = water_mask | (blocks == _ice_bid)
     else:
         # 兜底启发式（wet=None 时；冰/雪列不算水）
         deep = heights < (_SEA - 6)
@@ -1233,7 +1235,12 @@ def _colorize_blocks(blocks: np.ndarray, heights: np.ndarray,
         # n=水层数=62-heights（水面顶块 y=62、水列海床 heights<=61 ->
         # n>=1）；冰面列 heights==62 -> n=0 归入纯水分支。
         _n = np.clip((62 - heights).astype(np.float32), 0.0, 7.0)
-        _shallow = water_mask & (heights >= 55)  # n in [1,7] <=> h in [55,61]
+        # 浅水透底只适用于「换床海床」的海洋列（top=海床、水面 62-海床
+        # <=7 层）；top=water 的湖床列（native 对海床>=海平面的内陆水
+        # 不换床）无真实海床信息，走纯水色。且水面高于海平面的内陆水
+        # （如 Y=71 的 savanna 高原河）同样不混底。
+        _shallow = water_mask & (heights >= 55) & (heights < _SEA)
+        _shallow &= ~is_water_blk
         # 逐级 int 量化复刻（adjustBrightness/blendWith 每步 toInteger，
         # 四舍五入）：bevelSlope 不在此处——JM 顺序是先合成后 bevel
         #（paintStrata L265-273），由 _render_rect 的坡度段统一应用。
