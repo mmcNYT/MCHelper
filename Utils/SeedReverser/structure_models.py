@@ -4359,6 +4359,14 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 nb_mat, nb_shape = nb_info
                 if nb_mat in _LEAF_MATS:
                     pass                    # 树叶无遮挡（occlusion 空）
+                elif nb_shape and nb_shape.partition(":")[0] in (
+                        "vine", "dripstone"):
+                    # 藤蔓/滴水石锥：官方 getOcclusionShape 为空（无
+                    # 遮挡）。其 AABB 是贴墙满格投影的薄盒，若按 nb_rects
+                    # 覆盖判断会误剔背面的面（如藤蔓贴树干把原木侧面
+                    # 整面剔除 -> 木头“透明”透过去看到墙）。与树叶同
+                    # 理跳过剔除。
+                    pass
                 elif nb_shape is None and nb_mat not in _TRANSPARENT_MATS \
                         and nb_mat not in _TRANSLUCENT_MATS:
                     # 邻居整格实心非透明 = 官方 Block.shouldRenderFace 第一步
