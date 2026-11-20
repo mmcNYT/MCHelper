@@ -5,6 +5,7 @@ from .tool_StrongHoldFinder import StrongHoldFinderWidget
 from .tool_SeedReverser import SeedReverserWidget
 from .tool_StructurePreviewer import StructurePreviewerWidget
 from .tool_CommandGenerator import CommandGeneratorWidget
+from .tool_SaveManager import SaveManagerWidget
 
 # 核心：所有工具类都放在这个列表里，主窗口靠它来加载
 TOOL_CLASSES = [
@@ -14,6 +15,7 @@ TOOL_CLASSES = [
     EnchantCalculatorWidget,
     StrongHoldFinderWidget,
     CommandGeneratorWidget,
+    SaveManagerWidget,
 
     # 以后加了新工具，把类名追加到这里即可
 ]

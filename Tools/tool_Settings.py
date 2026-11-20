@@ -1,7 +1,9 @@
-from PySide6.QtWidgets import QDialog
-from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths, QItemSelectionModel
+from PySide6.QtWidgets import QDialog, QFileDialog
+from PySide6.QtCore import QCoreApplication, Slot, QThreadPool, QStandardPaths
 from CodesUI.Settings import Ui_Settings  # 编译生成的 UI 类
 from Utils.Settings.signals_Settings import settings_bus
+from Utils.SaveManager.save_config import load_settings, update_settings
+from Utils.SaveManager.save_scanner import default_saves_root
 import os,json
 
 class SettingsWindow(QDialog, Ui_Settings):
@@ -15,6 +17,7 @@ class SettingsWindow(QDialog, Ui_Settings):
 
         self.isStartOnRoot.checkStateChanged.connect(self.start_on_root_statu)
         self.isSystemTray.checkStateChanged.connect(self.system_tray_statu)
+        self.savesDirBrowseButton.clicked.connect(self._on_browse_saves_dir)
 
         self.checkRenderingSupportButton.clicked.connect(
             self.check_rendering_support)
@@ -47,35 +50,31 @@ class SettingsWindow(QDialog, Ui_Settings):
         os.makedirs(config_dir, exist_ok=True)
         return os.path.join(config_dir, "settings_config.json")
 
-    def read_config(self):
-        config_path = self.get_config_path()
-        if not os.path.exists(config_path):
-            return
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            #提取文件中的参数
-            self.is_system_tray = data.get("is_system_tray", bool)
-            self.is_start_on_root = data.get("is_start_on_root", bool)
-            #更新UI
-            self.isStartOnRoot.setChecked(self.is_start_on_root)
-            self.isSystemTray.setChecked(self.is_system_tray)
+    def _on_browse_saves_dir(self):
+        """选择存档扫描根目录（MC 安装根目录，含 versions/ 与 saves/）。"""
+        start = self.savesDirEdit.text().strip() or default_saves_root()
+        chosen = QFileDialog.getExistingDirectory(
+            self, "选择存档目录（MC 安装根目录）", start)
+        if chosen:
+            self.savesDirEdit.setText(chosen)
 
-        except Exception as e:
-            print(f"加载配置文件失败: {e}")
+    def read_config(self):
+        data = load_settings()
+        self.is_system_tray = bool(data.get("is_system_tray", False))
+        self.is_start_on_root = bool(data.get("is_start_on_root", False))
+        saves_dir = data.get("saves_dir")
+        self.savesDirEdit.setText(saves_dir if isinstance(saves_dir, str)
+                                  else default_saves_root())
+        #更新UI
+        self.isStartOnRoot.setChecked(self.is_start_on_root)
+        self.isSystemTray.setChecked(self.is_system_tray)
 
     def save_config(self):
-        data = {
-            "is_system_tray": getattr(self, "is_system_tray", bool),
-            "is_start_on_root": getattr(self, "is_start_on_root", bool),
-        }
-        config_path = self.get_config_path()
-
-        try:
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"保存配置文件失败: {e}")
+        update_settings({
+            "is_system_tray": getattr(self, "is_system_tray", False),
+            "is_start_on_root": getattr(self, "is_start_on_root", False),
+            "saves_dir": self.savesDirEdit.text().strip(),
+        })
 
     def closeEvent(self, event):
         self.save_config()
