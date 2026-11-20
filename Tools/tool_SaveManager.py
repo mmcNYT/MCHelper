@@ -544,6 +544,8 @@ class SaveManagerWidget(BaseToolWidget, Ui_SaveManager):
         self.deleteButton.clicked.connect(self._on_delete)
         self.backupButton.clicked.connect(self._on_backup)
         self.exportButton.clicked.connect(self._on_export)
+        # 右键地图 -> 操作当前区块（区块 3D 预览弹窗）
+        self.terrain_view.chunk_action.connect(self._on_chunk_action)
 
     # ---------- 扫描与列表 ----------
     def _resolve_root(self) -> str:
@@ -767,3 +769,214 @@ class SaveManagerWidget(BaseToolWidget, Ui_SaveManager):
             title_size=_NOTIFY_TITLE_SIZE,
             message_size=_NOTIFY_MESSAGE_SIZE,
             padding=_NOTIFY_PADDING)
+
+    # ---------- 区块 3D 预览（右键）----------
+    def _on_chunk_action(self, wx: int, wz: int) -> None:
+        """右键地图 -> 打开指向区块的 3D 预览弹窗。
+
+        wx/wz 是右键点处的世界方块坐标（terrain_view 换算）；
+        chunk 坐标 = 世界坐标 // 16。需已选存档（有 _current 与维度）。
+        """
+        if self._current is None:
+            QMessageBox.information(self, "区块预览", "请先选择一个存档")
+            return
+        cx = wx // 16
+        cz = wz // 16
+        ChunkPreviewDialog.open(self._current.path, self._current_dimension,
+                                cx, cz, parent=self)
+
+
+# ---------------------------------------------------------------------------
+# 区块 3D 预览（chunk voxel 提取 + 弹窗，复用 Structure3DView 渲染管线）
+# ---------------------------------------------------------------------------
+# 区块垂直范围（与 chunk_render.MIN_Y 一致）：1.18+ 世界 Y ∈ [-64, 319]，
+# 共 24 个 section（sec_y ∈ [-4, 19]）。预览体素的 Y 用「相对 chunk 底部
+# 的局部坐标」——3D 视口只需块相对结构，与 StructurePreviewer 模型同口径
+# （其 voxels 已平移到 min_y=0）。
+_CHUNK_MIN_Y = -64
+_CHUNK_MAX_Y = 319
+# 空气族（不进入 3D 体素；chunk_render 的 _AIR_LIKE 同集）
+_CHUNK_AIR = frozenset({"minecraft:air", "minecraft:cave_air",
+                        "minecraft:void_air"})
+
+
+def chunk_to_voxels(built: dict) -> dict:
+    """已 build_chunk 的区块数据 -> 3D 体素 {(lx, ly_local, lz): voxel_value}。
+
+    精确复现：用 built["states"]（Name + Properties 完整方块状态）逐格还原
+    几何。每个方块的体素值与 StructurePreviewer 模板体素同口径：
+      - None（空气/装饰/作物）跳过
+      - 基材质字符串 = 整格实体块
+      - (基材质, 形状码) = 台阶/楼梯/门/栅栏等非完整方块，build_mesh 按
+        形状码生成精确 AABB 几何。
+
+    映射链与 _voxels_from_template_file 一致：台阶按 type=bottom/top/double
+    选 half/full mode（bottom 半格、top 上格、double 整块），形状码由
+    shape_from_props 依 Properties（facing/half/axis 等）还原。局部
+    Y = 世界 Y - _CHUNK_MIN_Y，使体素原点落在 chunk 底（与结构模型
+    voxels 同口径，便于视口自适应相机）。
+    """
+    from Utils.SeedReverser.structure_models import (
+        _map_block, _palette_entry_half, _palette_entry_props)
+    from Utils.SeedReverser import block_shapes as bs
+    states = built.get("states") or built.get("blocks") or {}
+    vox: dict = {}
+    for sec_y, lookup in states.items():
+        if lookup is None:
+            continue
+        for ly in range(16):
+            wy = sec_y * 16 + ly
+            if wy < _CHUNK_MIN_Y or wy > _CHUNK_MAX_Y:
+                continue
+            y_local = wy - _CHUNK_MIN_Y
+            for lz in range(16):
+                for lx in range(16):
+                    got = lookup(ly, lz, lx)
+                    # states lookup 返回 (name, props)；兼容旧 blocks
+                    # lookup（仅 name str）
+                    if isinstance(got, tuple):
+                        name, props = got
+                    else:
+                        name, props = got, {}
+                    if not name or name in _CHUNK_AIR:
+                        continue
+                    # 流体检测（water/lava + level 属性）
+                    if "water" in name or "lava" in name:
+                        props_dict = props if isinstance(props, dict) else {}
+                        level_str = props_dict.get("level", "0")
+                        try:
+                            level = int(level_str)
+                        except (ValueError, TypeError):
+                            level = 0
+                        fluid_type = "water" if "water" in name else "lava"
+                        # 流体形状码：fluid:<level>:<type>
+                        # level=0 源（满格）、1-7 流动（递降）、8 下落（满格）
+                        mat = _map_block(name, "full")
+                        if mat is None:
+                            continue
+                        shape = f"fluid:{level}:{fluid_type}"
+                        vox[(lx, y_local, lz)] = (mat, shape)
+                        continue
+                    typ = _palette_entry_half_from_props(props)
+                    mode = "full" if typ in ("top", "double") else "half"
+                    mat = _map_block(name, mode)
+                    if mat is None:
+                        continue
+                    shape = bs.shape_from_props(name, props)
+                    half_prefix = (isinstance(mat, str)
+                                   and mat.startswith("halfheight:"))
+                    base = mat[len("halfheight:"):] if half_prefix else mat
+                    if shape is None and half_prefix and typ != "double":
+                        # 无 Properties 形状的旧前缀材质按底半格
+                        shape = bs.SHAPE_SLAB_BOT
+                    vox[(lx, y_local, lz)] = (base, shape) \
+                        if shape is not None else base
+    return vox
+
+
+def _palette_entry_half_from_props(props: dict) -> str:
+    """从已解析的 Properties dict 取 slab type（bottom/top/double/''）。"""
+    v = props.get("type", "")
+    return v if isinstance(v, str) else ""
+
+
+class ChunkPreviewDialog:
+    """区块 3D 预览弹窗（惰性构造单例）。
+
+    右键地图 -> _on_chunk_action(wx, wz) -> open_chunk_preview 取本区块
+    NBT、转 3D 体素、复用 Structure3DView（SeedReverser 3D 视口，原生
+    OpenGL）渲染。视口嵌在普通 QDialog 里（与 StructurePreviewer 同款
+    接入：Structure3DView 替换布局占位）。
+
+    单例 + 显式关闭回调：关闭对话框时停视口动画定时器并置空引用，防
+    关闭期 QOpenGLWidget 在 GL 上下文销毁后回调（0xC0000409）。
+    """
+    _instance = None
+
+    def __init__(self):
+        from PySide6.QtWidgets import QDialog
+        self._dlg = QDialog()
+        self._dlg.setWindowTitle("区块 3D 预览")
+        self._dlg.resize(760, 620)
+        self._dlg.setModal(False)
+        from PySide6.QtWidgets import QVBoxLayout, QLabel
+        lay = QVBoxLayout(self._dlg)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+        # 信息标签：区块坐标 + 体素规模
+        self._info = QLabel("")
+        self._info.setWordWrap(True)
+        lay.addWidget(self._info)
+        # 3D 视口（复用 SeedReverser 结构视口）
+        from Utils.SeedReverser import structure_3dview
+        self._view = structure_3dview.Structure3DView()
+        # 旁观者相机（WASD+鼠标 FP 飞行），与 StructurePreviewer 同体验
+        self._view.set_spectator_mode(True)
+        lay.addWidget(self._view, 1)
+        self._dlg.finished.connect(self._on_closed)
+        self._loaded = False
+
+    def _on_closed(self) -> None:
+        try:
+            self._view.stop_variant_timer()
+        except Exception:
+            pass
+        self._loaded = False
+
+    def load_chunk(self, world_path: str, dimension: str,
+                   cx: int, cz: int) -> bool:
+        """读取并渲染指定区块。成功返回 True（弹窗可见）。"""
+        from Utils.Public.map_render.region_reader import (
+            RegionFile, region_path_for)
+        from Utils.SeedReverser.structure_models import build_mesh
+        from Utils.Public.map_render.chunk_render import build_chunk
+        import os
+
+        rpath = region_path_for(world_path, dimension, cx // 32, cz // 32)
+        if not rpath or not os.path.isfile(rpath):
+            self._info.setText(
+                f"区块 ({cx}, {cz}) 所在 region 文件不存在：\n{rpath or '路径拼不出'}")
+            self._dlg.show()
+            self._dlg.raise_()
+            return False
+        rf = RegionFile(rpath)
+        chunk = rf.read_chunk(cx & 31, cz & 31)
+        if chunk is None:
+            self._info.setText(f"区块 ({cx}, {cz}) 未生成或不可读（空 chunk）")
+            self._dlg.show()
+            self._dlg.raise_()
+            return False
+        built = build_chunk(chunk)
+        vox = chunk_to_voxels(built)
+        if not vox:
+            self._info.setText(f"区块 ({cx}, {cz}) 无可见方块（全空气/装饰）")
+            self._dlg.show()
+            self._dlg.raise_()
+            return False
+        # 组装 3D model（与 StructurePreviewer.compose_display_model 同格式）
+        xs = [p[0] for p in vox]
+        zs = [p[2] for p in vox]
+        ys = [p[1] for p in vox]
+        size = (max(xs) + 1, max(ys) - min(ys) + 1, max(zs) + 1)
+        tex_keys = sorted({(m[0] if isinstance(m, tuple) else m)
+                           for m in vox.values()})
+        mesh = build_mesh(vox)
+        model = {"key": f"chunk:{cx},{cz}", "variant": None,
+                 "voxels": vox, "size": size, "mesh": mesh,
+                 "tex_keys": tex_keys}
+        self._view.set_model(model)
+        self._info.setText(
+            f"区块 ({cx}, {cz})　｜　体素 {len(vox):,}"
+            f"　｜　尺寸 {size[0]}×{size[1]}×{size[2]}\n"
+            "操作：WASD 飞行、鼠标拖动转视角　｜　右上角「渲染模型」开启绘制")
+        self._dlg.show()
+        self._dlg.raise_()
+        self._loaded = True
+        return True
+
+    @classmethod
+    def open(cls, world_path: str, dimension: str, cx: int, cz: int,
+             parent=None) -> None:
+        if cls._instance is None:
+            cls._instance = cls()
+        cls._instance.load_chunk(world_path, dimension, cx, cz)

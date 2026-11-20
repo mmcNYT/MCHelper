@@ -1181,6 +1181,10 @@ def shape_boxes(shape: str | None) -> tuple:
         # 农作物/花草：对角 X 非实体（build_mesh 专用 quad 路径），
         # 空 AABB = 不参与面剔除/邻居遮挡
         return ()
+    if kind == "fluid":
+        # 流体（water/lava）：build_mesh 专用 quad 路径（顶面高度 + 4 角斜角），
+        # 空 AABB = 不参与面剔除/邻居遮挡
+        return ()
     if kind == "crop":
         # 作物：四片竖直面（build_mesh 专用 quad 路径，同 plant）
         return ()

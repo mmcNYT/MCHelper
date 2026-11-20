@@ -567,6 +567,11 @@ class TerrainView(QGraphicsView):
     """可复用地形俯视视图：懒渲染 region 瓦片 + 缩放/平移/悬停取色。"""
 
     hover_info = Signal(str)   # 悬停信息（世界坐标 + 顶层方块名）
+    # 悬停世界坐标（方块级 floor）：右键菜单等操作需要知道当前指向的
+    # 方块，纯文本状态栏不够用。无存档/未指向地形时发 (-1, -1)。
+    hover_pos = Signal(int, int)
+    # 右键请求操作区块：(世界方块 x, z)。由工具侧连接，弹出区块预览等。
+    chunk_action = Signal(int, int)
     # 渲染进度（按区块计数）：(total, done)。total=0 表示无活动批次
     # （完成停留结束/切存档），监听方据此隐藏进度条。
     progress_changed = Signal(int, int)
@@ -602,6 +607,7 @@ class TerrainView(QGraphicsView):
         self._hover_seq = 0
         self._last_hover_text = None
         self._last_submitted = None
+        self._last_hover_pos = None   # hover_pos 去重基准
         self._hover_worker = _HoverWorker(self)
         self._hover_worker.hit_ready.connect(self._on_hover_hit)
         self._hover_worker.start()
@@ -692,6 +698,7 @@ class TerrainView(QGraphicsView):
         self._hover_seq += 1   # 切存档：旧存档在途取色结果作废
         self._last_hover_text = None
         self._last_submitted = None
+        self._last_hover_pos = None
 
         if self._render_thread is None:
             self._render_thread = RegionRenderThread(self)
@@ -954,6 +961,12 @@ class TerrainView(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             # 拖动中仍用方块光标（不切换闭手箭头，吸附框继续跟随）
             self.viewport().setCursor(Qt.CursorShape.BlankCursor)
+        elif event.button() == Qt.MouseButton.RightButton:
+            # 右键：拦截默认菜单，发世界坐标给工具侧（区块预览等）。
+            # ScrollHandDrag 不消费右键，故此处接管。
+            wp = self.world_pos_at(event.pos())
+            if wp is not None:
+                self.chunk_action.emit(wp[0], wp[1])
 
     def mouseReleaseEvent(self, event) -> None:
         super().mouseReleaseEvent(event)
@@ -1080,6 +1093,15 @@ class TerrainView(QGraphicsView):
         self._last_hover_text = text
         self.hover_info.emit(text)
 
+    # ---------- 右键区块预览 ----------
+    def world_pos_at(self, pos) -> tuple[int, int] | None:
+        """视口像素位置 -> 世界方块坐标（floor）。无存档返回 None。
+        右键菜单点查用（不依赖悬停状态，点击点即时换算）。"""
+        if self._world_path is None:
+            return None
+        sp = self.mapToScene(pos)
+        return (int(math.floor(sp.x())), int(math.floor(sp.y())))
+
     def _hover_settle(self) -> None:
         """快速移动后静止 80ms：恢复完整悬停取色（定时器被每个快速
         move 重置，超时即鼠标已停）。force=True 绕过同格跳过——快速
@@ -1114,6 +1136,10 @@ class TerrainView(QGraphicsView):
         # 给出右边相邻方块，取色错位（实测方块名跳成旁边方块）
         wx = int(math.floor(scene_pt.x()))
         wz = int(math.floor(scene_pt.y()))
+        # 悬停世界坐标广播（右键菜单等用）：同格微动去重，避免无谓信号
+        if (wx, wz) != self._last_hover_pos:
+            self._last_hover_pos = (wx, wz)
+            self.hover_pos.emit(wx, wz)
         if self._hover_fast:
             text = f"X: {wx}  Z: {wz}"
             if text != self._last_hover_text:   # 同格微动不重发

@@ -47,6 +47,16 @@ def _entry_name(entry) -> str:
     return str(entry)
 
 
+def _entry_props(entry) -> dict:
+    """palette 条目 → Properties dict（无则空 dict）。形状方块（台阶/楼梯/
+    门等）的几何还原依赖这些属性；地表渲染只用 Name，3D 精确预览才需要。"""
+    if isinstance(entry, dict):
+        p = entry.get("Properties")
+        if isinstance(p, dict):
+            return p
+    return {}
+
+
 # 无视觉/非实体方块：不作为地表返回（barrier 不可见，显示其下方方块）
 _AIR_LIKE = {"minecraft:air", "minecraft:cave_air", "minecraft:void_air",
              "minecraft:barrier"}
@@ -80,6 +90,44 @@ def build_block_lookup(sec: dict):
         boff = (idx % per_long) * b
         v = (dat[li] >> boff) & mask
         return _entry_name(pal[v]) if v < len(pal) else ""
+    return (sec_y, lookup)
+
+
+def build_block_state_lookup(sec: dict):
+    """从 section 构造 (sec_y, lookup(ly,lz,lx) -> (name, props))；空节返回 None。
+
+    与 build_block_lookup 同打包/位宽逻辑，但 lookup 返回完整方块状态
+    （名字 + Properties dict），供 3D 精确预览还原台阶/楼梯/门等形状。
+    """
+    if not isinstance(sec, dict):
+        return None
+    sec_y = sec.get("Y")
+    bs = sec.get("block_states", {})
+    pal = bs.get("palette", []) if isinstance(bs, dict) else []
+    if not pal:
+        return None
+    dat = bs.get("data") if isinstance(bs, dict) else None
+
+    def lookup(ly: int, lz: int, lx: int):
+        idx = ly * 256 + lz * 16 + lx
+        li = idx // per_long
+        if li >= len(dat):
+            return ("", {})
+        boff = (idx % per_long) * b
+        v = (dat[li] >> boff) & mask
+        if v >= len(pal):
+            return ("", {})
+        return (_entry_name(pal[v]), _entry_props(pal[v]))
+
+    if not dat:
+        # 单方块节（无 data）：palette 只有 1 项
+        n0 = _entry_name(pal[0])
+        p0 = _entry_props(pal[0])
+        return (sec_y, lambda ly, lz, lx: (n0, p0))
+
+    b = _palette_bits(len(pal))
+    mask = (1 << b) - 1
+    per_long = 64 // b
     return (sec_y, lookup)
 
 
@@ -123,6 +171,7 @@ def build_chunk(chunk: dict) -> dict:
     heightmap = decode_heightmap(ws) if isinstance(ws, list) and ws else [0] * 256
     blocks: dict = {}
     biomes: dict = {}
+    states: dict = {}   # 完整方块状态（Name+Properties），3D 精确预览用
     for sec in chunk.get("sections", []) or []:
         if not isinstance(sec, dict):
             continue
@@ -130,12 +179,16 @@ def build_chunk(chunk: dict) -> dict:
         blk = build_block_lookup(sec)
         if blk is not None:
             blocks[blk[0]] = blk[1]
+        stt = build_block_state_lookup(sec)
+        if stt is not None:
+            states[stt[0]] = stt[1]
         bio = build_biome_lookup(sec.get("biomes", {}))
         if bio is not None:
             biomes[sec_y] = bio
     return {
         "heightmap": heightmap,
         "blocks": blocks,
+        "states": states,
         "biomes": biomes,
         "xPos": chunk.get("xPos", 0),
         "zPos": chunk.get("zPos", 0),
