@@ -3934,36 +3934,40 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 else:
                     h_self = (8 - level) / 8.0
                 
-                # 计算顶面 4 角高度（MC 官方算法：每角取周围 4 个方向流体的最大高度）
+                # 计算顶面 4 角高度（MC 官方算法：每角取该角相邻流体的最大高度）
                 # 角 (cx,cz) ∈ {0,1}×{0,1}
                 corner_h = {}
                 for ccx in (0, 1):
                     for ccz in (0, 1):
-                        # 该角连接的 4 个水平方向（对角块）
-                        max_h = 0.0
-                        for ddx in (0, -1):
-                            for ddz in (0, -1):
-                                nb_pos = (x + ddx, y, z + ddz)
-                                nb_v = vox.get(nb_pos)
-                                if nb_v is not None:
-                                    nb_info = v_ms.get(nb_v)
-                                    if nb_info is None:
-                                        nb_info = v_ms[nb_v] = _mat_shape(nb_v)
-                                    nb_mat, nb_shape = nb_info
-                                    # 同种流体（材质 + shape kind 都是 fluid + type 一致）
-                                    if nb_shape and nb_shape.startswith("fluid:"):
-                                        nb_parts = nb_shape.split(":")
-                                        nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
-                                        if nb_type == ftype:
-                                            nb_level = int(nb_parts[1]) if nb_parts[1].isdigit() else 0
-                                            if nb_level == 0 or nb_level >= 8:
-                                                nb_h = 1.0
-                                            else:
-                                                nb_h = (8 - nb_level) / 8.0
-                                            max_h = max(max_h, nb_h)
-                        # MC 算法：角高度 = max(自身高度, 周围流体最大高度)
-                        # 如果没有周围流体，用自身高度
-                        corner_h[(ccx, ccz)] = max(h_self, max_h) if max_h > 0 else h_self
+                        # 该角相邻的流体块（包括自身 + 直接相邻的 2 个方向）
+                        max_h = h_self  # 至少是自身高度
+                        # 检查该角连接的 2 个直接邻居（非对角）
+                        # 角(0,0) 连接 -x 和 -z；角(1,0) 连接 +x 和 -z；以此类推
+                        for dx, dz in [(-ccx, -ccz), (-ccx, 1-ccz), (1-ccx, -ccz), (1-ccx, 1-ccz)]:
+                            # 只检查直接相邻（dx 或 dz 为 0，另一个为 ±1）
+                            if dx != 0 and dz != 0:
+                                continue
+                            if dx == 0 and dz == 0:
+                                continue
+                            nb_pos = (x + dx, y, z + dz)
+                            nb_v = vox.get(nb_pos)
+                            if nb_v is not None:
+                                nb_info = v_ms.get(nb_v)
+                                if nb_info is None:
+                                    nb_info = v_ms[nb_v] = _mat_shape(nb_v)
+                                nb_mat, nb_shape = nb_info
+                                # 同种流体（材质 + shape kind 都是 fluid + type 一致）
+                                if nb_shape and nb_shape.startswith("fluid:"):
+                                    nb_parts = nb_shape.split(":")
+                                    nb_type = nb_parts[2] if len(nb_parts) > 2 else ""
+                                    if nb_type == ftype:
+                                        nb_level = int(nb_parts[1]) if nb_parts[1].isdigit() else 0
+                                        if nb_level == 0 or nb_level >= 8:
+                                            nb_h = 1.0
+                                        else:
+                                            nb_h = (8 - nb_level) / 8.0
+                                        max_h = max(max_h, nb_h)
+                        corner_h[(ccx, ccz)] = max_h
                 
                 # 检查上方是否为同种流体（决定是否绘制顶面）
                 above_v = vox.get((x, y + 1, z))
