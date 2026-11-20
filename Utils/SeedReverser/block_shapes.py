@@ -636,12 +636,25 @@ def shape_from_props(name: str, props: dict) -> str | None:
     if name.endswith("_sapling") or name in (
             "minecraft:nether_wart",
             "minecraft:red_mushroom", "minecraft:brown_mushroom",
-            "minecraft:sea_pickle",
             "minecraft:poppy", "minecraft:dandelion",
             "minecraft:oxeye_daisy", "minecraft:short_grass",
             "minecraft:tall_grass", "minecraft:fern",
             "minecraft:large_fern", "minecraft:dead_bush"):
         return SHAPE_PLANT
+
+    # 海泡菜：3D 立体模型（主体盒 + 顶盖 + 45° 细杆），数量 1-4 排列
+    # 不同（官方 sea_pickle/two/three/four_sea_pickles.json）；形状码
+    # 承载 pickles 数量供 build_mesh 选模型，AABB 空（无遮挡，避免
+    # 误剔邻居面——与藤蔓同理）
+    if name == "minecraft:sea_pickle":
+        n = props.get("pickles", "1")
+        try:
+            n = int(n)
+        except (ValueError, TypeError):
+            n = 1
+        if n not in (1, 2, 3, 4):
+            n = 1
+        return f"pickle:{n}"
 
     if name.endswith("_slab"):
         if typ == "top":
@@ -1201,6 +1214,10 @@ def shape_boxes(shape: str | None) -> tuple:
         return ()
     if kind == "dripstone":
         # 滴水石锥：cross 十字片（同 plant，无碰撞无遮挡）
+        return ()
+    if kind == "pickle":
+        # 海泡菜：3D 立体模型（build_mesh 专用 quad 路径：主体盒 +
+        # 顶盖 + 45° 细杆），无碰撞无遮挡
         return ()
     if kind == "cross":
         # 落地告示牌：十字交叉板近似（AABB 无法表达斜板）

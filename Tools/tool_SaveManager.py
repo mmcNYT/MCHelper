@@ -873,6 +873,22 @@ def chunk_to_voxels(built: dict) -> dict:
                             "_", " ")
                         vox[(lx, y_local, lz)] = (mat, bs.SHAPE_PLANT)
                         continue
+                    # 海泡菜：官方 3D 立体模型（主体盒 + 顶盖 + 45°
+                    # 细杆），数量 pickles 1-4 排列不同 —— 按状态生成
+                    # 形状码 pickle:<n>（build_mesh 选对应模型），几何
+                    # 走专用 quad 路径（非单一旋转面）
+                    if name == "minecraft:sea_pickle":
+                        props_dict = props if isinstance(props, dict) else {}
+                        n_str = props_dict.get("pickles", "1")
+                        try:
+                            pn = int(n_str)
+                        except (ValueError, TypeError):
+                            pn = 1
+                        if pn not in (1, 2, 3, 4):
+                            pn = 1
+                        vox[(lx, y_local, lz)] = ("sea pickle",
+                                                  f"pickle:{pn}")
+                        continue
                     typ = _palette_entry_half_from_props(props)
                     mode = "full" if typ in ("top", "double") else "half"
                     mat = _map_block(name, mode)

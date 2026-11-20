@@ -3426,6 +3426,85 @@ _C45 = _S45 = math.sqrt(0.5)
 _YK = {"n": 0, "e": 1, "s": 2, "w": 3}   # blockstate y 旋转次数
 
 
+# 海泡菜官方模型（1.20.1 JSON，像素坐标）：n -> 元素列表。
+# 元素 = (from_px, to_px, rot_origin_px or None)；rot 元素为 45°
+# 旋转细杆（海泡菜的"芯"，rescale 忽略——1px 细线无感）。
+# 数量 1-4 排列不同：主体盒（4x6x4 等）+ 顶盖（零高度片）+ 细杆对。
+_SEA_PICKLE_ELEMS = {
+    1: [((6, 0, 6), (10, 6, 10), None), ((6, 5.95, 6), (10, 5.95, 10), None),
+        ((7.5, 5.2, 8), (8.5, 8.7, 8), (8, 8, 8)),
+        ((8, 5.2, 7.5), (8, 8.7, 8.5), (8, 8, 8))],
+    2: [((3, 0, 3), (7, 6, 7), None), ((3, 5.95, 3), (7, 5.95, 7), None),
+        ((8, 0, 8), (12, 4, 12), None), ((8, 3.95, 8), (12, 3.95, 12), None),
+        ((4.5, 5.2, 5), (5.5, 8.7, 5), (5, 5.6, 5)),
+        ((5, 5.2, 4.5), (5, 8.7, 5.5), (5, 5.6, 5)),
+        ((9.5, 3.2, 10), (10.5, 6.7, 10), (10, 8, 10)),
+        ((10, 3.2, 9.5), (10, 6.7, 10.5), (10, 8, 10))],
+    3: [((6, 0, 9), (10, 6, 13), None), ((6, 5.95, 9), (10, 5.95, 13), None),
+        ((2, 0, 2), (6, 4, 6), None), ((2, 3.95, 2), (6, 3.95, 6), None),
+        ((8, 0, 4), (12, 6, 8), None), ((8, 5.95, 4), (12, 5.95, 8), None),
+        ((7.5, 5.2, 11), (8.5, 8.7, 11), (8, 8, 11)),
+        ((8, 5.2, 10.5), (8, 8.7, 11.5), (8, 8, 11)),
+        ((3.5, 3.2, 4), (4.5, 6.7, 4), (4, 8, 4)),
+        ((4, 3.2, 3.5), (4, 6.7, 4.5), (4, 8, 4)),
+        ((9.5, 5.2, 6), (10.5, 8.7, 6), (10, 8, 6)),
+        ((10, 5.2, 5.5), (10, 8.7, 6.5), (10, 8, 6))],
+    4: [((2, 0, 2), (6, 6, 6), None), ((2, 5.95, 2), (6, 5.95, 6), None),
+        ((9, 0, 10), (13, 4, 14), None), ((9, 3.95, 10), (13, 3.95, 14), None),
+        ((9, 0, 2), (13, 6, 6), None), ((9, 5.95, 2), (13, 5.95, 6), None),
+        ((2, 0, 8), (6, 7, 12), None), ((2, 6.95, 8), (6, 6.95, 12), None),
+        ((3.5, 5.2, 4), (4.5, 8.7, 4), (4, 8, 4)),
+        ((4, 5.2, 3.5), (4, 8.7, 4.5), (4, 8, 4)),
+        ((10.5, 3.2, 12), (11.5, 6.7, 12), (11, 8, 12)),
+        ((11, 3.2, 11.5), (11, 6.7, 12.5), (11, 8, 12)),
+        ((10.5, 5.2, 4), (11.5, 8.7, 4), (11, 8, 4)),
+        ((11, 5.2, 3.5), (11, 8.7, 4.5), (11, 8, 4)),
+        ((3.5, 6.2, 10), (4.5, 9.7, 10), (4, 8, 10)),
+        ((4, 6.2, 9.5), (4, 9.7, 10.5), (4, 8, 10))],
+}
+
+# 海泡菜官方 UV 窗（16x16 贴图内）
+_PICKLE_UP = _RU(4, 1, 8, 5)
+_PICKLE_DOWN = _RU(8, 1, 12, 5)
+_PICKLE_NORTH = _RS(4, 5, 8, 11)
+_PICKLE_SOUTH = _RS(0, 5, 4, 11)
+_PICKLE_WEST = _RS(8, 5, 12, 11)
+_PICKLE_EAST = _RS(12, 5, 16, 11)
+_PICKLE_ROD = {"north": _RS(1, 0, 3, 5), "south": _RS(3, 0, 1, 5),
+               "west": _RS(13, 0, 15, 5), "east": _RS(15, 0, 13, 5)}
+_PICKLE_FACE_RECTS = {"+y": _PICKLE_UP, "-y": _PICKLE_DOWN,
+                      "-z": _PICKLE_NORTH, "+z": _PICKLE_SOUTH,
+                      "-x": _PICKLE_WEST, "+x": _PICKLE_EAST}
+
+
+def _sea_pickle_quads(n, mat, x, y, z, arr, idx):
+    """海泡菜 n 个的官方模型 quad（主体盒 6 面 + 顶盖零高片 + 45° 细杆）。"""
+    for (f, t, rot) in _SEA_PICKLE_ELEMS.get(n, _SEA_PICKLE_ELEMS[1]):
+        b = (f[0] / 16, f[1] / 16, f[2] / 16,
+             t[0] / 16, t[1] / 16, t[2] / 16)
+        if rot is None:
+            # 轴对齐盒：零高度片（顶盖）只画 up 面
+            flat = (t[1] - f[1]) < 0.01
+            for face, (normal, _) in _FACES.items():
+                if flat and face != "up":
+                    continue
+                _emit_quad(arr, idx, x, y, z, _box_face(b, normal),
+                           normal, _PICKLE_FACE_RECTS[face])
+        else:
+            # 45° 旋转细杆（rescale 忽略）：cuv 自带官方 UV，
+            # 直接写入（_emit_quad rect=None 会丢 UV 改平铺）
+            ox, oy, oz = rot[0] / 16, rot[1] / 16, rot[2] / 16
+            rot4 = ("y", ox, oz, _C45, _S45)
+            faces = {fn: (rc, mat) for fn, rc in _PICKLE_ROD.items()}
+            for cuv, nrm, _mk in _rot_element(b, faces, rot4):
+                base = len(arr) // 8
+                for (cx, cy, cz, u, v) in cuv:
+                    arr.extend((x + cx, y + cy, z + cz, u, v,
+                                nrm[0], nrm[1], nrm[2]))
+                idx.extend((base, base + 1, base + 2,
+                            base, base + 2, base + 3))
+
+
 def _rotx4(corners, oy, oz, c, s):
     """5 元组角点绕 x 轴 origin(.,oy,oz) 旋转（右手，y->z 正向），
     uv 两列原样随行（贴图焊面）。"""
@@ -4093,6 +4172,14 @@ def build_mesh(vox: dict, burial_volume: set | None = None) -> dict:
                 # up tip）；剔除盒空（无碰撞无遮挡）
                 for pq, pn in _PLANT_QUADS:
                     _emit_quad(arr, idx, x, y, z, pq, pn, _FULL_UV_UP)
+                continue
+            if kind == "pickle":
+                # 海泡菜（官方 sea_pickle/two/three/four_sea_pickles
+                # .json）：3D 立体模型——主体盒（4x6x4 等）+ 顶盖零高片
+                # + 45° 旋转细杆对（"芯"）；数量 pickles 1-4 排列不同。
+                # 非单一旋转面：主体盒逐面 + 细杆走 _rot_element 45°
+                pn = int(shape_rest) if shape_rest.isdigit() else 1
+                _sea_pickle_quads(pn, mat, x, y, z, arr, idx)
                 continue
             if kind == "fluid":
                 # 流体（water/lava）精确渲染 —— 逐条对齐 MC 26.2 官方
